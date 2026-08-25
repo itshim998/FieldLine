@@ -1,1066 +1,137 @@
-# FieldLine — PASS 2: SQLite & Persistence Foundation
+````text
+# FieldLine — PASS 2 Final Corrective Fix
 
-## Context
+One persistence issue remains.
 
-You are implementing **PASS 2 — SQLite and Persistence Foundation** of FieldLine in accordance to the master plan at C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine\FieldLine Complete Implementation plan.md
+Do ONLY the fix below. Do not implement PASS 3 or unrelated features.
 
-FieldLine is our **Smart India Hackathon 2026** project:
+## Problem
 
-* **Product:** FieldLine
-* **SIH PS ID:** SIH26122
-* **Problem:** Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management: Real-Time Actual Progress Tracking (Planning-to-Execution Bridge)
-* **Local project directory:**
+The corrected cross-project integrity constraints/triggers currently live in migration `0002_core_domain_schema`.
 
+That is insufficient for existing databases where `0002` has already been recorded, because the migration engine will skip `0002`.
 
-C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
+Therefore we need a new migration that upgrades existing `0002` databases to the corrected schema.
 
+## Required fix
 
-* **GitHub repository:**
-
-
-itshim998/FieldLine
-
-
-PASS 0 and PASS 1 have been completed and pushed.
-
-PASS 1 established the architectural boundaries:
+Create:
 
 ```text
-HTTP route
-    ↓
-validation
-    ↓
-service
-    ↓
-repository
-    ↓
-SQLite
-```
+backend/src/database/migrations/0004_upgrade_cross_project_integrity.ts
+````
 
-The AI architecture is also isolated from persistence.
+Register it after `0003`.
 
-**Do not bypass or weaken those boundaries in this pass.**
-
----
-
-# Authoritative objective
-
-The objective of PASS 2 is:
-
-> **Create the real local FieldLine database and persistence foundation.**
-
-Implement:
-
-* SQLite migrations/schema;
-* core domain tables;
-* repositories;
-* transactions;
-* indexes;
-* foreign keys;
-* basic constraints;
-* meaningful persistence tests.
-
-The exit criterion is:
-
-> **A project can be created, persisted and retrieved entirely from SQLite.**
-
-This is the persistence foundation for all later passes.
-
----
-
-# Critical boundary
-
-This pass is **NOT** Project Management.
-
-Do not implement the full project-management feature layer.
-
-The later roadmap remains:
-
-
-PASS 2 — SQLite and Persistence Foundation
-PASS 3 — Project Management
-PASS 4 — Schedule Importer
-...
-
-So PASS 2 must provide the persistence capabilities that PASS 3 will consume, but must not build the PASS 3 user-facing project lifecycle.
-
-Do not build:
-
-* project dashboard;
-* project selection UI;
-* project CRUD HTTP API;
-* project management screens;
-* project editing forms;
-* project deletion workflows exposed to users.
-
-A small internal service/repository test is sufficient to satisfy the PASS 2 exit criterion.
-
----
-
-# First: inspect the current repository
-
-Before changing anything, inspect the current state of:
-
-* `backend/src/database/`;
-* `backend/src/repositories/`;
-* `backend/src/services/`;
-* `backend/src/config/`;
-* `backend/tests/`;
-* SQLite initialization;
-* current `system_metadata` table;
-* Pass 1 architecture;
-* existing setup/reset scripts;
-* existing architecture documentation.
-
-Understand exactly how Pass 1 currently manages:
-
-* the SQLite connection;
-* database lifecycle;
-* repository abstraction;
-* service abstraction;
-* errors;
-* tests.
-
-Do not recreate or duplicate existing infrastructure.
-
-Extend it cleanly.
-
----
-
-# Persistence architecture
-
-Preserve this dependency direction:
+Migration chain must now be:
 
 ```text
-Service
-   ↓
-Repository interface
-   ↓
-SQLite repository implementation
-   ↓
-Database connection
-   ↓
-SQLite
+0001
+0002
+0003
+0004
 ```
 
-The service layer should depend on repository interfaces.
+`0004` must safely upgrade an existing database that already has `0001` + `0002`.
 
-The repository implementation owns SQL.
+It must add the corrected cross-project integrity enforcement for:
 
-The database module owns SQLite connection lifecycle and low-level database configuration.
+* activity → schedule
+* evidence → progress_update
+* activity_match → progress_update
+* activity_match → activity
+* activity_match → evidence
+* activity_progress → activity
+* activity_progress → progress_update
 
-No route should contain SQL.
+Preserve the intended delete semantics:
 
-No service should contain SQL.
+* evidence → progress_update: `ON DELETE SET NULL`
+* activity_match → evidence: `ON DELETE SET NULL`
+* activity_progress → progress_update: `ON DELETE SET NULL`
+* existing cascade relationships should remain cascades.
 
-No AI code should contain SQL.
+Do NOT rewrite migration history.
 
----
+Do NOT modify existing migration names.
 
-# Database design
+Because SQLite cannot simply alter all existing foreign-key definitions in place, use the safest SQLite-compatible migration strategy required to rebuild/replace the affected tables while preserving existing data.
 
-Implement migrations/schema for these core entities:
+The migration must be transactional.
 
+## Mandatory migration test
 
-projects
-schedules
-activities
-progress_updates
-evidence
-activity_matches
-activity_progress
-project_events
+Add a migration test that represents a REAL existing database:
 
+1. Create a database with the old `0001` + `0002` schema.
+2. Insert representative existing data across projects, schedules, activities, progress updates, evidence, activity matches, and activity progress.
+3. Mark `0001`, `0002`, and `0003` as already applied.
+4. Run the migration engine.
+5. Verify only `0004` is newly applied.
+6. Verify all existing valid data remains intact.
+7. Verify cross-project relationships are now rejected.
+8. Verify valid same-project relationships still work.
+9. Verify deleting a progress update:
 
-These are the foundational entities from the FieldLine domain model.
+   * preserves evidence;
+   * sets `evidence.progress_update_id` to NULL;
+   * sets nullable `activity_progress.progress_update_id` to NULL;
+   * preserves standalone evidence.
+10. Run migrations again and verify nothing is reapplied.
 
-The initial domain model is described as:
+Also retain the existing fresh-database migration tests.
 
-### projects
+## Validation
 
-Basic project information.
-
-### schedules
-
-An imported project schedule/version.
-
-### activities
-
-Individual planned schedule activities.
-
-Typical fields include:
-
-
-id
-project_id
-external_id
-name
-description
-wbs_code
-location
-planned_start
-planned_finish
-planned_quantity
-unit
-baseline_progress
-            
-
-### progress_updates
-
-A reported real-world update.
-
-### evidence
-
-The original source of a progress update.
-
-Examples:
-
-
-text
-XLSX
-PDF
-image
-transcript
-
-
-### activity_matches
-
-Relationship between extracted evidence and candidate activities.
-
-### activity_progress
-
-Current/derived actual project state.
-
-### project_events
-
-Important state transitions and audit events.
-
-Supporting entities should **not** be added unless implementation genuinely requires them in this pass.
-
-Do not introduce:
-
-* users;
-* processing_jobs;
-* milestones;
-* progress_snapshots;
-
-unless there is a concrete persistence dependency that makes one necessary.
-
----
-
-# Important schema principle
-
-Do not simply create tables because the names were listed.
-
-Model the relationships properly.
-
-The schema should establish the foundational dependency graph.
-
-At minimum, think carefully about relationships such as:
-
-
-projects
-   ↓
-schedules
-   ↓
-activities
- 
-
-and:
-
-
-progress_updates
-   ↓
-evidence
-
-
-and:
-
-
-activity_matches
-   ↓
-activities
-progress_updates / evidence
-
-
-and:
-
-
-activity_progress
-   ↓
-activities
-
-
-and:
-
-
-project_events
-   ↓
-project
-
-
-Use the actual domain semantics from the master implementation plan rather than inventing unrelated structures.
-
----
-
-# IDs
-
-Use a consistent identifier strategy across the schema.
-
-Choose a simple strategy compatible with:
-
-* SQLite;
-* TypeScript;
-* deterministic tests;
-* repository APIs;
-* later demo seeding.
-
-Do not introduce UUID infrastructure merely for appearance.
-
-Do not mix multiple ID strategies unnecessarily.
-
-Document the chosen strategy.
-
----
-
-# Foreign keys
-
-Foreign-key enforcement must be enabled and tested.
-
-Do not merely declare:
-
-```sql
-FOREIGN KEY (...)
-```
-
-and assume SQLite will enforce them.
-
-Ensure the database connection actually enables foreign keys.
-
-Write tests proving that invalid references are rejected where appropriate.
-
----
-
-# Constraints
-
-Add basic database constraints that protect domain integrity.
-
-Examples where appropriate:
-
-* required fields are `NOT NULL`;
-* IDs are unique where they should be unique;
-* percentages stay within valid ranges;
-* quantities cannot be invalid negative values where the domain disallows them;
-* dates use a consistent representation;
-* project/activity relationships are valid;
-* duplicate schedule activity identifiers within the relevant scope are prevented where appropriate.
-
-Do not overconstrain fields whose semantics are still uncertain.
-
-Future passes will refine validation.
-
----
-
-# Indexes
-
-Add indexes based on actual expected access patterns.
-
-At minimum consider indexes for:
-
-* foreign keys;
-* project-scoped activity lookup;
-* schedule-scoped activity lookup;
-* external activity IDs;
-* progress update lookup;
-* evidence lookup;
-* activity match lookup;
-* event lookup.
-
-Do not create dozens of speculative indexes.
-
-Each index should have a clear reason.
-
-Document the important ones.
-
----
-
-# Migrations
-
-Do not continue using one giant hard-coded schema string as the long-term database strategy.
-
-Introduce a small deterministic migration mechanism appropriate for the project.
-
-Requirements:
-
-* migrations are ordered;
-* migrations are tracked in SQLite;
-* running setup repeatedly is safe;
-* already-applied migrations are not re-run incorrectly;
-* a fresh database reaches the current schema deterministically;
-* migrations can be added in later passes.
-
-A simple custom migration runner is preferable to introducing an ORM or heavy migration framework.
-
-Do not introduce Prisma, TypeORM, Drizzle, Sequelize, or another ORM.
-
-The project intentionally uses lightweight SQLite.
-
----
-
-# Migration metadata
-
-Create an internal migration-tracking mechanism, for example a table conceptually similar to:
-
-```text
-schema_migrations
-```
-
-It should record which migrations have been applied.
-
-The exact design is up to you, but it must be:
-
-* deterministic;
-* local;
-* testable.
-
-Do not confuse migration metadata with the existing `system_metadata` table.
-
-Keep those responsibilities separate.
-
----
-
-# Migration 0 / baseline handling
-
-The repository already has the Pass 0 `system_metadata` table.
-
-Do not accidentally destroy it.
-
-Design the first migration carefully so that:
-
-* existing Pass 0 installations can migrate forward;
-* fresh databases initialize cleanly;
-* repeated `npm run setup` remains safe.
-
-Do not manually delete and recreate the entire database on ordinary setup.
-
-The database reset mechanism belongs to `demo:reset`, not normal setup.
-
----
-
-# Repository layer
-
-Extend the Pass 1 repository architecture.
-
-Create repository interfaces and SQLite implementations for the domain entities **only to the extent required by PASS 2**.
-
-At minimum, implement project persistence:
-
-```text
-create project
-retrieve project
-```
-
-These are mandatory because they are required for the PASS 2 exit criterion.
-
-Repositories should return typed data structures rather than raw SQLite-specific shapes where practical.
-
-Use explicit interfaces/types.
-
-Avoid leaking the `better-sqlite3` database object into application services.
-
----
-
-# Minimum project repository capability
-
-Provide a repository interface conceptually similar to:
-
-```text
-ProjectRepository
-
-create(...)
-getById(...)
-```
-
-The exact names are up to you.
-
-The implementation must:
-
-1. insert a project;
-2. retrieve the project;
-3. preserve its values correctly;
-4. throw/return a meaningful result when the project does not exist;
-5. respect SQLite constraints.
-
-Do not add a full project-management repository surface yet unless it is genuinely needed.
-
----
-
-# Transaction support
-
-Introduce transaction support at the repository/database boundary.
-
-The goal is not to build a transaction framework.
-
-The goal is to establish that related writes can be performed atomically.
-
-Provide a lightweight transaction helper or repository-level transaction mechanism appropriate for `better-sqlite3`.
-
-Demonstrate it with a meaningful test.
-
-For example:
-
-```text
-transaction starts
-    ↓
-write succeeds
-    ↓
-commit
-```
-
-and:
-
-```text
-transaction starts
-    ↓
-write fails
-    ↓
-rollback
-```
-
-A failed transaction must not leave partially committed state.
-
-Keep the API simple.
-
----
-
-# Database lifecycle
-
-Preserve the existing database lifecycle behavior from Pass 0/1.
-
-The database module should remain responsible for:
-
-* opening SQLite;
-* configuring pragmas;
-* enabling foreign keys;
-* enabling WAL where appropriate;
-* running migrations;
-* closing the connection.
-
-Do not move this responsibility into repositories.
-
----
-
-# WAL and SQLite pragmas
-
-Retain the existing appropriate SQLite configuration.
-
-At minimum ensure:
-
-```text
-foreign_keys = ON
-```
-
-and retain the existing local WAL configuration if it is still appropriate.
-
-Test the important pragmas rather than simply configuring them silently.
-
-Do not tune SQLite aggressively.
-
----
-
-# Setup behavior
-
-Update:
-
-```bash
-npm run setup
-```
-
-so that it:
-
-1. creates required directories;
-2. initializes SQLite if necessary;
-3. runs pending migrations;
-4. leaves an already-initialized database intact;
-5. is safe to run multiple times.
-
-Running:
-
-```bash
-npm run setup
-npm run setup
-npm run setup
-```
-
-should not corrupt or duplicate the database.
-
----
-
-# Demo reset behavior
-
-Do not build the complete Golden Demo Environment yet.
-
-However, `npm run demo:reset` must continue to work with the new migration system.
-
-Its responsibility in this pass remains:
-
-> reset local development/runtime persistence to a clean database state.
-
-After reset, the current schema should be recreated through the migration mechanism rather than through a separate hard-coded schema path.
-
-This is important.
-
-There should be **one authoritative schema initialization path**.
-
----
-
-# Tests
-
-Expand the test suite substantially.
-
-Do not measure success by test count.
-
-Tests must prove persistence behavior.
-
-At minimum cover:
-
-## Migration tests
-
-* fresh database runs all migrations;
-* migration state is tracked;
-* migrations are idempotent;
-* running migrations twice does not duplicate schema;
-* current schema contains expected tables.
-
-## Foreign-key tests
-
-* valid references succeed;
-* invalid references fail.
-
-## Constraint tests
-
-Test representative important constraints.
-
-## Project repository tests
-
-* create project;
-* retrieve project;
-* preserve fields;
-* missing project behavior.
-
-## Transaction tests
-
-* successful transaction commits;
-* failed transaction rolls back.
-
-## Repository isolation tests
-
-Verify services use repository abstractions and not SQLite directly.
-
-## Regression tests
-
-Existing Pass 0/1 tests must continue passing.
-
----
-
-# Tests should use isolated databases
-
-Do not allow persistence tests to mutate the developer's real:
-
-```text
-database/fieldline.db
-```
-
-Use isolated/in-memory test databases where practical.
-
-Tests must be deterministic.
-
-Tests must clean up connections properly.
-
----
-
-# TypeScript
-
-Maintain strict TypeScript.
-
-Avoid `any`, especially at the repository boundary.
-
-Define explicit types for:
-
-* project row/model;
-* repository inputs;
-* repository outputs;
-* migration definitions;
-* transaction helpers;
-* database-related errors.
-
-Do not expose unnecessary SQLite implementation details to services.
-
----
-
-# Error handling
-
-Use the Pass 1 error architecture.
-
-Database failures should map appropriately to the existing application error model.
-
-Do not leak raw SQLite errors directly into HTTP responses.
-
-Do not duplicate error hierarchies.
-
----
-
-# Documentation
-
-Update `docs/ARCHITECTURE.md` with the persistence architecture.
-
-Document:
-
-```text
-Service
-   ↓
-Repository interface
-   ↓
-SQLite repository
-   ↓
-Database layer
-   ↓
-SQLite
-```
-
-Document:
-
-* migration mechanism;
-* migration tracking;
-* transaction boundary;
-* foreign-key enforcement;
-* important indexes;
-* current schema entities.
-
-Do not document Pass 3+ functionality as implemented.
-
----
-
-# README
-
-Update only what is necessary.
-
-Keep the authoritative 26-pass roadmap.
-
-Mark:
-
-```text
-PASS 2 — SQLite and Persistence Foundation
-```
-
-as completed only after all validation succeeds.
-
-Do not rewrite or replace the roadmap.
-
----
-
-# What NOT to implement
-
-This restriction is extremely important.
-
-Do **not** implement:
-
-* project management UI;
-* project listing screens;
-* project selection;
-* schedule importer;
-* CSV parsing;
-* XLSX parsing;
-* schedule normalization;
-* schedule validation;
-* progress entry UI;
-* AI extraction;
-* activity matching;
-* progress calculation;
-* variance;
-* risk;
-* evidence ingestion workflows;
-* document processing;
-* assistant;
-* dashboard;
-* voice;
-* authentication;
-* authorization;
-* background jobs.
-
-Those belong to later passes.
-
----
-
-# Architectural self-review
-
-Before declaring PASS 2 complete, explicitly review:
-
-### Layering
-
-Verify:
-
-```text
-service
-   ↓
-repository interface
-   ↓
-SQLite repository
-   ↓
-database
-```
-
-and NOT:
-
-```text
-service → SQLite
-route → SQLite
-AI → SQLite
-```
-
-### Migration integrity
-
-Verify:
-
-* schema is migration-driven;
-* setup is repeatable;
-* migration state is tracked;
-* reset uses the same schema path.
-
-### Data integrity
-
-Verify:
-
-* foreign keys work;
-* constraints work;
-* indexes exist where justified;
-* transactions rollback correctly.
-
-### Test isolation
-
-Verify tests do not damage the real local demo database.
-
-### Regression
-
-Verify all Pass 0 and Pass 1 behavior still works.
-
----
-
-# Required validation
-
-Run all of these:
+Run:
 
 ```bash
 npm test
 npm run build
 npm run setup
+npm run setup
 npm run demo:reset
 ```
 
-Then:
-
-```bash
-npm run setup
-npm run setup
-```
-
-and verify the second setup is safe and produces no schema corruption.
-
-Run the development environment:
-
-```bash
-npm run dev
-```
-
-Verify:
+Then verify:
 
 ```text
-http://localhost:3000
+GET /api/health → HTTP 200
+schema_version → 0.2.0
 ```
 
-and:
+Inspect the final schema and migration chain manually before committing.
+
+## Git
+
+Commit:
 
 ```text
-GET http://localhost:3001/api/health
-```
-
-The health endpoint must remain healthy after migrations are applied.
-
----
-
-# Clean-checkout validation
-
-Where practical:
-
-1. remove generated dependencies/runtime artifacts;
-2. reinstall dependencies;
-3. create a fresh local database;
-4. run `npm run setup`;
-5. run `npm test`;
-6. run `npm run build`;
-7. run the app;
-8. verify `/api/health`.
-
-The standard is:
-
-> A clean checkout can initialize the current database schema deterministically.
-
----
-
-# Git discipline
-
-Before committing:
-
-1. inspect `git status`;
-2. inspect the complete diff;
-3. verify only PASS 2 work is included;
-4. do not commit:
-
-   * `.env`;
-   * SQLite runtime files;
-   * WAL/journal files;
-   * `dist`;
-   * uploads;
-   * secrets;
-5. preserve unrelated work already present in the repository.
-
-Use a focused commit message such as:
-
-```text
-feat: establish FieldLine SQLite persistence foundation
+fix: finalize FieldLine Pass 2 migration compatibility
 ```
 
 Push to:
 
 ```text
 itshim998/FieldLine
+main
 ```
 
-on the appropriate branch.
+Final report must include:
 
----
+* migration chain;
+* existing-database upgrade test result;
+* data-preservation result;
+* cross-project integrity result;
+* SET NULL behavior result;
+* full test result;
+* build/setup/reset results;
+* health result;
+* commit hash.
 
-# Completion criteria
+Explicitly confirm:
 
-PASS 2 is complete only when:
+> PASS 3 was NOT implemented.
 
-* [ ] SQLite schema exists for all eight foundational entities.
-* [ ] migrations are deterministic and tracked.
-* [ ] migrations are idempotent.
-* [ ] setup safely applies pending migrations.
-* [ ] demo reset recreates the schema through the migration path.
-* [ ] foreign keys are enabled and tested.
-* [ ] basic constraints are implemented and tested.
-* [ ] justified indexes exist.
-* [ ] repository abstractions exist.
-* [ ] project creation works through the repository/service architecture.
-* [ ] project retrieval works through the repository/service architecture.
-* [ ] transactions are supported and tested.
-* [ ] rollback is verified.
-* [ ] no service contains SQL.
-* [ ] no route contains SQL.
-* [ ] no AI code contains SQL.
-* [ ] Pass 0/1 tests remain green.
-* [ ] `npm test` passes.
-* [ ] `npm run build` passes.
-* [ ] `npm run setup` passes.
-* [ ] repeated setup is safe.
-* [ ] `npm run demo:reset` passes.
-* [ ] `/api/health` remains healthy.
-* [ ] frontend still starts.
-* [ ] no Pass 3+ functionality is implemented.
-* [ ] final diff is reviewed.
-* [ ] commit is created.
-* [ ] commit is pushed.
-
----
-
-# Final report
-
-After implementation, report:
-
-### 1. Database architecture
-
-Explain:
-
-* migration mechanism;
-* schema organization;
-* migration tracking;
-* database lifecycle.
-
-### 2. Core schema
-
-List the eight tables and their major relationships.
-
-### 3. Repository architecture
-
-Explain the repository interfaces and SQLite implementations added.
-
-### 4. Transactions
-
-Explain how transactions are exposed and how rollback was tested.
-
-### 5. Tests
-
-Report:
-
-* test suites;
-* total passing tests;
-* migration tests;
-* foreign-key tests;
-* repository tests;
-* transaction tests.
-
-### 6. Validation
-
-Report the results of:
-
-
-npm test
-npm run build
-npm run setup
-npm run setup
-npm run demo:reset
-npm run dev
-GET /api/health
-frontend startup
-
-
-### 7. Self-review
-
-Mention any persistence/design issues discovered and corrected.
-
-### 8. Git
-
-Report:
-
-* commit hash;
-* commit message;
-* branch;
-* push result.
-
-### 9. Boundary confirmation
-
-Explicitly state:
-
-> **PASS 3 and all later feature functionality were not implemented.**
-
----
-
-# Final instruction
-
-Implement **PASS 2 — SQLite and Persistence Foundation only**.
-
-This pass should establish a **real, deterministic, testable database foundation** for FieldLine.
-
-Do not rush into project-management features.
-
-Do not build the schedule model beyond what is necessary for the foundational schema.
-
-Do not implement business workflows.
-
-The goal is:
-
-> **A clean SQLite persistence layer on which the remaining FieldLine passes can safely build.**
-
-Stop after PASS 2.
+```
+```

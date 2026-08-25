@@ -2,6 +2,7 @@ import { Database as DatabaseType } from 'better-sqlite3';
 import * as migration0001 from './migrations/0001_baseline_system_metadata.js';
 import * as migration0002 from './migrations/0002_core_domain_schema.js';
 import * as migration0003 from './migrations/0003_upgrade_metadata_for_pass2.js';
+import * as migration0004 from './migrations/0004_upgrade_cross_project_integrity.js';
 
 export interface Migration {
   name: string;
@@ -16,7 +17,8 @@ export interface MigrationResult {
 export const MIGRATIONS: Migration[] = [
   { name: migration0001.name, up: migration0001.up },
   { name: migration0002.name, up: migration0002.up },
-  { name: migration0003.name, up: migration0003.up }
+  { name: migration0003.name, up: migration0003.up },
+  { name: migration0004.name, up: migration0004.up }
 ];
 
 /**
@@ -43,7 +45,7 @@ export function getAppliedMigrations(db: DatabaseType): string[] {
 
 /**
  * Runs all pending migrations deterministically in lexical/registration order.
- * Each migration is applied within an atomic transaction.
+ * Each migration is applied within an atomic transaction with foreign keys safely toggled.
  */
 export function runMigrations(db: DatabaseType): MigrationResult {
   initMigrationTable(db);
@@ -52,6 +54,7 @@ export function runMigrations(db: DatabaseType): MigrationResult {
   const alreadyApplied: string[] = [];
 
   const recordMigrationStmt = db.prepare('INSERT INTO schema_migrations (name) VALUES (?)');
+  const fkEnabled = db.pragma('foreign_keys', { simple: true }) === 1;
 
   for (const migration of MIGRATIONS) {
     if (appliedSet.has(migration.name)) {
@@ -59,13 +62,25 @@ export function runMigrations(db: DatabaseType): MigrationResult {
       continue;
     }
 
+    // Disable foreign keys outside transaction for table rebuild compatibility
+    db.pragma('foreign_keys = OFF');
+
     const applyMigrationTx = db.transaction(() => {
       migration.up(db);
       recordMigrationStmt.run(migration.name);
     });
 
     applyMigrationTx();
+
+    if (fkEnabled) {
+      db.pragma('foreign_keys = ON');
+    }
+
     newlyApplied.push(migration.name);
+  }
+
+  if (fkEnabled) {
+    db.pragma('foreign_keys = ON');
   }
 
   return {

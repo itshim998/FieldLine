@@ -141,7 +141,7 @@ backend/
     repositories/     # Direct SQLite persistence (ProjectRepository, SystemRepository)
     models/           # Strongly typed domain entity definitions and DTO contracts
     database/         # SQLite connection lifecycle, WAL pragmas, migrator, and migrations/
-      migrations/     # Ordered migrations (0001_baseline_system_metadata.ts, 0002_core_domain_schema.ts, 0003_upgrade_metadata_for_pass2.ts)
+      migrations/     # Ordered migrations (0001_baseline_system_metadata.ts, 0002_core_domain_schema.ts, 0003_upgrade_metadata_for_pass2.ts, 0004_upgrade_cross_project_integrity.ts)
       migrator.ts     # Schema migration runner with schema_migrations tracking
       db.ts           # initDatabase, getDatabase, runInTransaction, closeDatabase
       schema.ts       # Core tables list and schema constants
@@ -186,7 +186,7 @@ backend/
 1. **Pass 0 — Repository Bootstrap**: Node.js/TypeScript configuration, Express, Vite React shell, SQLite pragma setup, scripts.
 2. **Pass 1 — Application Architecture**: Architectural boundary enforcement, thin routes, Zod validation middleware, decoupled services, AI abstraction layer, centralized `AppError` handling.
 3. **Pass 2 — SQLite & Persistence Foundation**:
-   - Migration engine (`schema_migrations` tracking, append-only chain `0001`, `0002`, `0003`).
+   - Migration engine (`schema_migrations` tracking, append-only chain `0001`, `0002`, `0003`, `0004`).
    - 8 Core Domain Entities (`projects`, `schedules`, `activities`, `progress_updates`, `evidence`, `activity_matches`, `activity_progress`, `project_events`).
    - Cross-project referential integrity via composite foreign keys and consistency triggers.
    - Restored `ON DELETE SET NULL` on nullable references (`evidence.progress_update_id`, `activity_matches.evidence_id`, `activity_progress.progress_update_id`).
@@ -194,4 +194,4 @@ backend/
    - Relational and query indexing.
    - Transaction boundary (`runInTransaction`) with verified commit/rollback.
    - Repository layer (`ProjectRepository`, `SqliteProjectRepository`, `SystemRepository`).
-   - Comprehensive Vitest persistence test suite (13 test suites, 65 passing tests).
+   - Comprehensive Vitest persistence test suite (13 test suites, 66 passing tests).
