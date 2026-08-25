@@ -1,20 +1,21 @@
 /**
- * Base database schema initialization for Pass 0 & Pass 1.
- * In Pass 0 & 1, core system metadata is verified for deterministic SQLite initialization.
- * Full domain tables (projects, schedules, activities, progress, evidence) belong to Pass 2.
+ * Database schema configuration for FieldLine.
+ * Authoritative schema evolution is driven by the migration engine in ./migrator.ts.
  */
 
-export const INITIAL_SCHEMA_SQL = `
-  CREATE TABLE IF NOT EXISTS system_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
+export const SCHEMA_VERSION = '0.2.0';
 
-  INSERT OR IGNORE INTO system_metadata (key, value) VALUES 
-    ('schema_version', '0.1.0'),
-    ('app_name', 'FieldLine'),
-    ('sih_ps_id', 'SIH26122'),
-    ('pass', 'Pass 1: Application Architecture');
-`;
+export const CORE_TABLES = [
+  'system_metadata',
+  'schema_migrations',
+  'projects',
+  'schedules',
+  'activities',
+  'progress_updates',
+  'evidence',
+  'activity_matches',
+  'activity_progress',
+  'project_events'
+] as const;
+
+export type CoreTableName = (typeof CORE_TABLES)[number];

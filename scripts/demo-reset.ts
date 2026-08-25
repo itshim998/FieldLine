@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getValidatedEnv } from '../backend/src/config/env.js';
 import { initDatabase, closeDatabase, isDatabaseHealthy } from '../backend/src/database/db.js';
+import { getAppliedMigrations } from '../backend/src/database/migrator.js';
 
 async function resetDemoEnvironment(): Promise<void> {
   console.log('====================================================');
-  console.log('🔄 Resetting FieldLine Local Runtime Environment (Pass 0)');
+  console.log('🔄 Resetting FieldLine Local Runtime Environment (Pass 2)');
   console.log('====================================================');
 
   const rootDir = process.cwd();
@@ -43,7 +44,6 @@ async function resetDemoEnvironment(): Promise<void> {
       const fullPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) {
         cleanDirectory(fullPath);
-        // Check if directory is now empty or only contains .gitkeep
         const remaining = fs.readdirSync(fullPath);
         if (remaining.length === 0) {
           fs.rmdirSync(fullPath);
@@ -57,12 +57,15 @@ async function resetDemoEnvironment(): Promise<void> {
 
   cleanDirectory(path.resolve(rootDir, env.UPLOAD_DIR));
 
-  // 4. Reinitialize fresh SQLite database
+  // 4. Reinitialize fresh SQLite database with authoritative migrations
   console.log(`📦 Re-initializing clean SQLite database at: ${env.DATABASE_PATH}`);
-  initDatabase();
+  const db = initDatabase();
+
+  const applied = getAppliedMigrations(db);
+  console.log(`✅ SQLite migrations applied on fresh database: ${applied.join(', ')}`);
 
   if (isDatabaseHealthy()) {
-    console.log('✅ SQLite database cleanly re-initialized');
+    console.log('✅ SQLite database cleanly re-initialized and verified healthy');
   } else {
     console.error('❌ Failed to re-initialize SQLite database during reset');
     process.exit(1);

@@ -24,7 +24,7 @@ describe('SqliteSystemRepository', () => {
     expect(metadata).toBeDefined();
     expect(metadata.app_name).toBe('FieldLine');
     expect(metadata.sih_ps_id).toBe('SIH26122');
-    expect(metadata.schema_version).toBe('0.1.0');
+    expect(metadata.schema_version).toBe('0.2.0');
   });
 
   it('should get and set individual metadata keys deterministically', () => {

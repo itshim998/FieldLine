@@ -2,18 +2,19 @@ import Database, { Database as DatabaseType } from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
 import { env } from '../config/env.js';
-import { INITIAL_SCHEMA_SQL } from './schema.js';
+import { runMigrations, MigrationResult } from './migrator.js';
 
 let dbInstance: DatabaseType | null = null;
 
 export interface DatabaseOptions {
   dbPath?: string;
   verbose?: boolean;
+  skipMigrations?: boolean;
 }
 
 /**
  * Initializes and returns the SQLite database instance.
- * Enables WAL mode, foreign keys, and executes base schema setup.
+ * Enables WAL mode, foreign keys, and executes migrations deterministically.
  */
 export function initDatabase(options: DatabaseOptions = {}): DatabaseType {
   if (dbInstance) {
@@ -22,7 +23,7 @@ export function initDatabase(options: DatabaseOptions = {}): DatabaseType {
 
   const targetPath = options.dbPath || env.DATABASE_PATH;
 
-  // Handle in-memory database vs filesystem database
+  // Handle filesystem directory creation
   if (targetPath !== ':memory:') {
     const dbDir = path.dirname(path.resolve(process.cwd(), targetPath));
     if (!fs.existsSync(dbDir)) {
@@ -34,14 +35,18 @@ export function initDatabase(options: DatabaseOptions = {}): DatabaseType {
     verbose: options.verbose ? console.log : undefined
   });
 
-  // Enable WAL mode for better concurrency and local performance
+  // Enable foreign key enforcement
+  db.pragma('foreign_keys = ON');
+
+  // Enable WAL mode for file-based database for concurrent reads/writes
   if (targetPath !== ':memory:') {
     db.pragma('journal_mode = WAL');
   }
-  db.pragma('foreign_keys = ON');
 
-  // Execute Pass 0 base schema
-  db.exec(INITIAL_SCHEMA_SQL);
+  // Run pending schema migrations unless explicitly skipped
+  if (!options.skipMigrations) {
+    runMigrations(db);
+  }
 
   dbInstance = db;
   return dbInstance;
@@ -65,9 +70,19 @@ export function isDatabaseHealthy(): boolean {
     const db = getDatabase();
     const row = db.prepare('SELECT 1 as healthy').get() as { healthy: number } | undefined;
     return row?.healthy === 1;
-  } catch (error) {
+  } catch {
     return false;
   }
+}
+
+/**
+ * Executes a function inside an atomic SQLite transaction.
+ * Automatically commits on success and rolls back on thrown errors.
+ */
+export function runInTransaction<T>(fn: () => T, dbProvider?: () => DatabaseType): T {
+  const db = dbProvider ? dbProvider() : getDatabase();
+  const tx = db.transaction(fn);
+  return tx();
 }
 
 /**

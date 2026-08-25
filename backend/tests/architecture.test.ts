@@ -30,6 +30,16 @@ describe('Architectural Boundary Enforcement', () => {
     }
   });
 
+  it('services must not import better-sqlite3 directly or depend on SQLite handles', () => {
+    const servicesFiles = getFilesRecursively(path.join(srcRoot, 'services'));
+
+    for (const file of servicesFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      expect(content).not.toMatch(/from\s+['"]better-sqlite3['"]/);
+      expect(content).not.toMatch(/from\s+['"].*database\/db(\.js)?['"]/);
+    }
+  });
+
   it('services must not contain direct raw SQL statements', () => {
     const servicesFiles = getFilesRecursively(path.join(srcRoot, 'services'));
 

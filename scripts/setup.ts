@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getValidatedEnv } from '../backend/src/config/env.js';
-import { initDatabase, closeDatabase, isDatabaseHealthy } from '../backend/src/database/db.js';
+import { initDatabase, closeDatabase, isDatabaseHealthy, getDatabase } from '../backend/src/database/db.js';
+import { getAppliedMigrations } from '../backend/src/database/migrator.js';
 
 async function runSetup(): Promise<void> {
   console.log('====================================================');
-  console.log('🚀 Initializing FieldLine Local Environment (Pass 0)');
+  console.log('🚀 Initializing FieldLine Local Environment (Pass 2)');
   console.log('====================================================');
 
   const rootDir = process.cwd();
@@ -47,12 +48,15 @@ async function runSetup(): Promise<void> {
     }
   }
 
-  // 4. Initialize SQLite database and deterministic schema
+  // 4. Initialize SQLite database, enable foreign keys, WAL mode, and execute migrations
   console.log(`📦 Initializing SQLite database at: ${env.DATABASE_PATH}`);
-  initDatabase();
+  const db = initDatabase();
+
+  const applied = getAppliedMigrations(db);
+  console.log(`✅ SQLite migrations applied (${applied.length} total): ${applied.join(', ')}`);
 
   if (isDatabaseHealthy()) {
-    console.log('✅ SQLite database initialized and verified healthy');
+    console.log('✅ SQLite database verified healthy and fully migrated');
   } else {
     console.error('❌ Database health check failed during setup');
     process.exit(1);

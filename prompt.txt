@@ -1,8 +1,8 @@
-# FieldLine — PASS 1: Application Architecture
+# FieldLine — PASS 2: SQLite & Persistence Foundation
 
 ## Context
 
-You are implementing **PASS 1 — Application Architecture** of FieldLine according to C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine\FieldLine Complete Implementation plan.md
+You are implementing **PASS 2 — SQLite and Persistence Foundation** of FieldLine in accordance to the master plan at C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine\FieldLine Complete Implementation plan.md
 
 FieldLine is our **Smart India Hackathon 2026** project:
 
@@ -11,737 +11,844 @@ FieldLine is our **Smart India Hackathon 2026** project:
 * **Problem:** Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management: Real-Time Actual Progress Tracking (Planning-to-Execution Bridge)
 * **Local project directory:**
 
-```text
+
 C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
-```
+
 
 * **GitHub repository:**
 
-```text
+
 itshim998/FieldLine
+
+
+PASS 0 and PASS 1 have been completed and pushed.
+
+PASS 1 established the architectural boundaries:
+
+```text
+HTTP route
+    ↓
+validation
+    ↓
+service
+    ↓
+repository
+    ↓
+SQLite
 ```
 
-Pass 0 is complete and pushed.
+The AI architecture is also isolated from persistence.
 
-The current repository already contains a working local Node/TypeScript + Express + React/Vite + SQLite + Zod foundation, including a working health endpoint and tests.
-
-**Do not assume Pass 0 is perfect. Inspect the current repository first and build on the actual implementation.**
+**Do not bypass or weaken those boundaries in this pass.**
 
 ---
 
 # Authoritative objective
 
-The objective of this pass is:
+The objective of PASS 2 is:
 
-> **Create clean module boundaries before feature development.**
+> **Create the real local FieldLine database and persistence foundation.**
 
-The authoritative architecture requires:
+Implement:
 
-```text
-HTTP route
-    ↓
-validation
-    ↓
-service
-    ↓
-repository
-    ↓
-SQLite
-```
+* SQLite migrations/schema;
+* core domain tables;
+* repositories;
+* transactions;
+* indexes;
+* foreign keys;
+* basic constraints;
+* meaningful persistence tests.
 
-For AI:
+The exit criterion is:
 
-```text
-AI service
-    ↓
-AI adapter
-    ↓
-structured response
-    ↓
-validation
-    ↓
-service
-```
+> **A project can be created, persisted and retrieved entirely from SQLite.**
 
-The critical architectural rule is:
-
-> **AI code must not directly manipulate the database.**
-
-The master implementation plan defines this pass as an architectural foundation only. It does **not** introduce FieldLine domain functionality yet.
+This is the persistence foundation for all later passes.
 
 ---
 
-# Critical project philosophy
+# Critical boundary
 
-FieldLine must remain:
+This pass is **NOT** Project Management.
 
-* a **single local modular monolith**;
-* locally runnable;
-* easy to test;
-* strongly separated internally;
-* deliberately lightweight operationally.
+Do not implement the full project-management feature layer.
 
-The infrastructure constraints are:
+The later roadmap remains:
 
-* no Docker;
-* no Supabase;
-* no PostgreSQL;
-* no cloud database;
-* no cloud storage;
-* no Kubernetes;
-* no external deployment platform;
-* no separate deployed workers;
-* no microservices;
-* no production infrastructure.
 
-External AI APIs are allowed later where AI functionality actually requires them.
+PASS 2 — SQLite and Persistence Foundation
+PASS 3 — Project Management
+PASS 4 — Schedule Importer
+...
 
-Do not introduce any external deployment or hosted infrastructure.
+So PASS 2 must provide the persistence capabilities that PASS 3 will consume, but must not build the PASS 3 user-facing project lifecycle.
 
----
+Do not build:
 
-# Your role
+* project dashboard;
+* project selection UI;
+* project CRUD HTTP API;
+* project management screens;
+* project editing forms;
+* project deletion workflows exposed to users.
 
-You are the local implementation agent in Antigravity.
-
-Your workflow for this pass must be:
-
-```text
-Inspect current repository
-        ↓
-Understand existing Pass 0 architecture
-        ↓
-Implement Pass 1 only
-        ↓
-Run tests
-        ↓
-Run build
-        ↓
-Exercise the health endpoint
-        ↓
-Perform architectural self-review
-        ↓
-Inspect git diff
-        ↓
-Fix any issues discovered
-        ↓
-Run tests/build again
-        ↓
-Commit
-        ↓
-Push
-```
-
-Do not simply trust "tests passed" as proof that the architecture is correct.
+A small internal service/repository test is sufficient to satisfy the PASS 2 exit criterion.
 
 ---
 
 # First: inspect the current repository
 
-Before modifying anything, inspect:
+Before changing anything, inspect the current state of:
 
-* current directory structure;
-* `package.json`;
-* TypeScript configurations;
-* existing Express app;
-* routes;
-* middleware;
-* validation;
-* database layer;
-* tests;
-* setup/reset scripts;
-* README;
-* existing architectural documentation.
-
-In particular, understand how Pass 0 currently implements:
-
-* `createApp()`;
-* `/api/health`;
-* environment configuration;
+* `backend/src/database/`;
+* `backend/src/repositories/`;
+* `backend/src/services/`;
+* `backend/src/config/`;
+* `backend/tests/`;
 * SQLite initialization;
-* Zod validation;
-* request logging;
-* error handling.
+* current `system_metadata` table;
+* Pass 1 architecture;
+* existing setup/reset scripts;
+* existing architecture documentation.
 
-Do not recreate existing functionality merely because this pass mentions it.
+Understand exactly how Pass 1 currently manages:
 
-**Refactor and formalize existing foundations where necessary.**
+* the SQLite connection;
+* database lifecycle;
+* repository abstraction;
+* service abstraction;
+* errors;
+* tests.
 
----
+Do not recreate or duplicate existing infrastructure.
 
-# PASS 1 scope
-
-Implement the architectural skeleton for the application.
-
-The following concerns must exist with clear boundaries:
-
-### Application configuration
-
-Create or formalize a central configuration boundary.
-
-The application should not read `process.env` arbitrarily throughout the codebase.
-
-Prefer:
-
-```text
-process.env
-    ↓
-validated configuration
-    ↓
-application code
-```
-
-Keep Zod validation at the configuration boundary.
-
-Do not introduce a complicated configuration framework.
+Extend it cleanly.
 
 ---
 
-# HTTP route layer
+# Persistence architecture
 
-Routes should remain thin.
-
-A route should primarily perform:
+Preserve this dependency direction:
 
 ```text
-HTTP request
-    ↓
-request validation
-    ↓
-service invocation
-    ↓
-HTTP response
-```
-
-Routes should **not**:
-
-* execute SQL directly;
-* contain domain calculations;
-* contain business rules;
-* call an AI SDK directly;
-* perform large orchestration logic.
-
-The current health route should be refactored where necessary to follow this architectural direction without changing its externally observable behavior unnecessarily.
-
----
-
-# Request validation
-
-Create a clean validation boundary.
-
-Use Zod for request/input validation.
-
-The architecture should make it easy for future routes to define:
-
-```text
-Request
-    ↓
-Zod schema
-    ↓
-validated input
-    ↓
-service
-```
-
-Avoid duplicating validation logic inside services.
-
-Do not create domain schemas for projects, schedules, activities, progress, etc. yet.
-
-Those belong to later passes.
-
----
-
-# Service layer
-
-Create a clear application/service layer.
-
-Services should own orchestration and business operations.
-
-For this pass, use a small representative service where useful to prove the boundary.
-
-The health endpoint may be used as the architectural example, but do not invent fake business behavior merely to populate the service directory.
-
-A service should **not** directly depend on Express request/response objects.
-
-Prefer:
-
-```text
-route
-  → service input
-  → service result
-  → route response
-```
-
-rather than passing HTTP objects into the service.
-
----
-
-# Repository abstraction
-
-Create a repository/data-access boundary.
-
-The repository layer owns direct SQLite access.
-
-The architectural dependency should be:
-
-```text
-route
+Service
    ↓
-service
+Repository interface
    ↓
-repository
+SQLite repository implementation
+   ↓
+Database connection
    ↓
 SQLite
 ```
 
-Services must not embed SQL.
+The service layer should depend on repository interfaces.
 
-Routes must not embed SQL.
+The repository implementation owns SQL.
 
-AI code must not embed SQL.
+The database module owns SQLite connection lifecycle and low-level database configuration.
 
-The repository abstraction should be designed so later passes can add repositories such as:
+No route should contain SQL.
 
-```text
-projectRepository
-scheduleRepository
-activityRepository
-progressRepository
-evidenceRepository
-...
+No service should contain SQL.
+
+No AI code should contain SQL.
+
+---
+
+# Database design
+
+Implement migrations/schema for these core entities:
+
+
+projects
+schedules
+activities
+progress_updates
+evidence
+activity_matches
+activity_progress
+project_events
+
+
+These are the foundational entities from the FieldLine domain model.
+
+The initial domain model is described as:
+
+### projects
+
+Basic project information.
+
+### schedules
+
+An imported project schedule/version.
+
+### activities
+
+Individual planned schedule activities.
+
+Typical fields include:
+
+
+id
+project_id
+external_id
+name
+description
+wbs_code
+location
+planned_start
+planned_finish
+planned_quantity
+unit
+baseline_progress
+            
+
+### progress_updates
+
+A reported real-world update.
+
+### evidence
+
+The original source of a progress update.
+
+Examples:
+
+
+text
+XLSX
+PDF
+image
+transcript
+
+
+### activity_matches
+
+Relationship between extracted evidence and candidate activities.
+
+### activity_progress
+
+Current/derived actual project state.
+
+### project_events
+
+Important state transitions and audit events.
+
+Supporting entities should **not** be added unless implementation genuinely requires them in this pass.
+
+Do not introduce:
+
+* users;
+* processing_jobs;
+* milestones;
+* progress_snapshots;
+
+unless there is a concrete persistence dependency that makes one necessary.
+
+---
+
+# Important schema principle
+
+Do not simply create tables because the names were listed.
+
+Model the relationships properly.
+
+The schema should establish the foundational dependency graph.
+
+At minimum, think carefully about relationships such as:
+
+
+projects
+   ↓
+schedules
+   ↓
+activities
+ 
+
+and:
+
+
+progress_updates
+   ↓
+evidence
+
+
+and:
+
+
+activity_matches
+   ↓
+activities
+progress_updates / evidence
+
+
+and:
+
+
+activity_progress
+   ↓
+activities
+
+
+and:
+
+
+project_events
+   ↓
+project
+
+
+Use the actual domain semantics from the master implementation plan rather than inventing unrelated structures.
+
+---
+
+# IDs
+
+Use a consistent identifier strategy across the schema.
+
+Choose a simple strategy compatible with:
+
+* SQLite;
+* TypeScript;
+* deterministic tests;
+* repository APIs;
+* later demo seeding.
+
+Do not introduce UUID infrastructure merely for appearance.
+
+Do not mix multiple ID strategies unnecessarily.
+
+Document the chosen strategy.
+
+---
+
+# Foreign keys
+
+Foreign-key enforcement must be enabled and tested.
+
+Do not merely declare:
+
+```sql
+FOREIGN KEY (...)
 ```
 
-Do **not** implement those future domain repositories now.
+and assume SQLite will enforce them.
 
-Create only what is necessary to prove the architectural pattern.
+Ensure the database connection actually enables foreign keys.
 
-A small system/health-oriented repository is sufficient for this pass if it allows the architecture to be genuinely exercised.
-
----
-
-# Database boundary
-
-Keep the existing SQLite connection management where it is working.
-
-Do not replace the local SQLite strategy.
-
-The database layer should remain responsible for:
-
-* opening the database;
-* connection lifecycle;
-* SQLite pragmas;
-* low-level database access;
-* schema initialization that already belongs to Pass 0.
-
-Repositories should use the database layer rather than reaching into SQLite configuration themselves.
-
-Do not implement the full domain schema in this pass.
-
-That belongs to PASS 2.
+Write tests proving that invalid references are rejected where appropriate.
 
 ---
 
-# AI architecture skeleton
+# Constraints
 
-This pass must establish the **shape** of the future AI architecture without implementing FieldLine's actual AI features.
+Add basic database constraints that protect domain integrity.
 
-Create the boundary:
+Examples where appropriate:
+
+* required fields are `NOT NULL`;
+* IDs are unique where they should be unique;
+* percentages stay within valid ranges;
+* quantities cannot be invalid negative values where the domain disallows them;
+* dates use a consistent representation;
+* project/activity relationships are valid;
+* duplicate schedule activity identifiers within the relevant scope are prevented where appropriate.
+
+Do not overconstrain fields whose semantics are still uncertain.
+
+Future passes will refine validation.
+
+---
+
+# Indexes
+
+Add indexes based on actual expected access patterns.
+
+At minimum consider indexes for:
+
+* foreign keys;
+* project-scoped activity lookup;
+* schedule-scoped activity lookup;
+* external activity IDs;
+* progress update lookup;
+* evidence lookup;
+* activity match lookup;
+* event lookup.
+
+Do not create dozens of speculative indexes.
+
+Each index should have a clear reason.
+
+Document the important ones.
+
+---
+
+# Migrations
+
+Do not continue using one giant hard-coded schema string as the long-term database strategy.
+
+Introduce a small deterministic migration mechanism appropriate for the project.
+
+Requirements:
+
+* migrations are ordered;
+* migrations are tracked in SQLite;
+* running setup repeatedly is safe;
+* already-applied migrations are not re-run incorrectly;
+* a fresh database reaches the current schema deterministically;
+* migrations can be added in later passes.
+
+A simple custom migration runner is preferable to introducing an ORM or heavy migration framework.
+
+Do not introduce Prisma, TypeORM, Drizzle, Sequelize, or another ORM.
+
+The project intentionally uses lightweight SQLite.
+
+---
+
+# Migration metadata
+
+Create an internal migration-tracking mechanism, for example a table conceptually similar to:
 
 ```text
-AI service
+schema_migrations
+```
+
+It should record which migrations have been applied.
+
+The exact design is up to you, but it must be:
+
+* deterministic;
+* local;
+* testable.
+
+Do not confuse migration metadata with the existing `system_metadata` table.
+
+Keep those responsibilities separate.
+
+---
+
+# Migration 0 / baseline handling
+
+The repository already has the Pass 0 `system_metadata` table.
+
+Do not accidentally destroy it.
+
+Design the first migration carefully so that:
+
+* existing Pass 0 installations can migrate forward;
+* fresh databases initialize cleanly;
+* repeated `npm run setup` remains safe.
+
+Do not manually delete and recreate the entire database on ordinary setup.
+
+The database reset mechanism belongs to `demo:reset`, not normal setup.
+
+---
+
+# Repository layer
+
+Extend the Pass 1 repository architecture.
+
+Create repository interfaces and SQLite implementations for the domain entities **only to the extent required by PASS 2**.
+
+At minimum, implement project persistence:
+
+```text
+create project
+retrieve project
+```
+
+These are mandatory because they are required for the PASS 2 exit criterion.
+
+Repositories should return typed data structures rather than raw SQLite-specific shapes where practical.
+
+Use explicit interfaces/types.
+
+Avoid leaking the `better-sqlite3` database object into application services.
+
+---
+
+# Minimum project repository capability
+
+Provide a repository interface conceptually similar to:
+
+```text
+ProjectRepository
+
+create(...)
+getById(...)
+```
+
+The exact names are up to you.
+
+The implementation must:
+
+1. insert a project;
+2. retrieve the project;
+3. preserve its values correctly;
+4. throw/return a meaningful result when the project does not exist;
+5. respect SQLite constraints.
+
+Do not add a full project-management repository surface yet unless it is genuinely needed.
+
+---
+
+# Transaction support
+
+Introduce transaction support at the repository/database boundary.
+
+The goal is not to build a transaction framework.
+
+The goal is to establish that related writes can be performed atomically.
+
+Provide a lightweight transaction helper or repository-level transaction mechanism appropriate for `better-sqlite3`.
+
+Demonstrate it with a meaningful test.
+
+For example:
+
+```text
+transaction starts
     ↓
-AI adapter
+write succeeds
     ↓
-structured response
-    ↓
-validation
-    ↓
-service
-```
-
-The purpose is architectural decoupling.
-
-For example, create conceptual interfaces/types along the lines of:
-
-```text
-AIProvider
-AIRequest
-AIResponse
-Structured AI contract
-```
-
-but adapt the names and structure to the actual repository conventions.
-
-The important properties are:
-
-### AI service
-
-Owns application-level orchestration around an AI capability.
-
-It should not know provider-specific SDK details.
-
-### AI adapter
-
-Owns communication with a specific provider.
-
-It should be replaceable later.
-
-For example, later we may have:
-
-```text
-OpenAI adapter
-Gemini adapter
-Mock adapter
-```
-
-but **do not implement multiple real providers now**.
-
-A mock/in-memory adapter may be used if necessary to demonstrate the architectural boundary and test it.
-
-### Structured response
-
-AI responses must have an explicit application contract.
-
-Use Zod to validate the response before the service accepts it.
-
-The architecture should therefore make this sequence possible:
-
-```text
-provider returns unknown data
-        ↓
-adapter translates provider response
-        ↓
-structured application response
-        ↓
-Zod validation
-        ↓
-service receives trusted structure
-```
-
-Do not let arbitrary provider response objects flow directly into application logic.
-
----
-
-# Important AI restriction
-
-Do **not** let the AI layer:
-
-* query SQLite;
-* import repository modules;
-* modify project state;
-* write directly to the database;
-* calculate project truth;
-* contain FieldLine business rules.
-
-The architectural separation must remain:
-
-```text
-AI
-→ interpretation / structured extraction
-
-Application services
-→ validation / orchestration / business rules
-
-Repositories
-→ persistence
-
-SQLite
-→ storage
-```
-
-This distinction is one of FieldLine's core non-negotiable principles.
-
----
-
-# Error handling
-
-Formalize a clean application error boundary.
-
-The current centralized error middleware may already exist.
-
-Inspect it first.
-
-Improve/refactor only where necessary so that:
-
-* application errors are distinguishable from unexpected errors;
-* validation errors have a stable response shape;
-* routes/services do not repeat response formatting logic unnecessarily;
-* database errors do not leak internal implementation details;
-* unexpected errors are logged appropriately.
-
-Do not create an elaborate enterprise error framework.
-
-Keep it small.
-
----
-
-# Logging
-
-Formalize logging as a cross-cutting concern.
-
-The existing request logger can remain if it is appropriate.
-
-The architecture should make it possible for future services to log meaningful events without coupling business logic to HTTP.
-
-Avoid introducing a heavy logging platform.
-
-Local structured logging is sufficient.
-
-Do not add cloud observability infrastructure.
-
----
-
-# Suggested architectural shape
-
-Use the existing repository conventions where possible.
-
-The resulting structure should move toward something conceptually similar to:
-
-```text
-backend/
-  src/
-    config/
-    routes/
-    validation/
-    middleware/
-    services/
-    repositories/
-    database/
-    ai/
-      providers/
-      contracts/
-      ...
-    ...
-  tests/
-```
-
-Do not create empty folders only for appearance.
-
-Each boundary introduced should have a real purpose in this pass.
-
----
-
-# What NOT to implement
-
-This is critical.
-
-Do not implement:
-
-* projects;
-* project CRUD;
-* schedules;
-* schedule importing;
-* CSV parsing;
-* XLSX parsing;
-* schedule normalization;
-* activity matching;
-* AI field-report extraction;
-* progress calculations;
-* variance;
-* delay/risk logic;
-* evidence processing;
-* document ingestion;
-* background jobs;
-* assistant;
-* dashboard;
-* voice;
-* authentication;
-* authorization;
-* complex dependency injection frameworks;
-* microservices;
-* cloud infrastructure.
-
-Those belong to later passes.
-
----
-
-# Preserve the current working application
-
-Pass 0 already has:
-
-* working local frontend;
-* working Express backend;
-* working `/api/health`;
-* SQLite initialization;
-* Zod;
-* setup/reset commands;
-* automated tests.
-
-Do not regress those capabilities.
-
-After refactoring, the health endpoint must still work.
-
-The frontend must still start.
-
-The existing development workflow must remain usable.
-
----
-
-# Testing requirements
-
-Expand the tests enough to prove that the architecture is real.
-
-At minimum, tests should demonstrate:
-
-### Route → service
-
-The route delegates to a service rather than containing business/data-access logic.
-
-### Service → repository
-
-The service uses a repository abstraction.
-
-### Repository → SQLite
-
-The repository can successfully interact with the local database.
-
-### AI service → adapter
-
-The AI service can invoke an abstract provider/adapter.
-
-### AI response → validation
-
-An invalid structured AI response is rejected through Zod.
-
-### Health endpoint
-
-The existing `/api/health` endpoint still works end-to-end.
-
-Do not create tests that merely assert that files or folders exist.
-
-Test actual behavior.
-
----
-
-# Architectural testability
-
-Prefer dependency boundaries that are testable.
-
-Where practical, design service/repository/provider dependencies so they can be substituted in tests without introducing a heavyweight dependency-injection framework.
-
-Simple constructor/function injection is enough.
-
-Example concept:
-
-```text
-service(repository)
-```
-
-or:
-
-```text
-service({ repository, aiProvider })
-```
-
-Do not over-engineer this.
-
----
-
-# TypeScript requirements
-
-Maintain strict TypeScript.
-
-Avoid unnecessary `any`.
-
-Especially avoid `any` at architectural boundaries.
-
-Prefer explicit types for:
-
-* service inputs/outputs;
-* repository interfaces;
-* AI provider interfaces;
-* AI structured responses;
-* configuration;
-* application errors.
-
-The purpose of this pass is partly to establish type-safe boundaries that future Gemini passes can build upon.
-
----
-
-# Dependency discipline
-
-Before adding any dependency, ask:
-
-> Does Pass 1 genuinely require this?
-
-Do not add:
-
-* dependency injection frameworks;
-* ORM packages;
-* logging platforms;
-* cloud SDKs;
-* AI SDKs for providers that are not actually being used;
-* architecture frameworks.
-
-The current stack is sufficient unless the repository inspection reveals a concrete reason otherwise.
-
----
-
-# Documentation
-
-Update `docs/ARCHITECTURE.md` so it accurately describes the Pass 1 architecture.
-
-It should clearly document:
-
-```text
-HTTP route
-    ↓
-validation
-    ↓
-service
-    ↓
-repository
-    ↓
-SQLite
+commit
 ```
 
 and:
 
 ```text
-AI service
+transaction starts
     ↓
-AI adapter
+write fails
     ↓
-structured response
-    ↓
-validation
-    ↓
-service
+rollback
 ```
 
-Also explicitly document:
+A failed transaction must not leave partially committed state.
 
-> AI code must not directly manipulate the database.
+Keep the API simple.
 
-Keep documentation truthful to the implementation.
+---
 
-Do not claim future components are already implemented.
+# Database lifecycle
+
+Preserve the existing database lifecycle behavior from Pass 0/1.
+
+The database module should remain responsible for:
+
+* opening SQLite;
+* configuring pragmas;
+* enabling foreign keys;
+* enabling WAL where appropriate;
+* running migrations;
+* closing the connection.
+
+Do not move this responsibility into repositories.
+
+---
+
+# WAL and SQLite pragmas
+
+Retain the existing appropriate SQLite configuration.
+
+At minimum ensure:
+
+```text
+foreign_keys = ON
+```
+
+and retain the existing local WAL configuration if it is still appropriate.
+
+Test the important pragmas rather than simply configuring them silently.
+
+Do not tune SQLite aggressively.
+
+---
+
+# Setup behavior
+
+Update:
+
+```bash
+npm run setup
+```
+
+so that it:
+
+1. creates required directories;
+2. initializes SQLite if necessary;
+3. runs pending migrations;
+4. leaves an already-initialized database intact;
+5. is safe to run multiple times.
+
+Running:
+
+```bash
+npm run setup
+npm run setup
+npm run setup
+```
+
+should not corrupt or duplicate the database.
+
+---
+
+# Demo reset behavior
+
+Do not build the complete Golden Demo Environment yet.
+
+However, `npm run demo:reset` must continue to work with the new migration system.
+
+Its responsibility in this pass remains:
+
+> reset local development/runtime persistence to a clean database state.
+
+After reset, the current schema should be recreated through the migration mechanism rather than through a separate hard-coded schema path.
+
+This is important.
+
+There should be **one authoritative schema initialization path**.
+
+---
+
+# Tests
+
+Expand the test suite substantially.
+
+Do not measure success by test count.
+
+Tests must prove persistence behavior.
+
+At minimum cover:
+
+## Migration tests
+
+* fresh database runs all migrations;
+* migration state is tracked;
+* migrations are idempotent;
+* running migrations twice does not duplicate schema;
+* current schema contains expected tables.
+
+## Foreign-key tests
+
+* valid references succeed;
+* invalid references fail.
+
+## Constraint tests
+
+Test representative important constraints.
+
+## Project repository tests
+
+* create project;
+* retrieve project;
+* preserve fields;
+* missing project behavior.
+
+## Transaction tests
+
+* successful transaction commits;
+* failed transaction rolls back.
+
+## Repository isolation tests
+
+Verify services use repository abstractions and not SQLite directly.
+
+## Regression tests
+
+Existing Pass 0/1 tests must continue passing.
+
+---
+
+# Tests should use isolated databases
+
+Do not allow persistence tests to mutate the developer's real:
+
+```text
+database/fieldline.db
+```
+
+Use isolated/in-memory test databases where practical.
+
+Tests must be deterministic.
+
+Tests must clean up connections properly.
+
+---
+
+# TypeScript
+
+Maintain strict TypeScript.
+
+Avoid `any`, especially at the repository boundary.
+
+Define explicit types for:
+
+* project row/model;
+* repository inputs;
+* repository outputs;
+* migration definitions;
+* transaction helpers;
+* database-related errors.
+
+Do not expose unnecessary SQLite implementation details to services.
+
+---
+
+# Error handling
+
+Use the Pass 1 error architecture.
+
+Database failures should map appropriately to the existing application error model.
+
+Do not leak raw SQLite errors directly into HTTP responses.
+
+Do not duplicate error hierarchies.
+
+---
+
+# Documentation
+
+Update `docs/ARCHITECTURE.md` with the persistence architecture.
+
+Document:
+
+```text
+Service
+   ↓
+Repository interface
+   ↓
+SQLite repository
+   ↓
+Database layer
+   ↓
+SQLite
+```
+
+Document:
+
+* migration mechanism;
+* migration tracking;
+* transaction boundary;
+* foreign-key enforcement;
+* important indexes;
+* current schema entities.
+
+Do not document Pass 3+ functionality as implemented.
 
 ---
 
 # README
 
-Do not rewrite the project roadmap.
+Update only what is necessary.
 
-The README already contains the authoritative:
+Keep the authoritative 26-pass roadmap.
+
+Mark:
 
 ```text
-PASS 0 → PASS 25
+PASS 2 — SQLite and Persistence Foundation
 ```
 
-roadmap.
+as completed only after all validation succeeds.
 
-Preserve it.
-
-Only make minimal documentation updates needed to reflect that Pass 1 is complete, if appropriate.
-
-Do not invent another roadmap.
+Do not rewrite or replace the roadmap.
 
 ---
 
-# Validation commands
+# What NOT to implement
 
-After implementation, run:
+This restriction is extremely important.
+
+Do **not** implement:
+
+* project management UI;
+* project listing screens;
+* project selection;
+* schedule importer;
+* CSV parsing;
+* XLSX parsing;
+* schedule normalization;
+* schedule validation;
+* progress entry UI;
+* AI extraction;
+* activity matching;
+* progress calculation;
+* variance;
+* risk;
+* evidence ingestion workflows;
+* document processing;
+* assistant;
+* dashboard;
+* voice;
+* authentication;
+* authorization;
+* background jobs.
+
+Those belong to later passes.
+
+---
+
+# Architectural self-review
+
+Before declaring PASS 2 complete, explicitly review:
+
+### Layering
+
+Verify:
+
+```text
+service
+   ↓
+repository interface
+   ↓
+SQLite repository
+   ↓
+database
+```
+
+and NOT:
+
+```text
+service → SQLite
+route → SQLite
+AI → SQLite
+```
+
+### Migration integrity
+
+Verify:
+
+* schema is migration-driven;
+* setup is repeatable;
+* migration state is tracked;
+* reset uses the same schema path.
+
+### Data integrity
+
+Verify:
+
+* foreign keys work;
+* constraints work;
+* indexes exist where justified;
+* transactions rollback correctly.
+
+### Test isolation
+
+Verify tests do not damage the real local demo database.
+
+### Regression
+
+Verify all Pass 0 and Pass 1 behavior still works.
+
+---
+
+# Required validation
+
+Run all of these:
 
 ```bash
 npm test
@@ -750,7 +857,16 @@ npm run setup
 npm run demo:reset
 ```
 
-Then run the development environment:
+Then:
+
+```bash
+npm run setup
+npm run setup
+```
+
+and verify the second setup is safe and produces no schema corruption.
+
+Run the development environment:
 
 ```bash
 npm run dev
@@ -768,66 +884,26 @@ and:
 GET http://localhost:3001/api/health
 ```
 
-The health endpoint must return a successful healthy response when SQLite is available.
+The health endpoint must remain healthy after migrations are applied.
 
 ---
 
-# Self-review
+# Clean-checkout validation
 
-Before considering Pass 1 complete, perform an explicit architectural review.
+Where practical:
 
-## Dependency direction
+1. remove generated dependencies/runtime artifacts;
+2. reinstall dependencies;
+3. create a fresh local database;
+4. run `npm run setup`;
+5. run `npm test`;
+6. run `npm run build`;
+7. run the app;
+8. verify `/api/health`.
 
-Verify:
+The standard is:
 
-```text
-routes
-  ↓
-services
-  ↓
-repositories
-  ↓
-database
-```
-
-and not:
-
-```text
-routes → SQL
-services → SQL
-AI → SQL
-AI → repositories
-```
-
-## AI isolation
-
-Verify:
-
-* AI service does not know SQLite;
-* AI adapter does not know SQLite;
-* AI provider response is validated;
-* service consumes structured data;
-* provider-specific details do not leak into application logic.
-
-## HTTP isolation
-
-Verify services do not depend on Express `Request` / `Response`.
-
-## Database isolation
-
-Verify SQL exists only where database/repository responsibility belongs.
-
-## Error boundary
-
-Verify errors are handled consistently.
-
-## Configuration
-
-Verify application configuration comes through the validated configuration boundary.
-
-## Regression
-
-Verify Pass 0 behavior still works.
+> A clean checkout can initialize the current database schema deterministically.
 
 ---
 
@@ -835,19 +911,26 @@ Verify Pass 0 behavior still works.
 
 Before committing:
 
-1. Inspect `git status`.
-2. Inspect the complete diff.
-3. Confirm that changes are limited to Pass 1.
-4. Do not commit runtime `.env` files, SQLite databases, generated `dist`, uploads, or secrets.
-5. Do not overwrite unrelated work.
+1. inspect `git status`;
+2. inspect the complete diff;
+3. verify only PASS 2 work is included;
+4. do not commit:
 
-Create a focused commit such as:
+   * `.env`;
+   * SQLite runtime files;
+   * WAL/journal files;
+   * `dist`;
+   * uploads;
+   * secrets;
+5. preserve unrelated work already present in the repository.
+
+Use a focused commit message such as:
 
 ```text
-feat: establish FieldLine application architecture
+feat: establish FieldLine SQLite persistence foundation
 ```
 
-Push it to:
+Push to:
 
 ```text
 itshim998/FieldLine
@@ -859,76 +942,95 @@ on the appropriate branch.
 
 # Completion criteria
 
-Pass 1 is complete only when:
+PASS 2 is complete only when:
 
-1. Application configuration has a clear boundary.
-2. HTTP routes are thin and do not own business/data-access logic.
-3. Request validation has a clear Zod boundary.
-4. Services are separated from HTTP.
-5. Repository abstractions separate persistence from services.
-6. SQLite remains behind the persistence boundary.
-7. AI service/provider boundaries exist.
-8. AI structured responses are explicitly validated.
-9. AI code cannot directly manipulate the database.
-10. Error handling is centralized and consistent.
-11. Logging is centralized appropriately.
-12. The architecture is covered by meaningful tests.
-13. `/api/health` still works.
-14. The frontend still starts.
-15. `npm test` passes.
-16. `npm run build` passes.
-17. `npm run setup` passes.
-18. `npm run demo:reset` passes.
-19. No Pass 2+ domain functionality has been implemented.
-20. The final diff is reviewed and clean.
-21. Commit is created and pushed.
+* [ ] SQLite schema exists for all eight foundational entities.
+* [ ] migrations are deterministic and tracked.
+* [ ] migrations are idempotent.
+* [ ] setup safely applies pending migrations.
+* [ ] demo reset recreates the schema through the migration path.
+* [ ] foreign keys are enabled and tested.
+* [ ] basic constraints are implemented and tested.
+* [ ] justified indexes exist.
+* [ ] repository abstractions exist.
+* [ ] project creation works through the repository/service architecture.
+* [ ] project retrieval works through the repository/service architecture.
+* [ ] transactions are supported and tested.
+* [ ] rollback is verified.
+* [ ] no service contains SQL.
+* [ ] no route contains SQL.
+* [ ] no AI code contains SQL.
+* [ ] Pass 0/1 tests remain green.
+* [ ] `npm test` passes.
+* [ ] `npm run build` passes.
+* [ ] `npm run setup` passes.
+* [ ] repeated setup is safe.
+* [ ] `npm run demo:reset` passes.
+* [ ] `/api/health` remains healthy.
+* [ ] frontend still starts.
+* [ ] no Pass 3+ functionality is implemented.
+* [ ] final diff is reviewed.
+* [ ] commit is created.
+* [ ] commit is pushed.
 
 ---
 
 # Final report
 
-After completing the work, report:
+After implementation, report:
 
-### 1. Architectural changes
+### 1. Database architecture
 
-Explain the actual route → validation → service → repository → SQLite structure created.
+Explain:
 
-### 2. AI boundary
+* migration mechanism;
+* schema organization;
+* migration tracking;
+* database lifecycle.
 
-Explain the AI service → adapter → structured response → validation structure.
+### 2. Core schema
 
-### 3. Files changed
+List the eight tables and their major relationships.
 
-List the important files and why they changed.
+### 3. Repository architecture
 
-### 4. Tests
+Explain the repository interfaces and SQLite implementations added.
+
+### 4. Transactions
+
+Explain how transactions are exposed and how rollback was tested.
+
+### 5. Tests
 
 Report:
 
-* tests added;
-* tests modified;
+* test suites;
 * total passing tests;
-* any important architectural behavior verified.
+* migration tests;
+* foreign-key tests;
+* repository tests;
+* transaction tests.
 
-### 5. Validation
+### 6. Validation
 
-Report results of:
+Report the results of:
 
-```text
+
 npm test
 npm run build
+npm run setup
 npm run setup
 npm run demo:reset
 npm run dev
 GET /api/health
 frontend startup
-```
 
-### 6. Self-review
 
-Mention any architectural issues discovered and corrected.
+### 7. Self-review
 
-### 7. Git
+Mention any persistence/design issues discovered and corrected.
+
+### 8. Git
 
 Report:
 
@@ -937,24 +1039,28 @@ Report:
 * branch;
 * push result.
 
-### 8. Boundary confirmation
+### 9. Boundary confirmation
 
-Explicitly confirm:
+Explicitly state:
 
-> **PASS 2 and later feature functionality were not implemented.**
+> **PASS 3 and all later feature functionality were not implemented.**
 
 ---
 
 # Final instruction
 
-Implement **PASS 1 — Application Architecture only**.
+Implement **PASS 2 — SQLite and Persistence Foundation only**.
 
-The goal is not to add features.
+This pass should establish a **real, deterministic, testable database foundation** for FieldLine.
 
-The goal is to make the repository structurally ready for the feature passes that follow.
+Do not rush into project-management features.
 
-Prefer **simple, explicit, testable boundaries** over abstraction for abstraction's sake.
+Do not build the schedule model beyond what is necessary for the foundational schema.
 
-Do not rush into domain implementation.
+Do not implement business workflows.
 
-Stop after Pass 1.
+The goal is:
+
+> **A clean SQLite persistence layer on which the remaining FieldLine passes can safely build.**
+
+Stop after PASS 2.

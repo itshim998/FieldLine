@@ -109,10 +109,10 @@ Example response:
     "path": "./database/fieldline.db"
   },
   "metadata": {
-    "schema_version": "0.1.0",
+    "schema_version": "0.2.0",
     "app_name": "FieldLine",
     "sih_ps_id": "SIH26122",
-    "pass": "Pass 1: Application Architecture"
+    "pass": "Pass 2: SQLite and Persistence Foundation"
   }
 }
 ```
@@ -123,7 +123,7 @@ Example response:
 
 - [x] **PASS 0 — Repository Bootstrap** *(Completed)*
 - [x] **PASS 1 — Application Architecture** *(Completed)*
-- [ ] **PASS 2 — SQLite and Persistence Foundation**
+- [x] **PASS 2 — SQLite and Persistence Foundation** *(Completed)*
 - [ ] **PASS 3 — Project Management**
 - [ ] **PASS 4 — Schedule Importer**
 - [ ] **PASS 5 — Schedule Normalization**

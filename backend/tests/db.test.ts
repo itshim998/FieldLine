@@ -10,15 +10,19 @@ describe('SQLite Database Layer', () => {
     closeDatabase();
   });
 
-  it('should initialize an in-memory SQLite database with base schema', () => {
+  it('should initialize an in-memory SQLite database with base schema and migrations', () => {
     const db = initDatabase({ dbPath: ':memory:' });
     expect(db).toBeDefined();
     expect(isDatabaseHealthy()).toBe(true);
 
-    // Verify system_metadata table exists
+    // Verify foreign keys are enabled
+    const fk = db.pragma('foreign_keys', { simple: true });
+    expect(fk).toBe(1);
+
+    // Verify system_metadata table exists and has version
     const row = db.prepare("SELECT value FROM system_metadata WHERE key = 'schema_version'").get() as { value: string };
     expect(row).toBeDefined();
-    expect(row.value).toBe('0.1.0');
+    expect(row.value).toBe('0.2.0');
   });
 
   it('should support read and write operations deterministically', () => {
