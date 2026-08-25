@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build Output
+dist/
+build/
+*.tsbuildinfo
+
+# Local Environment & Secrets
+.env
+.env.local
+.env.*.local
+
+# SQLite Database & Lock files (Local runtime data)
+database/*.db
+database/*.db-journal
+database/*.db-wal
+database/*.db-shm
+!database/.gitkeep
+
+# Uploads & Temporary Storage
+uploads/*
+!uploads/.gitkeep
+!uploads/evidence/
+uploads/evidence/*
+!uploads/evidence/.gitkeep
+
+# Testing & Coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor & OS Artifacts
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db

@@ -1,0 +1,713 @@
+# FieldLine — Pass 0: Repository Bootstrap
+
+## Context
+
+You are implementing **Pass 0** of the FieldLine project.
+
+FieldLine is our **Smart India Hackathon 2026** project for:
+
+* **PS ID:** SIH26122
+* **Title:** Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management: Real-Time Actual Progress Tracking (Planning-to-Execution Bridge)
+* **Product:** FieldLine
+
+The project has a strict **7-day implementation window** and is intentionally a **local-only SIH presentation application**.
+
+The architectural direction is:
+
+> **Production-quality application logic, presentation-grade local infrastructure.**
+
+We want strong internal engineering boundaries and testability, but we do **not** want unnecessary production infrastructure.
+
+### Local project directory
+
+The repository is already created on GitHub as:
+
+`itshim998/FieldLine`
+
+The local working directory is:
+
+`C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine`
+
+You are working locally in **Gemini 3.7 Flash / Antigravity**.
+
+---
+
+# Your Role in This Pass
+
+You are the **local implementation agent**.
+
+Your responsibility is to:
+
+1. Inspect the current local repository before making assumptions.
+2. Implement only Pass 0.
+3. Keep the architecture ready for later passes.
+4. Run the required checks locally.
+5. Inspect your own diff carefully.
+6. Fix problems you discover.
+7. Run the checks again after fixes.
+8. Commit the completed pass.
+9. Push the commit to the GitHub repository.
+10. Report exactly what was implemented and verified.
+
+Do **not** begin implementing Pass 1 or later feature functionality.
+
+---
+
+# Authoritative architectural constraints
+
+These constraints apply to the entire FieldLine project and must guide Pass 0.
+
+## Deployment
+
+FieldLine will **not be deployed**.
+
+Everything runs locally:
+
+```text
+Local Browser
+    ↓
+Local Frontend
+    ↓
+Local Node/Express Backend
+    ↓
+Local Domain Services
+    ↓
+Local SQLite
+    ↓
+Local Filesystem
+```
+
+External AI APIs may be introduced in later passes where required for AI functionality.
+
+Do **not** introduce:
+
+* Supabase
+* PostgreSQL
+* Docker
+* Azure
+* Cloud deployment
+* Cloud storage
+* Kubernetes
+* separate worker infrastructure
+* microservices
+* production deployment tooling
+
+---
+
+# Architectural direction
+
+FieldLine will be a **single local modular monolith**.
+
+The intended high-level shape is:
+
+```text
+FieldLine/
+├── backend/
+├── frontend/
+├── database/
+├── uploads/
+├── demo/
+├── scripts/
+├── docs/
+├── package.json
+├── tsconfig.json
+├── .env.example
+├── .gitignore
+└── README.md
+```
+
+The exact structure may be adjusted based on what you discover during implementation, but preserve the intended architectural boundaries.
+
+The later backend architecture will follow this general direction:
+
+```text
+HTTP route
+    ↓
+validation
+    ↓
+service
+    ↓
+repository
+    ↓
+SQLite
+```
+
+and later the AI layer will follow:
+
+```text
+AI service
+    ↓
+AI adapter
+    ↓
+structured response
+    ↓
+validation
+    ↓
+service
+```
+
+AI code must not directly manipulate the database.
+
+Pass 0 does **not** need to implement these feature layers fully. It only needs to create a clean foundation that can support them.
+
+---
+
+# Pass 0 Objective
+
+Create the basic FieldLine repository and make it executable locally.
+
+The repository is currently expected to be empty or nearly empty, so **inspect it first**.
+
+Do not assume that any files already exist.
+
+---
+
+# Pass 0 Scope
+
+Set up the following:
+
+* Node.js
+* TypeScript
+* package configuration
+* Express
+* frontend shell
+* SQLite
+* Zod
+* testing framework
+* `.env.example`
+* `.gitignore`
+* `README.md`
+* basic development/build/setup scripts
+
+Create these commands:
+
+```bash
+npm run dev
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+```
+
+The result must be a clean repository that can be initialized and run locally.
+
+---
+
+# Important implementation philosophy
+
+## 1. Keep this pass deliberately small
+
+Do not try to make FieldLine impressive yet.
+
+Pass 0 is infrastructure/bootstrap only.
+
+Do not implement:
+
+* project management
+* schedule importing
+* schedule normalization
+* AI extraction
+* activity matching
+* progress calculations
+* variance logic
+* risk engine
+* evidence processing
+* document ingestion
+* assistant
+* dashboard
+* voice
+* production authentication
+* complex authorization
+
+Those belong to later passes.
+
+---
+
+## 2. Prefer proven, boring technology
+
+Use a straightforward Node.js + TypeScript + Express foundation.
+
+SQLite should be local.
+
+Use Zod for runtime validation infrastructure where appropriate.
+
+Use a mainstream local testing framework that works cleanly with TypeScript.
+
+Do not introduce dependencies merely because they are fashionable or because they exist in another repository.
+
+Every dependency should have a clear reason.
+
+---
+
+## 3. Preserve future architectural boundaries
+
+Even though most functionality is not being implemented yet, structure the repository so future passes can naturally add:
+
+```text
+backend/
+  routes/
+  middleware/
+  validation/
+  services/
+  repositories/
+  ai/
+  jobs/
+  tests/
+```
+
+Do not create dozens of empty abstractions without a reason.
+
+The goal is **clear boundaries, not ceremony**.
+
+---
+
+# Required technical foundation
+
+## Node.js / TypeScript
+
+Set up a clean TypeScript Node.js project.
+
+Ensure:
+
+* TypeScript compilation works.
+* development execution works.
+* production-style build output can be generated locally.
+* imports/exports are configured consistently.
+* strict TypeScript checking is enabled unless there is a concrete reason not to.
+
+Avoid unnecessary compiler complexity.
+
+---
+
+# Express backend
+
+Create the minimal Express application necessary to prove the backend works.
+
+At minimum, expose a simple health endpoint such as:
+
+```text
+GET /api/health
+```
+
+It should return a small structured response confirming that the FieldLine backend is running.
+
+Keep this endpoint intentionally simple.
+
+The health endpoint exists primarily to establish that the architecture can be started and tested.
+
+Do not build business routes yet.
+
+---
+
+# SQLite
+
+Set up SQLite for local persistence.
+
+Use a single local database approach compatible with the project's local-only architecture.
+
+The database should ultimately live under the repository's database area, for example:
+
+```text
+database/
+  fieldline.db
+```
+
+However:
+
+* do not commit generated runtime database state unless there is a compelling reason;
+* make initialization deterministic;
+* ensure the repository can be freshly cloned and initialized;
+* make sure later migration work can be introduced cleanly in Pass 2.
+
+Pass 0 does not need to implement the complete FieldLine domain schema.
+
+Do not prematurely implement:
+
+* projects
+* schedules
+* activities
+* progress_updates
+* evidence
+* activity_matches
+* activity_progress
+* project_events
+
+Those belong to Pass 2.
+
+The objective here is to establish that SQLite can be initialized and accessed locally.
+
+---
+
+# Frontend shell
+
+Create the smallest useful frontend shell needed to prove the local application works.
+
+It should:
+
+* start locally;
+* be able to communicate with the backend;
+* display a basic FieldLine application shell;
+* make it obvious that the application is running.
+
+Do not build the dashboard yet.
+
+Do not create final visual design.
+
+Do not spend significant time on styling.
+
+The UI should simply establish the foundation for later passes.
+
+---
+
+# Zod
+
+Install and configure Zod so runtime validation can be used by future application routes and services.
+
+Use it meaningfully where appropriate, rather than adding placeholder schemas merely to claim that Zod has been installed.
+
+---
+
+# Testing
+
+Set up a reliable local TypeScript-compatible test framework.
+
+At minimum, create tests proving that the Pass 0 foundation works.
+
+Tests should cover the things that can actually fail at this stage, such as:
+
+* basic application initialization;
+* health endpoint behavior;
+* essential configuration validation;
+* SQLite initialization/access if practical.
+
+Do **not** create superficial tests whose only purpose is increasing test count.
+
+---
+
+# Environment configuration
+
+Create:
+
+```text
+.env.example
+```
+
+Document only configuration that is actually relevant to Pass 0.
+
+Use safe local defaults where appropriate.
+
+Do not add fake cloud credentials or unrelated production settings.
+
+Do not commit real secrets.
+
+---
+
+# Git configuration
+
+Create an appropriate `.gitignore`.
+
+It should prevent local/generated material from polluting the repository.
+
+At minimum think about:
+
+* `node_modules`
+* build output
+* local environment files
+* runtime database files if they are generated
+* uploads/runtime files
+* logs
+* operating-system/editor artifacts
+
+Do not blindly copy a `.gitignore` from another project. Tailor it to FieldLine.
+
+---
+
+# README
+
+Create a useful initial `README.md`.
+
+It should explain:
+
+1. What FieldLine is.
+2. That it is an SIH 2026 project.
+3. The local-only architecture.
+4. Prerequisites.
+5. Installation/setup.
+6. How to run development mode.
+7. How to run tests.
+8. How to build.
+9. How to reset the demo environment.
+10. Current implementation status.
+
+Do not document features that do not exist yet as if they already work.
+
+Clearly distinguish the current bootstrap foundation from planned functionality.
+
+---
+
+# Required scripts
+
+Ensure these commands exist and work:
+
+```bash
+npm run dev
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+```
+
+Their responsibilities should be clear.
+
+### `npm run dev`
+
+Starts the local development environment.
+
+### `npm test`
+
+Runs the local automated test suite.
+
+### `npm run build`
+
+Performs a clean TypeScript/build validation.
+
+### `npm run setup`
+
+Initializes the local environment required to run FieldLine from a clean checkout.
+
+### `npm run demo:reset`
+
+For Pass 0, this only needs to establish the reset mechanism and safely reset whatever local runtime state Pass 0 creates.
+
+Do **not** invent the full future demo-reset implementation yet.
+
+The complete deterministic demo reset will be expanded in the later Golden Demo Environment pass.
+
+---
+
+# Local execution requirement
+
+Test everything from:
+
+```text
+C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
+```
+
+Pretend this is a fresh checkout as much as practical.
+
+The strongest validation is not:
+
+> "It works on my current machine."
+
+The stronger standard is:
+
+> "A clean checkout can be initialized and run locally using the documented commands."
+
+---
+
+# What to inspect before coding
+
+Before changing anything:
+
+1. Inspect the current directory.
+2. Inspect whether Git is already initialized.
+3. Inspect the current branch.
+4. Inspect whether any files already exist.
+5. Inspect the remote configuration if available.
+6. Do not overwrite existing work blindly.
+
+If the repository is genuinely empty, bootstrap it from scratch.
+
+If something exists, preserve anything meaningful and adapt rather than deleting it without reason.
+
+---
+
+# GitHub requirement
+
+The GitHub repository is:
+
+```text
+itshim998/FieldLine
+```
+
+After completing Pass 0 and verifying it locally:
+
+1. inspect the final diff;
+2. create a clean commit;
+3. use a descriptive commit message such as:
+
+```text
+feat: bootstrap FieldLine local application
+```
+
+4. push the completed Pass 0 implementation to the repository's appropriate branch.
+
+Do not create unrelated commits.
+
+Do not commit secrets.
+
+---
+
+# Self-review requirement
+
+Before considering Pass 0 complete, perform a deliberate self-review.
+
+Check:
+
+## Architecture
+
+* Is the project still a simple modular monolith?
+* Did any unnecessary infrastructure sneak in?
+* Are backend/frontend/database concerns reasonably separated?
+* Is the structure ready for future passes?
+
+## Dependencies
+
+* Does every major dependency have a reason?
+* Did we avoid unnecessary packages?
+* Are there obvious duplicate or redundant packages?
+
+## TypeScript
+
+* Does strict compilation work?
+* Are there avoidable `any` types?
+* Are configuration boundaries clear?
+
+## Runtime
+
+* Does the backend start?
+* Does the frontend start?
+* Does the health endpoint respond?
+* Can SQLite initialize successfully?
+
+## Scripts
+
+Run all five:
+
+```bash
+npm run dev
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+```
+
+For `npm run dev`, use the appropriate local method to start it and actually verify the application/health endpoint rather than merely checking that the command exists.
+
+## Clean-checkout validation
+
+Where practical:
+
+1. remove generated dependencies/runtime artifacts;
+2. reinstall;
+3. run setup;
+4. run tests;
+5. run build;
+6. verify startup.
+
+Do not skip this merely because the first local run succeeded.
+
+---
+
+# Regression checklist
+
+Before committing, verify:
+
+* [ ] Repository remains local-only.
+* [ ] No Docker introduced.
+* [ ] No cloud database introduced.
+* [ ] No Supabase introduced.
+* [ ] No production deployment tooling introduced.
+* [ ] No unnecessary microservices introduced.
+* [ ] No future FieldLine features prematurely implemented.
+* [ ] `.env.example` exists.
+* [ ] `.gitignore` exists.
+* [ ] `README.md` exists and is truthful.
+* [ ] TypeScript builds.
+* [ ] Tests pass.
+* [ ] SQLite initializes locally.
+* [ ] `npm run setup` works.
+* [ ] `npm run demo:reset` works.
+* [ ] backend health endpoint works.
+* [ ] frontend shell starts.
+* [ ] no secrets are committed.
+* [ ] final diff has only Pass 0 work.
+* [ ] commit is created.
+* [ ] commit is pushed to `itshim998/FieldLine`.
+
+---
+
+# Completion criteria
+
+Pass 0 is complete only when:
+
+> **A clean checkout can be initialized and run locally.**
+
+That means the repository has a working foundation and the documented setup/development/test/build/reset workflow is functional.
+
+Do not proceed to Pass 1 after achieving this.
+
+Stop after Pass 0.
+
+---
+
+# Final report
+
+After implementation, provide a concise report containing:
+
+### 1. Files created/changed
+
+List the important files and their purpose.
+
+### 2. Architecture
+
+Briefly describe the resulting Pass 0 structure.
+
+### 3. Commands verified
+
+Report the result of:
+
+```bash
+npm run dev
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+```
+
+Include any important qualification rather than simply saying "all passed".
+
+### 4. Self-review findings
+
+Mention any issues you discovered and fixed during your self-review.
+
+### 5. Git
+
+Report:
+
+* commit hash
+* commit message
+* branch
+* push result
+
+### 6. Pass boundary
+
+Explicitly state that **Pass 1 was not implemented**.
+
+---
+
+## Final instruction
+
+Implement **only Pass 0**.
+
+Do not optimize prematurely.
+
+Do not invent requirements.
+
+Do not copy entire architectures from SentIQ Chat or StudentOS.
+
+Use them only as architectural references where a proven pattern is genuinely useful.
+
+The objective is simple:
+
+> **Build a clean, minimal, testable local foundation on which the rest of FieldLine can safely be built.**

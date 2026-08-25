@@ -1,0 +1,45 @@
+{
+  "name": "fieldline",
+  "version": "0.1.0",
+  "description": "Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"tsx watch backend/src/index.ts\" \"vite --config frontend/vite.config.ts frontend\"",
+    "dev:backend": "tsx watch backend/src/index.ts",
+    "dev:frontend": "vite --config frontend/vite.config.ts frontend",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "tsc -p tsconfig.backend.json",
+    "build:frontend": "vite build frontend --config frontend/vite.config.ts",
+    "setup": "tsx scripts/setup.ts",
+    "demo:reset": "tsx scripts/demo-reset.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/supertest": "^6.0.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "lucide-react": "^0.475.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.1",
+    "vitest": "^3.0.6"
+  }
+}
