@@ -1,6 +1,7 @@
 import { Database as DatabaseType } from 'better-sqlite3';
 import * as migration0001 from './migrations/0001_baseline_system_metadata.js';
 import * as migration0002 from './migrations/0002_core_domain_schema.js';
+import * as migration0003 from './migrations/0003_upgrade_metadata_for_pass2.js';
 
 export interface Migration {
   name: string;
@@ -14,7 +15,8 @@ export interface MigrationResult {
 
 export const MIGRATIONS: Migration[] = [
   { name: migration0001.name, up: migration0001.up },
-  { name: migration0002.name, up: migration0002.up }
+  { name: migration0002.name, up: migration0002.up },
+  { name: migration0003.name, up: migration0003.up }
 ];
 
 /**

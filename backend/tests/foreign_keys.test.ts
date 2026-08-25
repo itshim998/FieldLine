@@ -202,7 +202,7 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
     expect(db.prepare('SELECT COUNT(*) as c FROM activities WHERE project_id = ?').get('p1')).toEqual({ c: 0 });
   });
 
-  it('should cascade delete attached evidence when progress_update is deleted while preserving standalone evidence', () => {
+  it('should set progress_update_id to NULL on evidence when progress_update is deleted while preserving the evidence row and standalone evidence', () => {
     db.prepare(`INSERT INTO projects (id, name, code) VALUES ('p1', 'Airport Pier', 'AIR-01')`).run();
     db.prepare(`
       INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text)
@@ -217,12 +217,23 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
       VALUES ('e_standalone', 'p1', NULL, 'site_blueprint.pdf', '/uploads/evidence/site_blueprint.pdf', 'pdf')
     `).run();
 
-    // Delete update
+    // Pre-condition check
+    expect(db.prepare('SELECT progress_update_id FROM evidence WHERE id = ?').get('e1')).toEqual({ progress_update_id: 'u1' });
+
+    // Delete the progress update
     db.prepare('DELETE FROM progress_updates WHERE id = ?').run('u1');
 
-    // Attached evidence deleted via cascade
-    expect(db.prepare('SELECT COUNT(*) as c FROM evidence WHERE id = ?').get('e1')).toEqual({ c: 0 });
-    // Standalone evidence preserved
-    expect(db.prepare('SELECT COUNT(*) as c FROM evidence WHERE id = ?').get('e_standalone')).toEqual({ c: 1 });
+    // 1. The progress_update_id is set to NULL on e1
+    const evidenceRow = db.prepare('SELECT id, project_id, progress_update_id FROM evidence WHERE id = ?').get('e1') as { id: string; project_id: string; progress_update_id: string | null };
+    expect(evidenceRow).toBeDefined();
+    expect(evidenceRow.id).toBe('e1');
+    expect(evidenceRow.project_id).toBe('p1');
+    expect(evidenceRow.progress_update_id).toBeNull();
+
+    // 2. Standalone evidence remains intact
+    const standaloneRow = db.prepare('SELECT id, project_id, progress_update_id FROM evidence WHERE id = ?').get('e_standalone') as { id: string; project_id: string; progress_update_id: string | null };
+    expect(standaloneRow).toBeDefined();
+    expect(standaloneRow.id).toBe('e_standalone');
+    expect(standaloneRow.progress_update_id).toBeNull();
   });
 });

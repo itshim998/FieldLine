@@ -82,7 +82,7 @@ export function up(db: DatabaseType): void {
       metadata_json TEXT,
       uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE,
+      FOREIGN KEY (progress_update_id) REFERENCES progress_updates(id) ON DELETE SET NULL,
       UNIQUE (project_id, id)
     );
 
@@ -104,7 +104,7 @@ export function up(db: DatabaseType): void {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE,
       FOREIGN KEY (project_id, activity_id) REFERENCES activities(project_id, id) ON DELETE CASCADE,
-      FOREIGN KEY (project_id, evidence_id) REFERENCES evidence(project_id, id) ON DELETE CASCADE
+      FOREIGN KEY (evidence_id) REFERENCES evidence(id) ON DELETE SET NULL
     );
 
     -- 7. Activity Progress table
@@ -123,7 +123,7 @@ export function up(db: DatabaseType): void {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (project_id, activity_id) REFERENCES activities(project_id, id) ON DELETE CASCADE,
-      FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE
+      FOREIGN KEY (progress_update_id) REFERENCES progress_updates(id) ON DELETE SET NULL
     );
 
     -- 8. Project Events table
@@ -137,6 +137,61 @@ export function up(db: DatabaseType): void {
       payload_json TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Triggers enforcing cross-project referential integrity on nullable references
+    CREATE TRIGGER IF NOT EXISTS trg_evidence_project_consistency_insert
+    BEFORE INSERT ON evidence
+    FOR EACH ROW
+    WHEN NEW.progress_update_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project evidence reference')
+      WHERE (SELECT project_id FROM progress_updates WHERE id = NEW.progress_update_id) != NEW.project_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_evidence_project_consistency_update
+    BEFORE UPDATE OF project_id, progress_update_id ON evidence
+    FOR EACH ROW
+    WHEN NEW.progress_update_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project evidence reference')
+      WHERE (SELECT project_id FROM progress_updates WHERE id = NEW.progress_update_id) != NEW.project_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_activity_matches_evidence_consistency_insert
+    BEFORE INSERT ON activity_matches
+    FOR EACH ROW
+    WHEN NEW.evidence_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project match evidence reference')
+      WHERE (SELECT project_id FROM evidence WHERE id = NEW.evidence_id) != NEW.project_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_activity_matches_evidence_consistency_update
+    BEFORE UPDATE OF project_id, evidence_id ON activity_matches
+    FOR EACH ROW
+    WHEN NEW.evidence_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project match evidence reference')
+      WHERE (SELECT project_id FROM evidence WHERE id = NEW.evidence_id) != NEW.project_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_activity_progress_update_consistency_insert
+    BEFORE INSERT ON activity_progress
+    FOR EACH ROW
+    WHEN NEW.progress_update_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project progress update reference')
+      WHERE (SELECT project_id FROM progress_updates WHERE id = NEW.progress_update_id) != NEW.project_id;
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_activity_progress_update_consistency_update
+    BEFORE UPDATE OF project_id, progress_update_id ON activity_progress
+    FOR EACH ROW
+    WHEN NEW.progress_update_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed: cross-project progress update reference')
+      WHERE (SELECT project_id FROM progress_updates WHERE id = NEW.progress_update_id) != NEW.project_id;
+    END;
 
     -- Relational and Lookup Indexes
     CREATE INDEX IF NOT EXISTS idx_schedules_project_id ON schedules(project_id);

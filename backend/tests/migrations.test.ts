@@ -23,6 +23,7 @@ describe('Database Migration Engine', () => {
     expect(result.applied).toHaveLength(MIGRATIONS.length);
     expect(result.applied).toContain('0001_baseline_system_metadata');
     expect(result.applied).toContain('0002_core_domain_schema');
+    expect(result.applied).toContain('0003_upgrade_metadata_for_pass2');
     expect(result.alreadyApplied).toHaveLength(0);
 
     const appliedFromDb = getAppliedMigrations(db);
@@ -42,8 +43,8 @@ describe('Database Migration Engine', () => {
     expect(thirdRun.alreadyApplied).toEqual(MIGRATIONS.map((m) => m.name));
   });
 
-  it('should correctly upgrade schema_version from 0.1.0 to 0.2.0 for existing databases while preserving metadata', () => {
-    // 1. Simulate an existing Pass 0/1 database with older metadata
+  it('should correctly upgrade an existing database with recorded 0001 and 0002 migrations by applying 0003', () => {
+    // 1. Simulate an existing Pass 1 database where 0001 and 0002 are already tracked
     db.exec(`
       CREATE TABLE system_metadata (
         key TEXT PRIMARY KEY,
@@ -58,18 +59,31 @@ describe('Database Migration Engine', () => {
         ('sih_ps_id', 'SIH26122'),
         ('pass', 'Pass 1: Application Architecture'),
         ('custom_eval_key', 'custom_eval_value');
+
+      CREATE TABLE schema_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        applied_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO schema_migrations (name) VALUES 
+        ('0001_baseline_system_metadata'),
+        ('0002_core_domain_schema');
     `);
 
-    // Verify pre-migration state
+    // Verify initial state
     const preVersion = db.prepare("SELECT value FROM system_metadata WHERE key = 'schema_version'").get() as { value: string };
     expect(preVersion.value).toBe('0.1.0');
 
-    // 2. Run current PASS 2 migrations
+    // 2. Run the migration engine
     const result = runMigrations(db);
-    expect(result.applied).toContain('0001_baseline_system_metadata');
-    expect(result.applied).toContain('0002_core_domain_schema');
 
-    // 3. Verify upgraded metadata
+    // 3. Verify that only 0003 was newly applied
+    expect(result.applied).toEqual(['0003_upgrade_metadata_for_pass2']);
+    expect(result.alreadyApplied).toContain('0001_baseline_system_metadata');
+    expect(result.alreadyApplied).toContain('0002_core_domain_schema');
+
+    // 4. Verify system_metadata upgraded values
     const rows = db.prepare('SELECT key, value FROM system_metadata').all() as Array<{ key: string; value: string }>;
     const metadata = rows.reduce((acc, r) => {
       acc[r.key] = r.value;
@@ -81,6 +95,11 @@ describe('Database Migration Engine', () => {
     expect(metadata.app_name).toBe('FieldLine');
     expect(metadata.sih_ps_id).toBe('SIH26122');
     expect(metadata.custom_eval_key).toBe('custom_eval_value');
+
+    // 5. Verify running migrations again does not re-apply 0003
+    const secondRun = runMigrations(db);
+    expect(secondRun.applied).toHaveLength(0);
+    expect(secondRun.alreadyApplied).toContain('0003_upgrade_metadata_for_pass2');
   });
 
   it('should create all required core domain and metadata tables', () => {
