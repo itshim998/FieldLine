@@ -31,12 +31,12 @@ describe('SQLite Database Layer', () => {
     expect(row.value).toBe('test_value');
   });
 
-  it('should report unhealthy status when closed', () => {
+  it('should reinitialize the database after close', () => {
     initDatabase({ dbPath: ':memory:' });
     expect(isDatabaseHealthy()).toBe(true);
 
     closeDatabase();
-    // After closing, getDatabase initializes a new one or close sets it to null
-    expect(isDatabaseHealthy()).toBe(true); // getDatabase auto initializes if called
+    // After closing, isDatabaseHealthy invokes getDatabase() which reinitializes a fresh database instance
+    expect(isDatabaseHealthy()).toBe(true);
   });
 });

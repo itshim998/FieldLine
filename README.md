@@ -115,22 +115,34 @@ Example response:
 
 ---
 
-## 📊 Current Implementation Status
+## 📊 Master Implementation Plan
 
-- [x] **Pass 0: Repository Bootstrap (Completed)**
-  - Monorepo package structure with TypeScript strict mode
-  - Express backend with structured logging, CORS, error handling
-  - SQLite persistence layer with WAL mode
-  - React + Vite frontend shell with live status indicators and dark aesthetic
-  - Zod runtime schema validation
-  - Vitest test suite for API routes, database, and configuration
-  - Deterministic `npm run setup` and `npm run demo:reset` scripts
-- [ ] **Pass 1: Golden Demo Dataset & Seed System** *(Upcoming)*
-- [ ] **Pass 2: Core Domain Schema & Project / Schedule Import Engine** *(Upcoming)*
-- [ ] **Pass 3: AI Document Ingestion & Activity Matching Layer** *(Upcoming)*
-- [ ] **Pass 4: Actual Progress Calculation & Variance Engine** *(Upcoming)*
-- [ ] **Pass 5: Risk Assessment & Assistant Interface** *(Upcoming)*
-- [ ] **Pass 6: Executive Dashboard & Demo Polish** *(Upcoming)*
+- [x] **PASS 0 — Repository Bootstrap** *(Completed)*
+- [ ] **PASS 1 — Application Architecture**
+- [ ] **PASS 2 — SQLite and Persistence Foundation**
+- [ ] **PASS 3 — Project Management**
+- [ ] **PASS 4 — Schedule Importer**
+- [ ] **PASS 5 — Schedule Normalization**
+- [ ] **PASS 6 — Schedule Validation**
+- [ ] **PASS 7 — Manual Progress Reporting**
+- [ ] **PASS 8 — AI Extraction Layer**
+- [ ] **PASS 9 — Activity Matching Engine**
+- [ ] **PASS 10 — Progress Normalization**
+- [ ] **PASS 11 — Planned vs Actual Engine**
+- [ ] **PASS 12 — Delay and Risk Engine**
+- [ ] **PASS 13 — Evidence System**
+- [ ] **PASS 14 — Document Ingestion**
+- [ ] **PASS 15 — In-process Processing Jobs**
+- [ ] **PASS 16 — Failure Isolation and Idempotency**
+- [ ] **PASS 17 — Project Intelligence Queries**
+- [ ] **PASS 18 — FieldLine Assistant**
+- [ ] **PASS 19 — Human Review Workflow**
+- [ ] **PASS 20 — Dashboard**
+- [ ] **PASS 21 — Activity Detail View**
+- [ ] **PASS 22 — Voice Input**
+- [ ] **PASS 23 — Test and Evaluation Suite**
+- [ ] **PASS 24 — Golden Demo Environment**
+- [ ] **PASS 25 — Final Integration and Presentation Polish**
 
 ---
 
