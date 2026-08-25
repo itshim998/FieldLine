@@ -1,124 +1,747 @@
-# FieldLine — Pass 0 Corrective Fixes
+# FieldLine — PASS 1: Application Architecture
 
-We have completed the Pass 0 implementation and pushed commit:
+## Context
 
-`d4d756a53fd5c15071f7fdcae0af6c2bd1ea8afc`
+You are implementing **PASS 1 — Application Architecture** of FieldLine according to C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine\FieldLine Complete Implementation plan.md
 
-Before we proceed to any later pass, make the following **targeted corrective fixes only**.
+FieldLine is our **Smart India Hackathon 2026** project:
 
-Do not implement Pass 1 or any feature functionality.
+* **Product:** FieldLine
+* **SIH PS ID:** SIH26122
+* **Problem:** Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management: Real-Time Actual Progress Tracking (Planning-to-Execution Bridge)
+* **Local project directory:**
 
-Do not restructure the project unnecessarily.
+```text
+C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
+```
+
+* **GitHub repository:**
+
+```text
+itshim998/FieldLine
+```
+
+Pass 0 is complete and pushed.
+
+The current repository already contains a working local Node/TypeScript + Express + React/Vite + SQLite + Zod foundation, including a working health endpoint and tests.
+
+**Do not assume Pass 0 is perfect. Inspect the current repository first and build on the actual implementation.**
 
 ---
 
-# Fix 1 — Correct the README implementation roadmap
+# Authoritative objective
 
-The README currently describes an incorrect Pass sequence.
+The objective of this pass is:
 
-Replace that roadmap with the **authoritative FieldLine Master Implementation Plan**.
+> **Create clean module boundaries before feature development.**
 
-The correct sequence is:
+The authoritative architecture requires:
 
 ```text
-PASS 0 — Repository Bootstrap
-
-PASS 1 — Application Architecture
-
-PASS 2 — SQLite and Persistence Foundation
-
-PASS 3 — Project Management
-
-PASS 4 — Schedule Importer
-
-PASS 5 — Schedule Normalization
-
-PASS 6 — Schedule Validation
-
-PASS 7 — Manual Progress Reporting
-
-PASS 8 — AI Extraction Layer
-
-PASS 9 — Activity Matching Engine
-
-PASS 10 — Progress Normalization
-
-PASS 11 — Planned vs Actual Engine
-
-PASS 12 — Delay and Risk Engine
-
-PASS 13 — Evidence System
-
-PASS 14 — Document Ingestion
-
-PASS 15 — In-process Processing Jobs
-
-PASS 16 — Failure Isolation and Idempotency
-
-PASS 17 — Project Intelligence Queries
-
-PASS 18 — FieldLine Assistant
-
-PASS 19 — Human Review Workflow
-
-PASS 20 — Dashboard
-
-PASS 21 — Activity Detail View
-
-PASS 22 — Voice Input
-
-PASS 23 — Test and Evaluation Suite
-
-PASS 24 — Golden Demo Environment
-
-PASS 25 — Final Integration and Presentation Polish
+HTTP route
+    ↓
+validation
+    ↓
+service
+    ↓
+repository
+    ↓
+SQLite
 ```
 
-Do not invent an alternative roadmap.
+For AI:
 
-Do not rename the passes.
+```text
+AI service
+    ↓
+AI adapter
+    ↓
+structured response
+    ↓
+validation
+    ↓
+service
+```
 
-Do not collapse multiple passes into fewer passes.
+The critical architectural rule is:
 
-The master implementation plan C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine\FieldLine Complete Implementation plan.md is authoritative.
+> **AI code must not directly manipulate the database.**
+
+The master implementation plan defines this pass as an architectural foundation only. It does **not** introduce FieldLine domain functionality yet.
 
 ---
 
-# Fix 2 — Correct the misleading database test name
+# Critical project philosophy
 
-There is currently a test with wording equivalent to:
+FieldLine must remain:
 
-```text
-should report unhealthy status when closed
-```
+* a **single local modular monolith**;
+* locally runnable;
+* easy to test;
+* strongly separated internally;
+* deliberately lightweight operationally.
 
-but it actually expects the system to become healthy again because `getDatabase()` automatically initializes a new database instance.
+The infrastructure constraints are:
 
-This test is misleading.
+* no Docker;
+* no Supabase;
+* no PostgreSQL;
+* no cloud database;
+* no cloud storage;
+* no Kubernetes;
+* no external deployment platform;
+* no separate deployed workers;
+* no microservices;
+* no production infrastructure.
 
-### Requirement
+External AI APIs are allowed later where AI functionality actually requires them.
 
-Change the test so that its name accurately reflects the behavior being tested.
-
-A suitable concept would be:
-
-```text
-should reinitialize the database after close
-```
-
-or another name that accurately describes the current intended behavior.
-
-Do not change the database lifecycle semantics merely to make the old test name true.
-
-The purpose is to improve test accuracy and maintainability.
+Do not introduce any external deployment or hosted infrastructure.
 
 ---
 
-# Validation requirements
+# Your role
 
-After applying these fixes:
+You are the local implementation agent in Antigravity.
 
-1. Run:
+Your workflow for this pass must be:
+
+```text
+Inspect current repository
+        ↓
+Understand existing Pass 0 architecture
+        ↓
+Implement Pass 1 only
+        ↓
+Run tests
+        ↓
+Run build
+        ↓
+Exercise the health endpoint
+        ↓
+Perform architectural self-review
+        ↓
+Inspect git diff
+        ↓
+Fix any issues discovered
+        ↓
+Run tests/build again
+        ↓
+Commit
+        ↓
+Push
+```
+
+Do not simply trust "tests passed" as proof that the architecture is correct.
+
+---
+
+# First: inspect the current repository
+
+Before modifying anything, inspect:
+
+* current directory structure;
+* `package.json`;
+* TypeScript configurations;
+* existing Express app;
+* routes;
+* middleware;
+* validation;
+* database layer;
+* tests;
+* setup/reset scripts;
+* README;
+* existing architectural documentation.
+
+In particular, understand how Pass 0 currently implements:
+
+* `createApp()`;
+* `/api/health`;
+* environment configuration;
+* SQLite initialization;
+* Zod validation;
+* request logging;
+* error handling.
+
+Do not recreate existing functionality merely because this pass mentions it.
+
+**Refactor and formalize existing foundations where necessary.**
+
+---
+
+# PASS 1 scope
+
+Implement the architectural skeleton for the application.
+
+The following concerns must exist with clear boundaries:
+
+### Application configuration
+
+Create or formalize a central configuration boundary.
+
+The application should not read `process.env` arbitrarily throughout the codebase.
+
+Prefer:
+
+```text
+process.env
+    ↓
+validated configuration
+    ↓
+application code
+```
+
+Keep Zod validation at the configuration boundary.
+
+Do not introduce a complicated configuration framework.
+
+---
+
+# HTTP route layer
+
+Routes should remain thin.
+
+A route should primarily perform:
+
+```text
+HTTP request
+    ↓
+request validation
+    ↓
+service invocation
+    ↓
+HTTP response
+```
+
+Routes should **not**:
+
+* execute SQL directly;
+* contain domain calculations;
+* contain business rules;
+* call an AI SDK directly;
+* perform large orchestration logic.
+
+The current health route should be refactored where necessary to follow this architectural direction without changing its externally observable behavior unnecessarily.
+
+---
+
+# Request validation
+
+Create a clean validation boundary.
+
+Use Zod for request/input validation.
+
+The architecture should make it easy for future routes to define:
+
+```text
+Request
+    ↓
+Zod schema
+    ↓
+validated input
+    ↓
+service
+```
+
+Avoid duplicating validation logic inside services.
+
+Do not create domain schemas for projects, schedules, activities, progress, etc. yet.
+
+Those belong to later passes.
+
+---
+
+# Service layer
+
+Create a clear application/service layer.
+
+Services should own orchestration and business operations.
+
+For this pass, use a small representative service where useful to prove the boundary.
+
+The health endpoint may be used as the architectural example, but do not invent fake business behavior merely to populate the service directory.
+
+A service should **not** directly depend on Express request/response objects.
+
+Prefer:
+
+```text
+route
+  → service input
+  → service result
+  → route response
+```
+
+rather than passing HTTP objects into the service.
+
+---
+
+# Repository abstraction
+
+Create a repository/data-access boundary.
+
+The repository layer owns direct SQLite access.
+
+The architectural dependency should be:
+
+```text
+route
+   ↓
+service
+   ↓
+repository
+   ↓
+SQLite
+```
+
+Services must not embed SQL.
+
+Routes must not embed SQL.
+
+AI code must not embed SQL.
+
+The repository abstraction should be designed so later passes can add repositories such as:
+
+```text
+projectRepository
+scheduleRepository
+activityRepository
+progressRepository
+evidenceRepository
+...
+```
+
+Do **not** implement those future domain repositories now.
+
+Create only what is necessary to prove the architectural pattern.
+
+A small system/health-oriented repository is sufficient for this pass if it allows the architecture to be genuinely exercised.
+
+---
+
+# Database boundary
+
+Keep the existing SQLite connection management where it is working.
+
+Do not replace the local SQLite strategy.
+
+The database layer should remain responsible for:
+
+* opening the database;
+* connection lifecycle;
+* SQLite pragmas;
+* low-level database access;
+* schema initialization that already belongs to Pass 0.
+
+Repositories should use the database layer rather than reaching into SQLite configuration themselves.
+
+Do not implement the full domain schema in this pass.
+
+That belongs to PASS 2.
+
+---
+
+# AI architecture skeleton
+
+This pass must establish the **shape** of the future AI architecture without implementing FieldLine's actual AI features.
+
+Create the boundary:
+
+```text
+AI service
+    ↓
+AI adapter
+    ↓
+structured response
+    ↓
+validation
+    ↓
+service
+```
+
+The purpose is architectural decoupling.
+
+For example, create conceptual interfaces/types along the lines of:
+
+```text
+AIProvider
+AIRequest
+AIResponse
+Structured AI contract
+```
+
+but adapt the names and structure to the actual repository conventions.
+
+The important properties are:
+
+### AI service
+
+Owns application-level orchestration around an AI capability.
+
+It should not know provider-specific SDK details.
+
+### AI adapter
+
+Owns communication with a specific provider.
+
+It should be replaceable later.
+
+For example, later we may have:
+
+```text
+OpenAI adapter
+Gemini adapter
+Mock adapter
+```
+
+but **do not implement multiple real providers now**.
+
+A mock/in-memory adapter may be used if necessary to demonstrate the architectural boundary and test it.
+
+### Structured response
+
+AI responses must have an explicit application contract.
+
+Use Zod to validate the response before the service accepts it.
+
+The architecture should therefore make this sequence possible:
+
+```text
+provider returns unknown data
+        ↓
+adapter translates provider response
+        ↓
+structured application response
+        ↓
+Zod validation
+        ↓
+service receives trusted structure
+```
+
+Do not let arbitrary provider response objects flow directly into application logic.
+
+---
+
+# Important AI restriction
+
+Do **not** let the AI layer:
+
+* query SQLite;
+* import repository modules;
+* modify project state;
+* write directly to the database;
+* calculate project truth;
+* contain FieldLine business rules.
+
+The architectural separation must remain:
+
+```text
+AI
+→ interpretation / structured extraction
+
+Application services
+→ validation / orchestration / business rules
+
+Repositories
+→ persistence
+
+SQLite
+→ storage
+```
+
+This distinction is one of FieldLine's core non-negotiable principles.
+
+---
+
+# Error handling
+
+Formalize a clean application error boundary.
+
+The current centralized error middleware may already exist.
+
+Inspect it first.
+
+Improve/refactor only where necessary so that:
+
+* application errors are distinguishable from unexpected errors;
+* validation errors have a stable response shape;
+* routes/services do not repeat response formatting logic unnecessarily;
+* database errors do not leak internal implementation details;
+* unexpected errors are logged appropriately.
+
+Do not create an elaborate enterprise error framework.
+
+Keep it small.
+
+---
+
+# Logging
+
+Formalize logging as a cross-cutting concern.
+
+The existing request logger can remain if it is appropriate.
+
+The architecture should make it possible for future services to log meaningful events without coupling business logic to HTTP.
+
+Avoid introducing a heavy logging platform.
+
+Local structured logging is sufficient.
+
+Do not add cloud observability infrastructure.
+
+---
+
+# Suggested architectural shape
+
+Use the existing repository conventions where possible.
+
+The resulting structure should move toward something conceptually similar to:
+
+```text
+backend/
+  src/
+    config/
+    routes/
+    validation/
+    middleware/
+    services/
+    repositories/
+    database/
+    ai/
+      providers/
+      contracts/
+      ...
+    ...
+  tests/
+```
+
+Do not create empty folders only for appearance.
+
+Each boundary introduced should have a real purpose in this pass.
+
+---
+
+# What NOT to implement
+
+This is critical.
+
+Do not implement:
+
+* projects;
+* project CRUD;
+* schedules;
+* schedule importing;
+* CSV parsing;
+* XLSX parsing;
+* schedule normalization;
+* activity matching;
+* AI field-report extraction;
+* progress calculations;
+* variance;
+* delay/risk logic;
+* evidence processing;
+* document ingestion;
+* background jobs;
+* assistant;
+* dashboard;
+* voice;
+* authentication;
+* authorization;
+* complex dependency injection frameworks;
+* microservices;
+* cloud infrastructure.
+
+Those belong to later passes.
+
+---
+
+# Preserve the current working application
+
+Pass 0 already has:
+
+* working local frontend;
+* working Express backend;
+* working `/api/health`;
+* SQLite initialization;
+* Zod;
+* setup/reset commands;
+* automated tests.
+
+Do not regress those capabilities.
+
+After refactoring, the health endpoint must still work.
+
+The frontend must still start.
+
+The existing development workflow must remain usable.
+
+---
+
+# Testing requirements
+
+Expand the tests enough to prove that the architecture is real.
+
+At minimum, tests should demonstrate:
+
+### Route → service
+
+The route delegates to a service rather than containing business/data-access logic.
+
+### Service → repository
+
+The service uses a repository abstraction.
+
+### Repository → SQLite
+
+The repository can successfully interact with the local database.
+
+### AI service → adapter
+
+The AI service can invoke an abstract provider/adapter.
+
+### AI response → validation
+
+An invalid structured AI response is rejected through Zod.
+
+### Health endpoint
+
+The existing `/api/health` endpoint still works end-to-end.
+
+Do not create tests that merely assert that files or folders exist.
+
+Test actual behavior.
+
+---
+
+# Architectural testability
+
+Prefer dependency boundaries that are testable.
+
+Where practical, design service/repository/provider dependencies so they can be substituted in tests without introducing a heavyweight dependency-injection framework.
+
+Simple constructor/function injection is enough.
+
+Example concept:
+
+```text
+service(repository)
+```
+
+or:
+
+```text
+service({ repository, aiProvider })
+```
+
+Do not over-engineer this.
+
+---
+
+# TypeScript requirements
+
+Maintain strict TypeScript.
+
+Avoid unnecessary `any`.
+
+Especially avoid `any` at architectural boundaries.
+
+Prefer explicit types for:
+
+* service inputs/outputs;
+* repository interfaces;
+* AI provider interfaces;
+* AI structured responses;
+* configuration;
+* application errors.
+
+The purpose of this pass is partly to establish type-safe boundaries that future Gemini passes can build upon.
+
+---
+
+# Dependency discipline
+
+Before adding any dependency, ask:
+
+> Does Pass 1 genuinely require this?
+
+Do not add:
+
+* dependency injection frameworks;
+* ORM packages;
+* logging platforms;
+* cloud SDKs;
+* AI SDKs for providers that are not actually being used;
+* architecture frameworks.
+
+The current stack is sufficient unless the repository inspection reveals a concrete reason otherwise.
+
+---
+
+# Documentation
+
+Update `docs/ARCHITECTURE.md` so it accurately describes the Pass 1 architecture.
+
+It should clearly document:
+
+```text
+HTTP route
+    ↓
+validation
+    ↓
+service
+    ↓
+repository
+    ↓
+SQLite
+```
+
+and:
+
+```text
+AI service
+    ↓
+AI adapter
+    ↓
+structured response
+    ↓
+validation
+    ↓
+service
+```
+
+Also explicitly document:
+
+> AI code must not directly manipulate the database.
+
+Keep documentation truthful to the implementation.
+
+Do not claim future components are already implemented.
+
+---
+
+# README
+
+Do not rewrite the project roadmap.
+
+The README already contains the authoritative:
+
+```text
+PASS 0 → PASS 25
+```
+
+roadmap.
+
+Preserve it.
+
+Only make minimal documentation updates needed to reflect that Pass 1 is complete, if appropriate.
+
+Do not invent another roadmap.
+
+---
+
+# Validation commands
+
+After implementation, run:
 
 ```bash
 npm test
@@ -127,7 +750,13 @@ npm run setup
 npm run demo:reset
 ```
 
-2. Run the development environment and verify:
+Then run the development environment:
+
+```bash
+npm run dev
+```
+
+Verify:
 
 ```text
 http://localhost:3000
@@ -136,48 +765,196 @@ http://localhost:3000
 and:
 
 ```text
-GET /api/health
+GET http://localhost:3001/api/health
 ```
 
-3. Verify that no external deployment or hosted infrastructure dependency has been added.
+The health endpoint must return a successful healthy response when SQLite is available.
 
-4. Inspect the final Git diff carefully.
+---
 
-5. Confirm that only these corrective changes were introduced.
+# Self-review
 
-6. Do not modify the domain model.
+Before considering Pass 1 complete, perform an explicit architectural review.
 
-7. Do not implement Pass 1.
+## Dependency direction
 
-8. Do not add cloud services, Docker, hosted databases, workers, AI functionality, or additional infrastructure.
-
-9. Commit the fixes separately with a message such as:
+Verify:
 
 ```text
-fix: correct Pass 0 roadmap and test naming
+routes
+  ↓
+services
+  ↓
+repositories
+  ↓
+database
 ```
 
-11. Push the corrective commit to:
+and not:
+
+```text
+routes → SQL
+services → SQL
+AI → SQL
+AI → repositories
+```
+
+## AI isolation
+
+Verify:
+
+* AI service does not know SQLite;
+* AI adapter does not know SQLite;
+* AI provider response is validated;
+* service consumes structured data;
+* provider-specific details do not leak into application logic.
+
+## HTTP isolation
+
+Verify services do not depend on Express `Request` / `Response`.
+
+## Database isolation
+
+Verify SQL exists only where database/repository responsibility belongs.
+
+## Error boundary
+
+Verify errors are handled consistently.
+
+## Configuration
+
+Verify application configuration comes through the validated configuration boundary.
+
+## Regression
+
+Verify Pass 0 behavior still works.
+
+---
+
+# Git discipline
+
+Before committing:
+
+1. Inspect `git status`.
+2. Inspect the complete diff.
+3. Confirm that changes are limited to Pass 1.
+4. Do not commit runtime `.env` files, SQLite databases, generated `dist`, uploads, or secrets.
+5. Do not overwrite unrelated work.
+
+Create a focused commit such as:
+
+```text
+feat: establish FieldLine application architecture
+```
+
+Push it to:
 
 ```text
 itshim998/FieldLine
 ```
 
-## Completion criteria
+on the appropriate branch.
 
-Pass 0 should then satisfy all of the following:
+---
 
-* no external deployment or hosted infrastructure dependency
-* authoritative implementation roadmap preserved
-* tests accurately named
-* no Pass 1 functionality implemented
-* tests pass
-* build passes
-* setup passes
-* demo reset passes
-* development server still works
-* corrective commit pushed successfully
+# Completion criteria
 
-Stop after this corrective pass.
+Pass 1 is complete only when:
 
-Do not start the next implementation pass.
+1. Application configuration has a clear boundary.
+2. HTTP routes are thin and do not own business/data-access logic.
+3. Request validation has a clear Zod boundary.
+4. Services are separated from HTTP.
+5. Repository abstractions separate persistence from services.
+6. SQLite remains behind the persistence boundary.
+7. AI service/provider boundaries exist.
+8. AI structured responses are explicitly validated.
+9. AI code cannot directly manipulate the database.
+10. Error handling is centralized and consistent.
+11. Logging is centralized appropriately.
+12. The architecture is covered by meaningful tests.
+13. `/api/health` still works.
+14. The frontend still starts.
+15. `npm test` passes.
+16. `npm run build` passes.
+17. `npm run setup` passes.
+18. `npm run demo:reset` passes.
+19. No Pass 2+ domain functionality has been implemented.
+20. The final diff is reviewed and clean.
+21. Commit is created and pushed.
+
+---
+
+# Final report
+
+After completing the work, report:
+
+### 1. Architectural changes
+
+Explain the actual route → validation → service → repository → SQLite structure created.
+
+### 2. AI boundary
+
+Explain the AI service → adapter → structured response → validation structure.
+
+### 3. Files changed
+
+List the important files and why they changed.
+
+### 4. Tests
+
+Report:
+
+* tests added;
+* tests modified;
+* total passing tests;
+* any important architectural behavior verified.
+
+### 5. Validation
+
+Report results of:
+
+```text
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+npm run dev
+GET /api/health
+frontend startup
+```
+
+### 6. Self-review
+
+Mention any architectural issues discovered and corrected.
+
+### 7. Git
+
+Report:
+
+* commit hash;
+* commit message;
+* branch;
+* push result.
+
+### 8. Boundary confirmation
+
+Explicitly confirm:
+
+> **PASS 2 and later feature functionality were not implemented.**
+
+---
+
+# Final instruction
+
+Implement **PASS 1 — Application Architecture only**.
+
+The goal is not to add features.
+
+The goal is to make the repository structurally ready for the feature passes that follow.
+
+Prefer **simple, explicit, testable boundaries** over abstraction for abstraction's sake.
+
+Do not rush into domain implementation.
+
+Stop after Pass 1.

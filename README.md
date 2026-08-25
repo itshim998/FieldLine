@@ -20,18 +20,22 @@ It requires **no cloud dependencies, no Docker containers, and no external datab
 ## 🏗️ Architecture
 
 ```text
-Local Browser (Port 3000)
-       ↓
-Local Frontend (Vite + React)
-       ↓
-Local Node/Express Backend (Port 3001)
-       ↓
-Local Domain Services & Zod Validation
-       ↓
-Local SQLite (database/fieldline.db)
-       ↓
-Local Filesystem (uploads/)
+HTTP Route (Thin Controller)
+    ↓
+Validation (Zod Schemas)
+    ↓
+Service (Application Orchestration)
+    ↓
+Repository (Persistence Layer)
+    ↓
+SQLite (Local database/fieldline.db)
 ```
+
+AI Pipeline:
+```text
+AI Service → AI Adapter → Raw Response → Zod Validation → Service
+```
+> **Non-negotiable principle:** AI code must never directly manipulate SQLite or database state.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural details and layer boundaries.
 
@@ -108,7 +112,7 @@ Example response:
     "schema_version": "0.1.0",
     "app_name": "FieldLine",
     "sih_ps_id": "SIH26122",
-    "pass": "Pass 0: Repository Bootstrap"
+    "pass": "Pass 1: Application Architecture"
   }
 }
 ```
@@ -118,7 +122,7 @@ Example response:
 ## 📊 Master Implementation Plan
 
 - [x] **PASS 0 — Repository Bootstrap** *(Completed)*
-- [ ] **PASS 1 — Application Architecture**
+- [x] **PASS 1 — Application Architecture** *(Completed)*
 - [ ] **PASS 2 — SQLite and Persistence Foundation**
 - [ ] **PASS 3 — Project Management**
 - [ ] **PASS 4 — Schedule Importer**

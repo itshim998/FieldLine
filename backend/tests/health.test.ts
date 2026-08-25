@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
+import express from 'express';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { healthResponseSchema } from '../src/validation/health.schema.js';
+import { createHealthRouter } from '../src/routes/health.router.js';
+import { HealthService } from '../src/services/health.service.js';
 
 describe('GET /api/health', () => {
   const app = createApp();
@@ -36,9 +39,37 @@ describe('GET /api/health', () => {
     }
   });
 
+  it('should return 503 when healthService reports degraded status', async () => {
+    const mockDegradedService: HealthService = {
+      getHealthStatus: () => ({
+        status: 'degraded',
+        service: 'FieldLine Backend',
+        version: '0.1.0',
+        timestamp: new Date().toISOString(),
+        uptime: 10,
+        environment: 'test',
+        database: {
+          status: 'disconnected',
+          type: 'sqlite',
+          path: ':memory:'
+        },
+        metadata: {}
+      })
+    };
+
+    const degradedApp = express();
+    degradedApp.use(createHealthRouter(mockDegradedService));
+
+    const res = await request(degradedApp).get('/health');
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.database.status).toBe('disconnected');
+  });
+
   it('should return 404 for non-existent API endpoints', async () => {
     const res = await request(app).get('/api/non-existent-route');
     expect(res.status).toBe(404);
     expect(res.body.error).toBe('Endpoint Not Found');
+    expect(res.body.code).toBe('NOT_FOUND');
   });
 });

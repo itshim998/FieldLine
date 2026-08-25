@@ -3,6 +3,7 @@ import cors from 'cors';
 import { apiRouter } from './routes/index.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { NotFoundError } from './errors/AppError.js';
 
 export function createApp(): Express {
   const app = express();
@@ -17,8 +18,8 @@ export function createApp(): Express {
   app.use('/api', apiRouter);
 
   // Fallback 404 handler for unknown API routes
-  app.use('/api/*', (_req, res) => {
-    res.status(404).json({ error: 'Endpoint Not Found' });
+  app.use('/api/*', (_req, _res, next) => {
+    next(new NotFoundError('Endpoint Not Found'));
   });
 
   // Centralized error handler

@@ -112,7 +112,7 @@ export function App(): React.JSX.Element {
             </div>
             <div className="info-item">
               <span className="info-key">Version</span>
-              <span className="info-val">{health?.version || '0.1.0 (Pass 0)'}</span>
+              <span className="info-val">{health?.version || '0.1.0 (Pass 1)'}</span>
             </div>
             <div className="info-item">
               <span className="info-key">Environment</span>
@@ -241,7 +241,7 @@ export function App(): React.JSX.Element {
       {/* Footer Banner */}
       <footer className="footer-banner">
         <div className="footer-text">
-          <strong>FieldLine Pass 0 Complete</strong> &bull; Bootstrap foundation initialized and ready for feature passes.
+          <strong>FieldLine Pass 1 Complete</strong> &bull; Clean application architecture and module boundaries established.
         </div>
         <div className="footer-actions">
           <span className="footer-link">npm run dev</span>

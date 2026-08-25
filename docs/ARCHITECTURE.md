@@ -1,4 +1,4 @@
-# FieldLine Architecture — Pass 0 Foundation
+# FieldLine Architecture — Pass 1: Application Architecture
 
 ## Overview
 
@@ -11,66 +11,103 @@ FieldLine runs entirely locally on a developer/evaluator workstation without req
 
 ---
 
-## Architectural Topology
+## Authoritative Architectural Pipelines
+
+### 1. HTTP Request Execution Pipeline
 
 ```text
-┌────────────────────────────────────────────────────────┐
-│                   Local Web Browser                    │
-└───────────────────────────┬────────────────────────────┘
-                            │ (HTTP / React UI)
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│               Frontend Shell (Vite + React)            │
-│               Port 3000 (proxies /api to backend)      │
-└───────────────────────────┬────────────────────────────┘
-                            │ (JSON REST API)
-                            ▼
-┌────────────────────────────────────────────────────────┐
-│               Express Monolith API Layer               │
-│               Port 3001                                │
-│                                                        │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Routes     │  │  Validation  │  │  Middleware  │  │
-│  │  /api/health │  │ (Zod Schemas)│  │ (CORS, Error)│  │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘  │
-│         │                                              │
-│         ▼                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
-│  │   Services   │  │ Repositories │  │ AI Adapters  │  │
-│  │  (Domain/App)│  │ (Data Access)│  │(Structured)  │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────────────┘  │
-└─────────┼─────────────────┼────────────────────────────┘
-          │                 │
-          ▼                 ▼
-┌──────────────────┐ ┌───────────────────────────────────┐
-│ Local Filesystem │ │       Local SQLite Database       │
-│ uploads/evidence │ │       database/fieldline.db       │
-└──────────────────┘ └───────────────────────────────────┘
+HTTP Route (Thin Controller)
+    ↓
+Validation (Zod Schema Middleware & Parsers)
+    ↓
+Service (Pure Application Orchestration & Business Logic)
+    ↓
+Repository (Persistence Abstraction & Data Access)
+    ↓
+SQLite (Local Storage with WAL Mode)
+```
+
+**Key Invariants:**
+- **Routes are thin**: They handle HTTP parsing, invoke services, validate outgoing contracts, and set status codes. Routes never embed SQL or domain calculations.
+- **Services are decoupled**: Services receive typed DTOs and return pure domain/application models. Services never depend on Express `Request`/`Response` objects or write raw SQL.
+- **Repositories encapsulate data access**: All direct SQLite queries, statements, and transactions reside strictly inside the repository layer.
+
+---
+
+### 2. AI Structured Extraction Pipeline
+
+```text
+AI Service (Orchestration & Workflow Coordination)
+    ↓
+AI Adapter / Provider (External API or Local Mock)
+    ↓
+Raw Structured Response (Untrusted Provider Output)
+    ↓
+Validation (Strict Zod Schema Enforcement)
+    ↓
+Service (Consumes Validated & Typed Contract)
+```
+
+> [!IMPORTANT]
+> **AI Isolation Principle: AI code must not directly manipulate the database.**
+> The AI layer must never query SQLite, import repository modules, or write directly to the database. AI is strictly used for extraction, summarization, and structured interpretation. Application services decide truth, validation, and persistence.
+
+---
+
+## Component Boundaries & Directory Layout
+
+```text
+backend/
+  src/
+    config/           # Validated environment configuration (env.ts) and structured logger (logger.ts)
+    routes/           # Thin Express route handlers delegating directly to services
+    validation/       # Runtime Zod schemas for request and response contracts
+    middleware/       # Centralized error handling, request logging, and Zod validation middleware
+    services/         # Pure application domain logic and workflow orchestration
+    repositories/     # Direct SQLite persistence and data access queries
+    database/         # SQLite connection lifecycle, WAL mode pragmas, and base schema initialization
+    errors/           # Application error hierarchy (AppError, NotFoundError, AIProviderError, etc.)
+    ai/               # Decoupled AI provider interfaces, mock adapters, contracts, and AI services
+      contracts/      # Zod schemas for AI completion and structured extraction contracts
+      providers/      # Provider adapters (MockAIProvider, future Gemini/OpenAI adapters)
+      services/       # AI service orchestrator enforcing Zod schema validation
+    jobs/             # Local background/batch task workers (Pass 4+)
+  tests/              # Vitest test suite enforcing behavioral contracts and architectural isolation
 ```
 
 ---
 
-## Modular Boundaries & Future Passes
+## Cross-Cutting Concerns
 
-- **`backend/src/routes/`**: Handles HTTP request parsing, status codes, and routing.
-- **`backend/src/validation/`**: Defines runtime schemas using Zod for strict type checking and contract enforcement.
-- **`backend/src/middleware/`**: Cross-cutting HTTP middleware (logging, error formatting, CORS).
-- **`backend/src/services/`**: Pure application domain logic and workflow orchestration (Pass 2+).
-- **`backend/src/repositories/`**: Direct SQLite persistence queries and transactions (Pass 2+).
-- **`backend/src/ai/`**: External AI client adapters returning strictly typed schemas (Pass 3+).
-- **`backend/src/jobs/`**: Local background/batch task workers (Pass 4+).
-- **`database/`**: Deterministic SQLite storage with WAL mode enabled.
-- **`uploads/`**: Local document and evidence storage.
-- **`demo/`**: Deterministic sample datasets and reset scripts.
+### Centralized Configuration
+- All configuration values originate from environment variables parsed strictly through `backend/src/config/env.ts` using Zod.
+- Direct `process.env` access across application services, repositories, and AI modules is prohibited.
+
+### Structured Error Handling
+- Errors are classified into operational `AppError` subclasses (`NotFoundError`, `ValidationError`, `ConflictError`, `AIProviderError`, `DatabaseError`).
+- The centralized `errorHandler` middleware catches `ZodError`, `AppError`, and unexpected errors, outputting uniform JSON envelopes:
+  ```json
+  {
+    "error": "Descriptive message",
+    "statusCode": 400,
+    "code": "ERROR_CODE",
+    "details": {}
+  }
+  ```
+- Database internal paths and SQL syntax details are never leaked to HTTP clients.
+
+### Structured Local Logging
+- `backend/src/config/logger.ts` provides a structured, lightweight logger (`debug`, `info`, `warn`, `error`) without requiring third-party cloud logging platforms.
+- `requestLogger` logs method, URL, status code, and latency in milliseconds.
 
 ---
 
-## Pass 0 Scope
+## Scope Realized in Pass 1
 
-Pass 0 establishes:
-1. Complete TypeScript + Node.js toolchain.
-2. Express backend server with health check endpoint (`/api/health`).
-3. Local SQLite initialization and deterministic migration/table verification.
-4. React + Vite frontend shell showing system status and API health.
-5. Automated Vitest suite testing routes, environment parsing, and SQLite.
-6. Setup and demo reset scripts (`scripts/setup.ts`, `scripts/demo-reset.ts`).
+1. **Configuration Boundary**: Centralized `EnvConfig` with Zod validation.
+2. **Repository Abstraction**: `SystemRepository` and `SqliteSystemRepository` isolating SQLite queries.
+3. **Service Layer**: `HealthService` and `DefaultHealthService` isolating health aggregation from HTTP and SQL.
+4. **Thin Route Layer**: `health.router.ts` delegating to `HealthService`.
+5. **AI Architecture Skeleton**: `AIProvider` interface, `MockAIProvider`, `AIService`, and strict Zod validation of structured extraction contracts.
+6. **Error Boundary**: `AppError` hierarchy and centralized `errorHandler` middleware.
+7. **Architectural Verification**: Vitest test suite with 8 test files and 31 unit, integration, and architecture enforcement tests.

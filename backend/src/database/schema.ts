@@ -1,6 +1,6 @@
 /**
- * Base database schema initialization for Pass 0.
- * In Pass 0, only core system metadata is created to verify deterministic SQLite initialization.
+ * Base database schema initialization for Pass 0 & Pass 1.
+ * In Pass 0 & 1, core system metadata is verified for deterministic SQLite initialization.
  * Full domain tables (projects, schedules, activities, progress, evidence) belong to Pass 2.
  */
 
@@ -16,5 +16,5 @@ export const INITIAL_SCHEMA_SQL = `
     ('schema_version', '0.1.0'),
     ('app_name', 'FieldLine'),
     ('sih_ps_id', 'SIH26122'),
-    ('pass', 'Pass 0: Repository Bootstrap');
+    ('pass', 'Pass 1: Application Architecture');
 `;
