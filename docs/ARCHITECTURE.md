@@ -1,4 +1,4 @@
-# FieldLine Architecture — Pass 2: SQLite & Persistence Foundation
+# FieldLine Architecture — Pass 3: Project Management
 
 ## Overview
 
@@ -16,25 +16,86 @@ FieldLine runs entirely locally on a developer/evaluator workstation without req
 ### 1. HTTP Request Execution Pipeline
 
 ```text
-HTTP Route (Thin Controller)
+Project UI (React State + LocalStorage Project Context)
     ↓
-Validation (Zod Schema Middleware & Parsers)
+HTTP Route (Thin Controller: /api/projects, /api/health)
     ↓
-Service (Pure Application Orchestration & Business Logic)
+Validation (Zod Schemas & Middleware)
     ↓
-Repository (Persistence Abstraction & Data Access)
+Service (Pure Application Orchestration: ProjectService, HealthService)
     ↓
-SQLite (Local Storage with WAL Mode & Foreign Keys ON)
+Repository (Persistence Abstraction: ProjectRepository, SystemRepository)
+    ↓
+SQLite (Local Storage with WAL Mode & Foreign Keys ON: database/fieldline.db)
 ```
 
 **Key Invariants:**
 - **Routes are thin**: They handle HTTP parsing, invoke services, validate outgoing contracts, and set status codes. Routes never embed SQL or domain calculations.
 - **Services are decoupled**: Services receive typed DTOs and return pure domain/application models. Services never depend on Express `Request`/`Response` objects, import SQLite drivers directly, or write raw SQL.
 - **Repositories encapsulate data access**: All direct SQLite queries, statements, constraints handling, and transactions reside strictly inside the repository and database layers.
+- **Frontend relies exclusively on HTTP API**: The frontend never queries SQLite or stores hardcoded database state; persistence is mediated through clean REST endpoints.
 
 ---
 
-### 2. AI Structured Extraction Pipeline
+### 2. Project Lifecycle & Context Persistence Architecture (Pass 3)
+
+```text
+┌────────────────────────────────────────────────────────┐
+│                   React Frontend                       │
+│  - Empty State View ("No projects yet")               │
+│  - Project Selector View (Cards, Search & Filter)     │
+│  - Project Workspace View (Active context & Sub-tabs)  │
+│  - Selected Project ID (localStorage persistence)      │
+└──────────────────────────┬─────────────────────────────┘
+                           │ HTTP REST
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                   API Router                           │
+│  GET    /api/projects          → List all projects     │
+│  POST   /api/projects          → Create project        │
+│  GET    /api/projects/:id      → Retrieve project      │
+│  PATCH  /api/projects/:id      → Update metadata       │
+│  DELETE /api/projects/:id      → Cascade delete        │
+└──────────────────────────┬─────────────────────────────┘
+                           │ Validated DTOs
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│              Zod Validation Middleware                 │
+│  - createProjectSchema, updateProjectSchema            │
+│  - projectIdParamSchema                                │
+└──────────────────────────┬─────────────────────────────┘
+                           │ Clean Input
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                 ProjectService                         │
+│  - createProject(input)       → Input normalization    │
+│  - listProjects()             → Domain entities        │
+│  - getProject(id)             → Throws NotFoundError   │
+│  - updateProject(id, input)   → Throws NotFound/Conflict│
+│  - deleteProject(id)          → Cascades & removes     │
+└──────────────────────────┬─────────────────────────────┘
+                           │ Repository Contract
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│               ProjectRepository                        │
+│  - SqliteProjectRepository (Prepared Statements)       │
+└──────────────────────────┬─────────────────────────────┘
+                           │ SQL with Constraints & Pragmas
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│                  SQLite Engine                         │
+│  - projects Table (Indexed, Unique Code, WAL Mode)     │
+└────────────────────────────────────────────────────────┘
+```
+
+#### Selection & Persistence Mechanism
+1. When a user creates or selects a project in the UI, the active `project.id` is saved to `localStorage` under the key `fieldline_selected_project_id`.
+2. On browser refresh, the frontend queries `GET /api/projects` and restores the selected project workspace context automatically.
+3. If the stored project ID is no longer present in the database (e.g. after a database reset or deletion), the frontend gracefully clears the invalid ID from `localStorage` and returns to the project selection list with a notification.
+
+---
+
+### 3. AI Structured Extraction Pipeline
 
 ```text
 AI Service (Orchestration & Workflow Coordination)
@@ -54,7 +115,7 @@ Service (Consumes Validated & Typed Contract)
 
 ---
 
-## Persistence Architecture (Pass 2)
+## Persistence Architecture
 
 ```text
 Service Layer (Domain Orchestration)
@@ -115,17 +176,6 @@ projects (1) ──────────< (N) schedules ───────
 - **WAL Mode**: `PRAGMA journal_mode = WAL` is enabled for file-backed storage to allow concurrent reader processes alongside writers.
 - **Cascading Invariants**: Deleting a project cascades to schedules, activities, progress updates, and events. Deleting a progress update safely sets child evidence references to `NULL`.
 
-### 4. Indexing Strategy
-- Foreign key lookup indexes: `idx_schedules_project_id`, `idx_activities_project_id`, `idx_activities_schedule_id`, `idx_evidence_project_id`, `idx_activity_matches_project_id`, `idx_activity_progress_project_activity`.
-- Schedule activity lookups: `idx_activities_external_id`, `idx_activities_schedule_external`.
-- Temporal & event queries: `idx_progress_updates_project_date`, `idx_project_events_project_created`, `idx_project_events_event_type`.
-
-### 5. Transactions & Rollback
-- Atomic execution is exposed via `runInTransaction(fn, dbProvider)`:
-  - Automatically wraps callback within `db.transaction(fn)()`.
-  - Commits all mutations if the function succeeds.
-  - Automatically rolls back and leaves zero partial state if an error is thrown.
-
 ---
 
 ## Component Boundaries & Directory Layout
@@ -134,50 +184,27 @@ projects (1) ──────────< (N) schedules ───────
 backend/
   src/
     config/           # Validated environment configuration (env.ts) and structured logger (logger.ts)
-    routes/           # Thin Express route handlers delegating directly to services
-    validation/       # Runtime Zod schemas for request and response contracts
+    routes/           # Thin Express route handlers (health.router.ts, project.router.ts)
+    validation/       # Runtime Zod schemas for request/response contracts (health.schema.ts, project.schema.ts)
     middleware/       # Centralized error handling, request logging, and Zod validation middleware
-    services/         # Pure application domain logic and workflow orchestration
+    services/         # Pure application domain logic (health.service.ts, project.service.ts)
     repositories/     # Direct SQLite persistence (ProjectRepository, SystemRepository)
     models/           # Strongly typed domain entity definitions and DTO contracts
     database/         # SQLite connection lifecycle, WAL pragmas, migrator, and migrations/
-      migrations/     # Ordered migrations (0001_baseline_system_metadata.ts, 0002_core_domain_schema.ts, 0003_upgrade_metadata_for_pass2.ts, 0004_upgrade_cross_project_integrity.ts)
+      migrations/     # Ordered migrations (0001, 0002, 0003, 0004)
       migrator.ts     # Schema migration runner with schema_migrations tracking
       db.ts           # initDatabase, getDatabase, runInTransaction, closeDatabase
       schema.ts       # Core tables list and schema constants
     errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError)
     ai/               # Decoupled AI provider interfaces, mock adapters, contracts, and AI services
-      contracts/      # Zod schemas for AI completion and structured extraction contracts
-      providers/      # Provider adapters (MockAIProvider, future Gemini/OpenAI adapters)
-      services/       # AI service orchestrator enforcing Zod schema validation
     jobs/             # Local background/batch task workers (Pass 4+)
-  tests/              # Vitest test suite enforcing behavioral contracts, persistence, and isolation
+  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (15 suites, 90 tests)
+frontend/
+  src/
+    App.tsx           # FieldLine Project Management UI & Workspace Shell
+    index.css         # Visual design system tokens, cards, modals, and responsive layout
+    main.tsx          # React application root
 ```
-
----
-
-## Cross-Cutting Concerns
-
-### Centralized Configuration
-- All configuration values originate from environment variables parsed strictly through `backend/src/config/env.ts` using Zod.
-- Direct `process.env` access across application services, repositories, and AI modules is prohibited.
-
-### Structured Error Handling
-- Errors are classified into operational `AppError` subclasses (`NotFoundError`, `ValidationError`, `ConflictError`, `AIProviderError`, `DatabaseError`).
-- The centralized `errorHandler` middleware catches `ZodError`, `AppError`, and unexpected errors, outputting uniform JSON envelopes:
-  ```json
-  {
-    "error": "Descriptive message",
-    "statusCode": 400,
-    "code": "ERROR_CODE",
-    "details": {}
-  }
-  ```
-- Database internal paths and SQL syntax details are never leaked to HTTP clients.
-
-### Structured Local Logging
-- `backend/src/config/logger.ts` provides a structured, lightweight logger (`debug`, `info`, `warn`, `error`) without requiring third-party cloud logging platforms.
-- `requestLogger` logs method, URL, status code, and latency in milliseconds.
 
 ---
 
@@ -186,12 +213,15 @@ backend/
 1. **Pass 0 — Repository Bootstrap**: Node.js/TypeScript configuration, Express, Vite React shell, SQLite pragma setup, scripts.
 2. **Pass 1 — Application Architecture**: Architectural boundary enforcement, thin routes, Zod validation middleware, decoupled services, AI abstraction layer, centralized `AppError` handling.
 3. **Pass 2 — SQLite & Persistence Foundation**:
-   - Migration engine (`schema_migrations` tracking, append-only chain `0001`, `0002`, `0003`, `0004`).
-   - 8 Core Domain Entities (`projects`, `schedules`, `activities`, `progress_updates`, `evidence`, `activity_matches`, `activity_progress`, `project_events`).
-   - Cross-project referential integrity via composite foreign keys and consistency triggers.
-   - Restored `ON DELETE SET NULL` on nullable references (`evidence.progress_update_id`, `activity_matches.evidence_id`, `activity_progress.progress_update_id`).
-   - Domain check and unique constraints.
-   - Relational and query indexing.
-   - Transaction boundary (`runInTransaction`) with verified commit/rollback.
-   - Repository layer (`ProjectRepository`, `SqliteProjectRepository`, `SystemRepository`).
-   - Comprehensive Vitest persistence test suite (13 test suites, 66 passing tests).
+   - Migration engine (`schema_migrations` tracking, append-only chain `0001` → `0004`).
+   - 8 Core Domain Entities with composite foreign keys, cascading deletes, and consistency triggers.
+   - Transaction boundary (`runInTransaction`) with rollback.
+   - `ProjectRepository` and `SystemRepository` persistence layer.
+4. **Pass 3 — Project Management**:
+   - Complete Project Management REST API (`GET /api/projects`, `POST /api/projects`, `GET /api/projects/:projectId`, `PATCH /api/projects/:projectId`, `DELETE /api/projects/:projectId`).
+   - `ProjectService` application domain layer with clean input normalization and boundary enforcement.
+   - Runtime Zod input and output validation (`createProjectSchema`, `updateProjectSchema`, `projectIdParamSchema`).
+   - Project lifecycle UI: Empty state, project list/card selector with search filter, active project workspace, metadata overview, and sub-navigation with future pass indicators.
+   - Active project context persistence in `localStorage` across page reloads with graceful missing project fallback.
+   - Edit metadata modal and safe destructive delete confirmation modal.
+   - 15 Vitest test suites (90 tests passing).

@@ -1,137 +1,751 @@
-````text
-# FieldLine — PASS 2 Final Corrective Fix
+FieldLine — PASS 3: Project Management
+Context
 
-One persistence issue remains.
+You are implementing PASS 3 — Project Management of FieldLine. 
 
-Do ONLY the fix below. Do not implement PASS 3 or unrelated features.
+FieldLine is our Smart India Hackathon 2026 project:
 
-## Problem
+Product: FieldLine
+SIH PS ID: SIH26122
+Local directory:
+C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
+GitHub repository:
+itshim998/FieldLine
 
-The corrected cross-project integrity constraints/triggers currently live in migration `0002_core_domain_schema`.
+PASS 0, PASS 1, and PASS 2 are complete.
 
-That is insufficient for existing databases where `0002` has already been recorded, because the migration engine will skip `0002`.
+Before coding, inspect the current repository and work with what is already implemented.
 
-Therefore we need a new migration that upgrades existing `0002` databases to the corrected schema.
+Current state you must preserve
 
-## Required fix
+PASS 2 already provides:
 
-Create:
+SQLite persistence;
+migrations 0001 → 0004;
+the projects table;
+typed Project, CreateProjectInput, and UpdateProjectInput;
+ProjectRepository with:
+create()
+getById()
+getByCode()
+listAll()
+update()
+delete()
+count()
 
-```text
-backend/src/database/migrations/0004_upgrade_cross_project_integrity.ts
-````
+Do not duplicate or replace this persistence functionality.
 
-Register it after `0003`.
+Build the Pass 3 application layer on top of it.
 
-Migration chain must now be:
+Objective
 
-```text
-0001
-0002
-0003
-0004
-```
+Create the minimum usable FieldLine project lifecycle.
 
-`0004` must safely upgrade an existing database that already has `0001` + `0002`.
+Implement:
 
-It must add the corrected cross-project integrity enforcement for:
+create project;
+list projects;
+open/select project;
+display project metadata;
+project update where needed for the metadata flow;
+project deletion/reset where appropriate.
+Exit criterion
 
-* activity → schedule
-* evidence → progress_update
-* activity_match → progress_update
-* activity_match → activity
-* activity_match → evidence
-* activity_progress → activity
-* activity_progress → progress_update
+A user can:
 
-Preserve the intended delete semantics:
+Open FieldLine
+    ↓
+See available projects
+    ↓
+Create a project if none exists
+    ↓
+Select/open a project
+    ↓
+See that project's metadata/workspace
 
-* evidence → progress_update: `ON DELETE SET NULL`
-* activity_match → evidence: `ON DELETE SET NULL`
-* activity_progress → progress_update: `ON DELETE SET NULL`
-* existing cascade relationships should remain cascades.
+The user should have a clear current-project context after opening a project.
 
-Do NOT rewrite migration history.
+Critical scope boundary
 
-Do NOT modify existing migration names.
+This is PROJECT MANAGEMENT ONLY.
 
-Because SQLite cannot simply alter all existing foreign-key definitions in place, use the safest SQLite-compatible migration strategy required to rebuild/replace the affected tables while preserving existing data.
+Do not implement:
 
-The migration must be transactional.
+schedule importing;
+CSV/XLSX parsing;
+schedule normalization;
+schedule validation;
+activities UI;
+progress reporting;
+AI extraction;
+activity matching;
+variance;
+risk;
+evidence ingestion;
+assistant;
+dashboard analytics;
+voice;
+authentication;
+authorization.
 
-## Mandatory migration test
+Those belong to later passes.
 
-Add a migration test that represents a REAL existing database:
+Do not invent a project-management framework.
 
-1. Create a database with the old `0001` + `0002` schema.
-2. Insert representative existing data across projects, schedules, activities, progress updates, evidence, activity matches, and activity progress.
-3. Mark `0001`, `0002`, and `0003` as already applied.
-4. Run the migration engine.
-5. Verify only `0004` is newly applied.
-6. Verify all existing valid data remains intact.
-7. Verify cross-project relationships are now rejected.
-8. Verify valid same-project relationships still work.
-9. Verify deleting a progress update:
+Keep this a small vertical slice.
 
-   * preserves evidence;
-   * sets `evidence.progress_update_id` to NULL;
-   * sets nullable `activity_progress.progress_update_id` to NULL;
-   * preserves standalone evidence.
-10. Run migrations again and verify nothing is reapplied.
+First: inspect the current repository
 
-Also retain the existing fresh-database migration tests.
+Before modifying anything, inspect:
 
-## Validation
+current backend/src/app.ts;
+route registration;
+validation middleware;
+service layer;
+ProjectRepository;
+project domain types;
+error handling;
+tests;
+current frontend/src/App.tsx;
+frontend styling;
+existing API proxy configuration;
+README / architecture documentation.
+
+Understand the actual current implementation before changing it.
+
+Do not recreate Pass 2 persistence.
+
+Target architecture
+
+The project lifecycle must follow:
+
+HTTP route
+    ↓
+request validation
+    ↓
+Project service
+    ↓
+ProjectRepository
+    ↓
+SQLite
+
+The frontend must use the HTTP API.
+
+The frontend must NOT:
+
+access SQLite;
+contain database logic;
+contain repository logic;
+hardcode project data as application state.
+Backend implementation
+1. Project service
+
+Create a ProjectService boundary over the existing repository.
+
+The service should provide the application-level operations needed by Pass 3, such as:
+
+createProject
+listProjects
+getProject
+updateProject
+deleteProject
+
+Use explicit typed inputs and outputs.
+
+The service must not depend on Express Request or Response.
+
+The service must not contain SQL.
+
+Use the existing repository abstraction.
+
+Do not add a generic service framework.
+
+2. Request validation
+
+Create Zod schemas for project API inputs.
+
+At minimum validate:
+
+Create project
+name
+code
+description
+status
+startDate
+targetEndDate
+Update project
+
+Only fields that are actually editable.
+
+Project ID
+
+Validate the route parameter.
+
+Use sensible constraints, for example:
+
+name required and non-empty;
+code required and non-empty;
+description optional;
+status constrained to existing ProjectStatus;
+dates represented consistently with the repository/database conventions.
+
+Do not introduce overly complex date/business validation yet.
+
+3. HTTP API
+
+Create a project router.
+
+Use a clean REST-style API.
+
+Suggested endpoints:
+
+GET    /api/projects
+POST   /api/projects
+GET    /api/projects/:projectId
+PATCH  /api/projects/:projectId
+DELETE /api/projects/:projectId
+
+Use the existing project service.
+
+Routes should be thin.
+
+Do not put SQL or business logic inside routes.
+
+4. Response contracts
+
+Define explicit Zod schemas/types for the API response shapes where appropriate.
+
+At minimum:
+
+Project
+ProjectList
+
+Keep the API responses predictable.
+
+For example:
+
+{
+  "project": { ... }
+}
+
+for a single project and:
+
+{
+  "projects": [ ... ]
+}
+
+for the collection.
+
+Use whatever exact response convention best matches the current repository, but remain consistent across endpoints.
+
+5. Error behavior
+
+Use the existing AppError architecture.
+
+Expected cases:
+
+Create
+
+Duplicate project code → conflict response.
+
+Get/open
+
+Unknown project ID → not-found response.
+
+Update
+
+Unknown project ID → not-found response.
+
+Duplicate replacement code → conflict response.
+
+Delete
+
+Unknown project ID should have a predictable behavior.
+
+Do not expose raw SQLite implementation details to the browser.
+
+Use the existing centralized error handler.
+
+6. Project event
+
+Consider whether creating/updating/deleting a project should create an appropriate project_events record.
+
+Because the project_events table already exists from Pass 2, an event such as:
+
+project_created
+project_updated
+project_deleted
+
+would fit the current data model.
+
+However, do not build a general event framework.
+
+A simple service-level implementation is enough if you use events.
+
+If deletion makes event persistence impossible because the project is cascaded away, do not invent complicated audit behavior. Keep the deletion semantics simple and document the choice.
+
+The goal is project lifecycle, not audit architecture.
+
+Frontend implementation
+
+The current frontend is still a Pass 0/1 infrastructure-status shell.
+
+Transform it into the first usable FieldLine application flow while preserving the useful health/status information where appropriate.
+
+Required user flow
+Case 1 — No projects
+
+When the application loads and there are no projects:
+
+FieldLine
+    ↓
+No projects yet
+    ↓
+Create Project
+
+Show a simple creation form.
+
+Minimum fields:
+
+Project name
+Project code
+Description
+Start date
+Target end date
+
+Do not ask for fields that are unnecessary.
+
+Case 2 — Existing projects
+
+Show a project selection screen/list.
+
+Each project card/item should communicate:
+
+name;
+code;
+status;
+relevant date metadata;
+an obvious Open action.
+
+Also provide:
+
+Create Project
+Case 3 — Opened project
+
+When the user opens a project, show a simple project workspace/header.
+
+It should clearly communicate:
+
+FieldLine
+Project: <project name>
+Code: <project code>
+Status: <status>
+
+and useful metadata:
+
+description;
+start date;
+target end date;
+created/updated timestamps if useful.
+
+Include navigation or a visible placeholder area for future passes.
+
+For example:
+
+Project Workspace
+
+Project Overview
+Schedules
+Progress
+Evidence
+Insights
+
+But only Project Overview should be functional in Pass 3.
+
+The other sections must be visibly marked as future functionality or remain non-interactive.
+
+Do not fake future data.
+
+Current project state
+
+The frontend needs a reliable current-project state.
+
+For this pass, use a lightweight local mechanism such as:
+
+React state
++
+localStorage for selected project ID
+
+or an equally simple approach.
+
+Requirement:
+
+Refreshing the browser should not immediately lose the selected project context.
+
+Do not introduce Redux, Zustand, or another global-state framework.
+
+If the stored project no longer exists, gracefully return to project selection.
+
+Create flow
+
+After successful project creation:
+
+POST /api/projects
+        ↓
+project returned
+        ↓
+set as current project
+        ↓
+persist selected project ID
+        ↓
+open project workspace
+
+Do not force the user back to the project list unnecessarily.
+
+Delete flow
+
+Deletion is potentially destructive.
+
+Provide an explicit confirmation step.
+
+After successful deletion:
+
+delete project
+    ↓
+clear current project if necessary
+    ↓
+refresh project list
+    ↓
+open project selector
+
+Because project deletion cascades into schedules, activities, progress, evidence, matches, etc., clearly communicate that this is a destructive operation.
+
+Do not add a complex recycle-bin system.
+
+Project reset semantics
+
+Do not create a separate complicated "reset" architecture.
+
+The existing:
+
+npm run demo:reset
+
+remains the developer/demo database reset mechanism.
+
+For the UI, use ordinary project deletion.
+
+Do not confuse:
+
+application/demo reset
+
+with:
+
+delete one project
+UX requirements
+
+Keep the frontend presentation-grade but restrained.
+
+The current dark FieldLine aesthetic can be preserved.
+
+Do not spend this pass on final dashboard polish.
+
+Prioritize:
+
+clear hierarchy;
+obvious project selection;
+obvious Open/Create actions;
+clear current-project context;
+clean empty state;
+safe delete confirmation;
+useful error messages.
+
+Do not create fake charts or future analytics.
+
+Backend tests
+
+Add meaningful tests for:
+
+Service
+create project;
+list projects;
+get project;
+update project;
+delete project;
+not-found behavior;
+conflict behavior.
+Routes/API
+GET /api/projects;
+POST /api/projects;
+GET /api/projects/:projectId;
+PATCH /api/projects/:projectId;
+DELETE /api/projects/:projectId.
+
+Test validation failures.
+
+Test not-found responses.
+
+Test duplicate-code conflict.
+
+Frontend tests
+
+Use the existing frontend testing approach if one exists.
+
+At minimum, verify the main project lifecycle behavior if the repository's setup supports frontend component testing.
+
+If frontend component testing is not currently configured, do not introduce a large testing stack solely for this pass.
+
+Instead, ensure:
+
+production build passes;
+API integration is wired correctly;
+project selection/create/open/delete flow is manually verified.
+Regression tests
+
+Everything from Pass 0–2 must remain working.
+
+Verify:
+
+npm test
+npm run build
+npm run setup
+npm run demo:reset
+
+The health endpoint must continue to work.
+
+SQLite migration behavior must remain unchanged.
+
+Do not modify migration history.
+
+Do not alter the eight core tables except where absolutely necessary for a concrete Pass 3 requirement.
+
+Important architectural restriction
+
+Do NOT query the database directly from the frontend.
+
+Do NOT introduce a second project storage mechanism.
+
+The source of truth must remain:
+
+React UI
+    ↓
+Project API
+    ↓
+ProjectService
+    ↓
+ProjectRepository
+    ↓
+SQLite
+Documentation
+
+Update:
+
+docs/ARCHITECTURE.md
+
+to include the project lifecycle layer:
+
+Project UI
+    ↓
+Project API routes
+    ↓
+ProjectService
+    ↓
+ProjectRepository
+    ↓
+SQLite
+
+Document the current-project selection mechanism.
+
+Update the README only enough to mark Pass 3 complete and describe the now-functional project lifecycle.
+
+Do not change the authoritative 26-pass roadmap.
+
+Self-review
+
+Before committing, inspect the final implementation specifically for:
+
+Boundaries
+routes remain thin;
+services contain no SQL;
+repositories remain the only project data-access layer;
+frontend contains no persistence/database logic.
+Lifecycle
+project can be created;
+project appears in list;
+project can be opened;
+project metadata is displayed;
+project can be updated where exposed;
+project can be deleted;
+selected-project state survives refresh.
+Safety
+duplicate codes handled;
+missing projects handled;
+delete confirmation exists;
+deleted current project clears cleanly.
+Regression
+health endpoint works;
+SQLite remains healthy;
+migration chain untouched;
+existing Pass 0–2 tests remain green.
+Required validation
 
 Run:
 
-```bash
 npm test
 npm run build
 npm run setup
 npm run setup
 npm run demo:reset
-```
 
-Then verify:
+Then:
 
-```text
-GET /api/health → HTTP 200
-schema_version → 0.2.0
-```
+npm run dev
 
-Inspect the final schema and migration chain manually before committing.
+Manually verify the complete flow:
 
-## Git
+1. Open FieldLine.
+2. Confirm empty-state behavior when no projects exist.
+3. Create a project.
+4. Confirm it appears in the project list.
+5. Open it.
+6. Refresh the browser.
+7. Confirm the same project remains selected.
+8. Update project metadata.
+9. Return to project selection.
+10. Create a second project.
+11. Open the second project.
+12. Delete the second project with confirmation.
+13. Confirm it disappears.
+14. Confirm the first project remains intact.
+15. Verify /api/health remains healthy.
 
-Commit:
+Also verify the frontend production build.
 
-```text
-fix: finalize FieldLine Pass 2 migration compatibility
-```
+Git
+
+Inspect:
+
+git status
+git diff
+
+Confirm that changes are limited to PASS 3.
+
+Do not commit:
+
+.env;
+SQLite runtime files;
+WAL/journal files;
+dist;
+uploads;
+secrets.
+
+Create a focused commit:
+
+feat: implement FieldLine project management
 
 Push to:
 
-```text
 itshim998/FieldLine
 main
-```
+Completion criteria
 
-Final report must include:
+PASS 3 is complete only when:
 
-* migration chain;
-* existing-database upgrade test result;
-* data-preservation result;
-* cross-project integrity result;
-* SET NULL behavior result;
-* full test result;
-* build/setup/reset results;
-* health result;
-* commit hash.
+ Project service exists.
+ Project request validation exists.
+ Project API exists.
+ Project creation works.
+ Project listing works.
+ Project retrieval/opening works.
+ Project metadata is displayed.
+ Project update works where exposed.
+ Project deletion works with confirmation.
+ Current-project state persists across refresh.
+ Unknown project behavior is handled.
+ Duplicate project codes are handled.
+ No database access exists in frontend/routes/services.
+ Pass 0–2 functionality remains intact.
+ npm test passes.
+ npm run build passes.
+ npm run setup passes.
+ repeated setup passes.
+ npm run demo:reset passes.
+ /api/health remains healthy.
+ Full manual project lifecycle has been verified.
+ No Pass 4+ functionality is implemented.
+ Final diff has been reviewed.
+ Commit has been created.
+ Commit has been pushed.
+Final report
+
+After implementation, report:
+
+Architecture
+
+Explain:
+
+Project UI
+→ Project API
+→ validation
+→ ProjectService
+→ ProjectRepository
+→ SQLite
+API
+
+List the project endpoints implemented.
+
+Frontend
+
+Describe:
+
+project selector;
+create flow;
+opened project workspace;
+current-project persistence;
+delete flow.
+Tests
+
+Report:
+
+service tests;
+API tests;
+frontend verification;
+total test count.
+Validation
+
+Report results for:
+
+npm test
+npm run build
+npm run setup
+npm run setup
+npm run demo:reset
+npm run dev/api/health
+project creation
+project listing
+project opening
+project refresh persistence
+project update
+project deletion
+Git
+
+Report:
+
+commit hash;
+commit message;
+branch;
+push result.
+Boundary confirmation
 
 Explicitly confirm:
 
-> PASS 3 was NOT implemented.
+PASS 4 and all later feature functionality were not implemented.
 
-```
-```
+Final instruction
+
+Implement PASS 3 — Project Management only.
+
+Build the smallest complete vertical slice that allows a user to launch FieldLine, select a project, create one when necessary, open it, and see its metadata.
+
+Do not jump ahead into schedules, activities, progress, AI, or analytics.
+
+Stop after PASS 3.
