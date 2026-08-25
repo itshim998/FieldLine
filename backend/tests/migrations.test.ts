@@ -42,6 +42,47 @@ describe('Database Migration Engine', () => {
     expect(thirdRun.alreadyApplied).toEqual(MIGRATIONS.map((m) => m.name));
   });
 
+  it('should correctly upgrade schema_version from 0.1.0 to 0.2.0 for existing databases while preserving metadata', () => {
+    // 1. Simulate an existing Pass 0/1 database with older metadata
+    db.exec(`
+      CREATE TABLE system_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO system_metadata (key, value) VALUES 
+        ('schema_version', '0.1.0'),
+        ('app_name', 'FieldLine'),
+        ('sih_ps_id', 'SIH26122'),
+        ('pass', 'Pass 1: Application Architecture'),
+        ('custom_eval_key', 'custom_eval_value');
+    `);
+
+    // Verify pre-migration state
+    const preVersion = db.prepare("SELECT value FROM system_metadata WHERE key = 'schema_version'").get() as { value: string };
+    expect(preVersion.value).toBe('0.1.0');
+
+    // 2. Run current PASS 2 migrations
+    const result = runMigrations(db);
+    expect(result.applied).toContain('0001_baseline_system_metadata');
+    expect(result.applied).toContain('0002_core_domain_schema');
+
+    // 3. Verify upgraded metadata
+    const rows = db.prepare('SELECT key, value FROM system_metadata').all() as Array<{ key: string; value: string }>;
+    const metadata = rows.reduce((acc, r) => {
+      acc[r.key] = r.value;
+      return acc;
+    }, {} as Record<string, string>);
+
+    expect(metadata.schema_version).toBe('0.2.0');
+    expect(metadata.pass).toBe('Pass 2: SQLite and Persistence Foundation');
+    expect(metadata.app_name).toBe('FieldLine');
+    expect(metadata.sih_ps_id).toBe('SIH26122');
+    expect(metadata.custom_eval_key).toBe('custom_eval_value');
+  });
+
   it('should create all required core domain and metadata tables', () => {
     runMigrations(db);
 
@@ -66,7 +107,7 @@ describe('Database Migration Engine', () => {
 
     expect(metadata.app_name).toBe('FieldLine');
     expect(metadata.sih_ps_id).toBe('SIH26122');
-    expect(metadata.schema_version).toBeDefined();
+    expect(metadata.schema_version).toBe('0.2.0');
   });
 
   it('should create indexes for domain entities', () => {

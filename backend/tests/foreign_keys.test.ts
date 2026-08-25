@@ -22,7 +22,7 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
     expect(row).toBe(1);
   });
 
-  it('should allow valid relational inserts across the domain dependency graph', () => {
+  it('should allow valid relational inserts across the domain dependency graph within the same project', () => {
     // 1. Insert Project
     db.prepare(`
       INSERT INTO projects (id, name, code, status) 
@@ -102,17 +102,83 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
     }).toThrow(/FOREIGN KEY constraint failed/);
   });
 
-  it('should reject activity match referencing a non-existent activity', () => {
-    db.prepare(`INSERT INTO projects (id, name, code) VALUES ('p1', 'Highway 5', 'HW-05')`).run();
-    db.prepare(`
-      INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text)
-      VALUES ('u1', 'p1', '2026-03-01', 'manual', 'Report text')
-    `).run();
+  it('should reject cross-project activity -> schedule relationship (activity in Project B referencing schedule in Project A)', () => {
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_A', 'Project A', 'PRJ-A')").run();
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_B', 'Project B', 'PRJ-B')").run();
+    db.prepare("INSERT INTO schedules (id, project_id, name, source_type) VALUES ('sched_A', 'proj_A', 'Schedule A', 'csv')").run();
+
+    expect(() => {
+      // Activity declares project_id = 'proj_B' but schedule_id = 'sched_A' (which belongs to 'proj_A')
+      db.prepare(`
+        INSERT INTO activities (id, project_id, schedule_id, external_id, name, planned_start, planned_finish)
+        VALUES ('act_cross', 'proj_B', 'sched_A', 'ACT-01', 'Cross Project Task', '2026-01-01', '2026-01-10')
+      `).run();
+    }).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it('should reject cross-project evidence -> progress_update relationship (evidence in Project B referencing update in Project A)', () => {
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_A', 'Project A', 'PRJ-A')").run();
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_B', 'Project B', 'PRJ-B')").run();
+    db.prepare("INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text) VALUES ('upd_A', 'proj_A', '2026-01-01', 'manual', 'Report A')").run();
+
+    expect(() => {
+      // Evidence declares project_id = 'proj_B' but progress_update_id = 'upd_A' (which belongs to 'proj_A')
+      db.prepare(`
+        INSERT INTO evidence (id, project_id, progress_update_id, file_name, file_path, file_type)
+        VALUES ('evi_cross', 'proj_B', 'upd_A', 'photo.jpg', '/uploads/photo.jpg', 'image')
+      `).run();
+    }).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it('should reject cross-project activity_matches combining Project B with activity or update from Project A', () => {
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_A', 'Project A', 'PRJ-A')").run();
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_B', 'Project B', 'PRJ-B')").run();
+    db.prepare("INSERT INTO schedules (id, project_id, name, source_type) VALUES ('sched_A', 'proj_A', 'Schedule A', 'csv')").run();
+    db.prepare("INSERT INTO activities (id, project_id, schedule_id, external_id, name, planned_start, planned_finish) VALUES ('act_A', 'proj_A', 'sched_A', 'ACT-A', 'Task A', '2026-01-01', '2026-01-10')").run();
+    db.prepare("INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text) VALUES ('upd_A', 'proj_A', '2026-01-01', 'manual', 'Report A')").run();
+
+    // 1. Match in Project B combining update_A and act_A -> Rejected
+    expect(() => {
+      db.prepare(`
+        INSERT INTO activity_matches (id, project_id, progress_update_id, activity_id, confidence_score, match_method)
+        VALUES ('match_cross_1', 'proj_B', 'upd_A', 'act_A', 0.9, 'exact_id')
+      `).run();
+    }).toThrow(/FOREIGN KEY constraint failed/);
+
+    // 2. Insert valid update in Project B, but referencing activity in Project A -> Rejected
+    db.prepare("INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text) VALUES ('upd_B', 'proj_B', '2026-01-01', 'manual', 'Report B')").run();
 
     expect(() => {
       db.prepare(`
         INSERT INTO activity_matches (id, project_id, progress_update_id, activity_id, confidence_score, match_method)
-        VALUES ('m_invalid', 'p1', 'u1', 'non_existent_activity', 0.9, 'exact_id')
+        VALUES ('match_cross_2', 'proj_B', 'upd_B', 'act_A', 0.9, 'exact_id')
+      `).run();
+    }).toThrow(/FOREIGN KEY constraint failed/);
+  });
+
+  it('should reject cross-project activity_progress combining Project B with activity or update from Project A', () => {
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_A', 'Project A', 'PRJ-A')").run();
+    db.prepare("INSERT INTO projects (id, name, code) VALUES ('proj_B', 'Project B', 'PRJ-B')").run();
+    db.prepare("INSERT INTO schedules (id, project_id, name, source_type) VALUES ('sched_A', 'proj_A', 'Schedule A', 'csv')").run();
+    db.prepare("INSERT INTO activities (id, project_id, schedule_id, external_id, name, planned_start, planned_finish) VALUES ('act_A', 'proj_A', 'sched_A', 'ACT-A', 'Task A', '2026-01-01', '2026-01-10')").run();
+    db.prepare("INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text) VALUES ('upd_A', 'proj_A', '2026-01-01', 'manual', 'Report A')").run();
+
+    // 1. Activity progress in Project B referencing act_A from Project A -> Rejected
+    expect(() => {
+      db.prepare(`
+        INSERT INTO activity_progress (id, project_id, activity_id, actual_percent, as_of_date)
+        VALUES ('prog_cross_1', 'proj_B', 'act_A', 50.0, '2026-01-05')
+      `).run();
+    }).toThrow(/FOREIGN KEY constraint failed/);
+
+    // 2. Valid activity in Project B, but referencing progress update from Project A -> Rejected
+    db.prepare("INSERT INTO schedules (id, project_id, name, source_type) VALUES ('sched_B', 'proj_B', 'Schedule B', 'csv')").run();
+    db.prepare("INSERT INTO activities (id, project_id, schedule_id, external_id, name, planned_start, planned_finish) VALUES ('act_B', 'proj_B', 'sched_B', 'ACT-B', 'Task B', '2026-01-01', '2026-01-10')").run();
+
+    expect(() => {
+      db.prepare(`
+        INSERT INTO activity_progress (id, project_id, activity_id, progress_update_id, actual_percent, as_of_date)
+        VALUES ('prog_cross_2', 'proj_B', 'act_B', 'upd_A', 50.0, '2026-01-05')
       `).run();
     }).toThrow(/FOREIGN KEY constraint failed/);
   });
@@ -136,7 +202,7 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
     expect(db.prepare('SELECT COUNT(*) as c FROM activities WHERE project_id = ?').get('p1')).toEqual({ c: 0 });
   });
 
-  it('should set progress_update_id to NULL in evidence when update is deleted', () => {
+  it('should cascade delete attached evidence when progress_update is deleted while preserving standalone evidence', () => {
     db.prepare(`INSERT INTO projects (id, name, code) VALUES ('p1', 'Airport Pier', 'AIR-01')`).run();
     db.prepare(`
       INSERT INTO progress_updates (id, project_id, report_date, source_type, raw_text)
@@ -146,11 +212,17 @@ describe('Foreign Key Enforcement and Referential Integrity', () => {
       INSERT INTO evidence (id, project_id, progress_update_id, file_name, file_path, file_type)
       VALUES ('e1', 'p1', 'u1', 'report.pdf', '/uploads/evidence/report.pdf', 'pdf')
     `).run();
+    db.prepare(`
+      INSERT INTO evidence (id, project_id, progress_update_id, file_name, file_path, file_type)
+      VALUES ('e_standalone', 'p1', NULL, 'site_blueprint.pdf', '/uploads/evidence/site_blueprint.pdf', 'pdf')
+    `).run();
 
     // Delete update
     db.prepare('DELETE FROM progress_updates WHERE id = ?').run('u1');
 
-    const evidenceRow = db.prepare('SELECT progress_update_id FROM evidence WHERE id = ?').get('e1') as { progress_update_id: string | null };
-    expect(evidenceRow.progress_update_id).toBeNull();
+    // Attached evidence deleted via cascade
+    expect(db.prepare('SELECT COUNT(*) as c FROM evidence WHERE id = ?').get('e1')).toEqual({ c: 0 });
+    // Standalone evidence preserved
+    expect(db.prepare('SELECT COUNT(*) as c FROM evidence WHERE id = ?').get('e_standalone')).toEqual({ c: 1 });
   });
 });

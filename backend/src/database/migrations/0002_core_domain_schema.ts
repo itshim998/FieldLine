@@ -28,14 +28,15 @@ export function up(db: DatabaseType): void {
       is_baseline INTEGER NOT NULL DEFAULT 1 CHECK (is_baseline IN (0, 1)),
       imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (project_id, id)
     );
 
     -- 3. Activities table
     CREATE TABLE IF NOT EXISTS activities (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+      schedule_id TEXT NOT NULL,
       external_id TEXT NOT NULL,
       name TEXT NOT NULL,
       description TEXT,
@@ -48,7 +49,9 @@ export function up(db: DatabaseType): void {
       baseline_progress REAL NOT NULL DEFAULT 0.0 CHECK (baseline_progress >= 0.0 AND baseline_progress <= 100.0),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE (schedule_id, external_id)
+      FOREIGN KEY (project_id, schedule_id) REFERENCES schedules(project_id, id) ON DELETE CASCADE,
+      UNIQUE (schedule_id, external_id),
+      UNIQUE (project_id, id)
     );
 
     -- 4. Progress Updates table
@@ -62,14 +65,15 @@ export function up(db: DatabaseType): void {
       raw_text TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'processed', 'reviewed')),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (project_id, id)
     );
 
     -- 5. Evidence table
     CREATE TABLE IF NOT EXISTS evidence (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      progress_update_id TEXT REFERENCES progress_updates(id) ON DELETE SET NULL,
+      progress_update_id TEXT,
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
       file_type TEXT NOT NULL CHECK (file_type IN ('text', 'xlsx', 'pdf', 'image', 'transcript', 'other')),
@@ -77,16 +81,18 @@ export function up(db: DatabaseType): void {
       mime_type TEXT,
       metadata_json TEXT,
       uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE,
+      UNIQUE (project_id, id)
     );
 
     -- 6. Activity Matches table
     CREATE TABLE IF NOT EXISTS activity_matches (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      progress_update_id TEXT NOT NULL REFERENCES progress_updates(id) ON DELETE CASCADE,
-      evidence_id TEXT REFERENCES evidence(id) ON DELETE SET NULL,
-      activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+      progress_update_id TEXT NOT NULL,
+      evidence_id TEXT,
+      activity_id TEXT NOT NULL,
       confidence_score REAL NOT NULL CHECK (confidence_score >= 0.0 AND confidence_score <= 1.0),
       match_method TEXT NOT NULL CHECK (match_method IN ('exact_id', 'text_similarity', 'wbs_location', 'llm_assisted', 'manual')),
       matched_text TEXT,
@@ -95,15 +101,18 @@ export function up(db: DatabaseType): void {
       reviewed_by TEXT,
       reviewed_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id, activity_id) REFERENCES activities(project_id, id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id, evidence_id) REFERENCES evidence(project_id, id) ON DELETE CASCADE
     );
 
     -- 7. Activity Progress table
     CREATE TABLE IF NOT EXISTS activity_progress (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-      activity_id TEXT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
-      progress_update_id TEXT REFERENCES progress_updates(id) ON DELETE SET NULL,
+      activity_id TEXT NOT NULL,
+      progress_update_id TEXT,
       actual_percent REAL NOT NULL CHECK (actual_percent >= 0.0 AND actual_percent <= 100.0),
       actual_quantity REAL CHECK (actual_quantity IS NULL OR actual_quantity >= 0),
       actual_start TEXT,
@@ -112,7 +121,9 @@ export function up(db: DatabaseType): void {
       as_of_date TEXT NOT NULL,
       notes TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id, activity_id) REFERENCES activities(project_id, id) ON DELETE CASCADE,
+      FOREIGN KEY (project_id, progress_update_id) REFERENCES progress_updates(project_id, id) ON DELETE CASCADE
     );
 
     -- 8. Project Events table

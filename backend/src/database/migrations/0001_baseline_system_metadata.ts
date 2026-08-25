@@ -11,10 +11,13 @@ export function up(db: DatabaseType): void {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
-    INSERT OR IGNORE INTO system_metadata (key, value) VALUES 
+    INSERT INTO system_metadata (key, value) VALUES 
       ('schema_version', '0.2.0'),
       ('app_name', 'FieldLine'),
       ('sih_ps_id', 'SIH26122'),
-      ('pass', 'Pass 2: SQLite and Persistence Foundation');
+      ('pass', 'Pass 2: SQLite and Persistence Foundation')
+    ON CONFLICT(key) DO UPDATE SET 
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP;
   `);
 }
