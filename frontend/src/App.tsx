@@ -24,7 +24,8 @@ import {
   FileCheck,
   Check,
   AlertCircle,
-  FileUp
+  FileUp,
+  User
 } from 'lucide-react';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
@@ -88,6 +89,20 @@ export interface ScheduleValidationIssue {
   value?: unknown;
 }
 
+export interface ProgressUpdate {
+  id: string;
+  projectId: string;
+  reportDate: string;
+  reporterName: string | null;
+  reporterRole: string | null;
+  sourceType: 'manual' | 'voice' | 'pdf' | 'xlsx' | 'image' | 'text';
+  rawText: string;
+  status: 'received' | 'processed' | 'reviewed';
+  createdAt: string;
+  updatedAt: string;
+}
+
+
 interface HealthData {
   status: 'ok' | 'degraded' | 'error';
   service: string;
@@ -113,7 +128,7 @@ export function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Workspace View State
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules'>('overview');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules' | 'progress'>('overview');
 
   // Schedules & Activities State
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -121,6 +136,19 @@ export function App(): React.JSX.Element {
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
   const [loadingSchedules, setLoadingSchedules] = useState<boolean>(false);
   const [loadingActivities, setLoadingActivities] = useState<boolean>(false);
+
+  // Progress Updates State (PASS 7)
+  const [progressUpdates, setProgressUpdates] = useState<ProgressUpdate[]>([]);
+  const [loadingProgressUpdates, setLoadingProgressUpdates] = useState<boolean>(false);
+  const [reportFormData, setReportFormData] = useState({
+    reportDate: new Date().toISOString().slice(0, 10),
+    reporterName: '',
+    reporterRole: '',
+    rawText: ''
+  });
+  const [submittingReport, setSubmittingReport] = useState<boolean>(false);
+  const [reportFormError, setReportFormError] = useState<string | null>(null);
+  const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
 
   // File Upload State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -230,6 +258,24 @@ export function App(): React.JSX.Element {
     }
   }, [fetchActivities]);
 
+  // Fetch Project Progress Updates (PASS 7)
+  const fetchProgressUpdates = useCallback(async (projectId: string) => {
+    setLoadingProgressUpdates(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/progress-updates`);
+      const data = await res.json();
+      if (res.ok) {
+        setProgressUpdates(data.progressUpdates || []);
+      } else {
+        setProgressUpdates([]);
+      }
+    } catch {
+      setProgressUpdates([]);
+    } finally {
+      setLoadingProgressUpdates(false);
+    }
+  }, []);
+
   // Fetch Projects and restore saved selection
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
@@ -251,6 +297,7 @@ export function App(): React.JSX.Element {
           setSelectedProject(found);
           localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, found.id);
           fetchSchedules(found.id);
+          fetchProgressUpdates(found.id);
         } else {
           localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
           setSelectedProject(null);
@@ -266,7 +313,7 @@ export function App(): React.JSX.Element {
     } finally {
       setLoadingProjects(false);
     }
-  }, [showNotification, fetchSchedules]);
+  }, [showNotification, fetchSchedules, fetchProgressUpdates]);
 
   // Initial load
   useEffect(() => {
@@ -283,8 +330,17 @@ export function App(): React.JSX.Element {
     setSelectedFile(null);
     setUploadError(null);
     setImportSummary(null);
+    setReportFormError(null);
+    setReportSuccessMessage(null);
+    setReportFormData({
+      reportDate: new Date().toISOString().slice(0, 10),
+      reporterName: '',
+      reporterRole: '',
+      rawText: ''
+    });
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
     fetchSchedules(project.id);
+    fetchProgressUpdates(project.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -294,9 +350,12 @@ export function App(): React.JSX.Element {
     setSelectedSchedule(null);
     setSchedules([]);
     setActivities([]);
+    setProgressUpdates([]);
     setSelectedFile(null);
     setUploadError(null);
     setImportSummary(null);
+    setReportFormError(null);
+    setReportSuccessMessage(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
   };
 
@@ -562,6 +621,59 @@ export function App(): React.JSX.Element {
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
+  // Handle Manual Progress Report Submission (PASS 7)
+  const handleProgressUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProject) return;
+
+    if (!reportFormData.rawText.trim()) {
+      setReportFormError('Report text cannot be empty or whitespace only');
+      return;
+    }
+
+    setSubmittingReport(true);
+    setReportFormError(null);
+    setReportSuccessMessage(null);
+
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/progress-updates`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          reportDate: reportFormData.reportDate,
+          reporterName: reportFormData.reporterName.trim() || undefined,
+          reporterRole: reportFormData.reporterRole.trim() || undefined,
+          rawText: reportFormData.rawText
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const errorMsg = data.error?.message || data.message || 'Failed to record progress update';
+        setReportFormError(errorMsg);
+        showNotification('error', errorMsg);
+      } else {
+        await fetchProgressUpdates(selectedProject.id);
+        setReportFormData((prev) => ({
+          ...prev,
+          rawText: ''
+        }));
+        setReportSuccessMessage('Field progress report successfully recorded and persisted.');
+        showNotification('success', 'Field update recorded successfully');
+        setTimeout(() => setReportSuccessMessage(null), 5000);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Error recording field update';
+      setReportFormError(errorMsg);
+      showNotification('error', errorMsg);
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
+
   // Filtered projects for search
   const filteredProjects = projects.filter((p) => {
     const query = searchQuery.toLowerCase();
@@ -606,7 +718,7 @@ export function App(): React.JSX.Element {
             SIH 2026 &bull; SIH26122
           </div>
           <div className="badge-pass">
-            Pass 4: Schedule Importer
+            Pass 7: Manual Progress Reporting
           </div>
         </div>
       </header>
@@ -718,15 +830,28 @@ export function App(): React.JSX.Element {
                 </span>
               )}
             </button>
-            <button className="workspace-tab future" disabled title="Progress reporting will be enabled in Pass 6">
+            <button
+              id="tab-progress"
+              className={`workspace-tab ${activeWorkspaceTab === 'progress' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveWorkspaceTab('progress');
+                if (selectedProject) {
+                  fetchProgressUpdates(selectedProject.id);
+                }
+              }}
+            >
               <Activity size={16} />
               <span>Progress Updates</span>
-              <span className="tab-future-pill">Pass 6</span>
+              {progressUpdates.length > 0 && (
+                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                  {progressUpdates.length}
+                </span>
+              )}
             </button>
-            <button className="workspace-tab future" disabled title="Evidence ingestion will be enabled in Pass 5">
+            <button className="workspace-tab future" disabled title="Evidence ingestion will be enabled in Pass 13">
               <FileText size={16} />
               <span>Evidence</span>
-              <span className="tab-future-pill">Pass 5</span>
+              <span className="tab-future-pill">Pass 13</span>
             </button>
             <button className="workspace-tab future" disabled title="AI insights will be enabled in Pass 8+">
               <TrendingUp size={16} />
@@ -806,14 +931,14 @@ export function App(): React.JSX.Element {
               <div className="pass3-scope-card">
                 <div className="pass3-scope-header">
                   <ShieldCheck size={18} />
-                  <span>FieldLine Pass 4 Active Project Workspace</span>
+                  <span>FieldLine Pass 7 Active Project Workspace</span>
                 </div>
                 <p className="pass3-scope-text">
-                  This infrastructure project is fully registered in local SQLite persistence. Use the <strong>Schedules & Activities</strong> tab to import baseline schedules in <strong>.csv</strong> or <strong>.xlsx</strong> format. Imported activities will be persisted with transactional integrity and displayed in the activity verification table.
+                  This infrastructure project is fully registered in local SQLite persistence. Use the <strong>Schedules & Activities</strong> tab to import baseline schedules in <strong>.csv</strong> or <strong>.xlsx</strong> format, or switch to <strong>Progress Updates</strong> to record and persist raw manual field reports with verified data integrity.
                 </p>
               </div>
             </div>
-          ) : (
+          ) : activeWorkspaceTab === 'schedules' ? (
             /* Tab 2: Schedules & Importer Content (PASS 4) */
             <div className="schedules-container">
               {/* Importer Section */}
@@ -1115,6 +1240,248 @@ export function App(): React.JSX.Element {
                   </p>
                 </div>
               )}
+            </div>
+          ) : (
+            /* Tab 3: Progress Updates Content (PASS 7) */
+            <div className="progress-container">
+              {/* Form Card: Record Manual Field Progress */}
+              <div className="progress-form-card">
+                <div className="progress-card-header">
+                  <div className="progress-card-title-group">
+                    <div className="progress-card-icon-badge">
+                      <Activity size={18} color="var(--accent-blue)" />
+                    </div>
+                    <div>
+                      <h3 className="progress-card-title">Record Manual Field Progress</h3>
+                      <p className="progress-card-subtitle">
+                        Capture ground-truth human updates with guaranteed raw-text preservation.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="progress-mode-badge">
+                    <ShieldCheck size={13} />
+                    <span>PASS 7 &bull; Raw Data Capture</span>
+                  </div>
+                </div>
+
+                {reportSuccessMessage && (
+                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
+                    <CheckCircle2 size={16} />
+                    <span>{reportSuccessMessage}</span>
+                  </div>
+                )}
+
+                {reportFormError && (
+                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                    <AlertTriangle size={16} />
+                    <span>{reportFormError}</span>
+                  </div>
+                )}
+
+                <form id="manual-progress-form" onSubmit={handleProgressUpdateSubmit}>
+                  <div className="form-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="report-date-input">
+                        <Calendar size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
+                        Report Date <span className="required-star">*</span>
+                      </label>
+                      <input
+                        id="report-date-input"
+                        type="date"
+                        className="form-input"
+                        value={reportFormData.reportDate}
+                        onChange={(e) => setReportFormData({ ...reportFormData, reportDate: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="reporter-name-input">
+                        <User size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
+                        Reporter Name
+                      </label>
+                      <input
+                        id="reporter-name-input"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., Rajesh Sharma"
+                        value={reportFormData.reporterName}
+                        onChange={(e) => setReportFormData({ ...reportFormData, reporterName: e.target.value })}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" htmlFor="reporter-role-input">
+                        <ShieldCheck size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
+                        Reporter Role
+                      </label>
+                      <input
+                        id="reporter-role-input"
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g., Site Supervisor / Project Engineer"
+                        value={reportFormData.reporterRole}
+                        onChange={(e) => setReportFormData({ ...reportFormData, reporterRole: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
+                    <label className="form-label" htmlFor="raw-text-input">
+                      <FileText size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
+                      Field Progress Report <span className="required-star">*</span>
+                    </label>
+                    <textarea
+                      id="raw-text-input"
+                      className="form-textarea"
+                      rows={4}
+                      placeholder="Foundation work at Block B is 60% complete. Concrete pouring started today."
+                      value={reportFormData.rawText}
+                      onChange={(e) => setReportFormData({ ...reportFormData, rawText: e.target.value })}
+                      required
+                      style={{ fontFamily: 'inherit', fontSize: '0.9rem' }}
+                    />
+                    <div className="raw-text-hint">
+                      <span>Raw text integrity guaranteed: All metrics, numbers, and notes are preserved verbatim.</span>
+                      <span className="mono">{reportFormData.rawText.length} chars</span>
+                    </div>
+                  </div>
+
+                  <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setReportFormData({ ...reportFormData, rawText: '' })}
+                      disabled={submittingReport || !reportFormData.rawText}
+                    >
+                      Clear Text
+                    </button>
+                    <button
+                      id="submit-progress-update-btn"
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={submittingReport || !reportFormData.rawText.trim()}
+                    >
+                      {submittingReport ? (
+                        <>
+                          <RefreshCw size={14} className="pulse-dot" />
+                          <span>Recording Report...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 size={15} />
+                          <span>Record Field Update</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* History Section: Stored Progress Updates */}
+              <div className="progress-history-card">
+                <div className="progress-card-header">
+                  <div className="progress-card-title-group">
+                    <div className="progress-card-icon-badge" style={{ background: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.25)' }}>
+                      <Clock size={18} color="var(--accent-emerald)" />
+                    </div>
+                    <div>
+                      <h3 className="progress-card-title">Progress Update History</h3>
+                      <p className="progress-card-subtitle">
+                        Persisted chronological feed of ground-truth updates (newest reports first).
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
+                      {progressUpdates.length} {progressUpdates.length === 1 ? 'Report' : 'Reports'}
+                    </span>
+                    <button
+                      id="refresh-progress-btn"
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => selectedProject && fetchProgressUpdates(selectedProject.id)}
+                      disabled={loadingProgressUpdates}
+                      title="Refresh updates from SQLite"
+                    >
+                      <RefreshCw size={13} className={loadingProgressUpdates ? 'pulse-dot' : ''} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {loadingProgressUpdates ? (
+                  <div className="loading-state" style={{ padding: '3rem 1rem' }}>
+                    <RefreshCw size={24} className="pulse-dot" color="var(--accent-blue)" />
+                    <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Loading progress updates from SQLite...</p>
+                  </div>
+                ) : progressUpdates.length === 0 ? (
+                  <div id="progress-empty-state" className="progress-empty-state">
+                    <div className="empty-icon-circle" style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
+                      <Activity size={28} color="var(--text-muted)" />
+                    </div>
+                    <h4 className="empty-title" style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.4rem' }}>No Progress Updates Recorded</h4>
+                    <p className="empty-desc" style={{ maxWidth: 450, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                      No manual field updates have been submitted for <strong>{selectedProject.name}</strong> yet. Use the form above to record your first field update.
+                    </p>
+                  </div>
+                ) : (
+                  <div id="progress-update-list" className="progress-feed">
+                    {progressUpdates.map((update, idx) => (
+                      <div
+                        key={update.id}
+                        id={`progress-update-item-${idx}`}
+                        className="progress-item"
+                      >
+                        <div className="progress-item-header">
+                          <div className="progress-item-meta-left">
+                            <div className="progress-date-badge">
+                              <Calendar size={13} />
+                              <span>Report Date: {update.reportDate}</span>
+                            </div>
+                            {update.reporterName ? (
+                              <div className="progress-reporter-badge">
+                                <User size={13} />
+                                <span>{update.reporterName}</span>
+                                {update.reporterRole && (
+                                  <span className="reporter-role-tag">({update.reporterRole})</span>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="progress-reporter-badge" style={{ opacity: 0.6 }}>
+                                <User size={13} />
+                                <span>Anonymous Field Reporter</span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="progress-item-meta-right">
+                            <span className="badge-source-manual">
+                              Source: {update.sourceType.toUpperCase()}
+                            </span>
+                            <span className={`status-badge ${update.status === 'received' ? 'active' : 'planning'}`} style={{ textTransform: 'capitalize' }}>
+                              {update.status}
+                            </span>
+                            <span className="progress-timestamp" title={`Stored at: ${update.createdAt}`}>
+                              <Clock size={12} />
+                              {new Date(update.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="progress-item-body">
+                          <p className="progress-raw-text">{update.rawText}</p>
+                        </div>
+
+                        <div className="progress-item-footer">
+                          <span className="progress-record-id mono">ID: {update.id}</span>
+                          <span className="progress-pass-tag">Pass 7 Verified Raw Record &bull; Awaiting Pass 8 AI Extraction</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1588,7 +1955,7 @@ export function App(): React.JSX.Element {
                 </div>
                 <div className="meta-card">
                   <span className="meta-card-label">Pass Version</span>
-                  <span className="meta-card-value">Pass 4 Importer</span>
+                  <span className="meta-card-value">Pass 7 Manual Reporting</span>
                 </div>
               </div>
             </div>

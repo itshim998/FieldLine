@@ -21,3 +21,10 @@ export {
   activityRepository
 } from './activity.repository.js';
 export type { ActivityRepository } from './activity.repository.js';
+
+export {
+  SqliteProgressUpdateRepository,
+  progressUpdateRepository
+} from './progress-update.repository.js';
+export type { ProgressUpdateRepository } from './progress-update.repository.js';
+

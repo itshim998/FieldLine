@@ -178,31 +178,54 @@ projects (1) ──────────< (N) schedules ───────
 
 ---
 
+### 4. Manual Progress Reporting Pipeline (Pass 7)
+
+```text
+Manual Progress UI (Field Report Form & Chronological Timeline)
+    ↓
+Progress Update API (POST /api/projects/:projectId/progress-updates, GET /api/projects/:projectId/progress-updates)
+    ↓
+Validation (createProgressUpdateSchema, progressUpdateParamsSchema)
+    ↓
+ProgressUpdateService (verify project, enforce sourceType='manual' & status='received', preserve rawText)
+    ↓
+ProgressUpdateRepository (atomic transaction: progress_updates record + progress_reported project_event)
+    ↓
+SQLite (database/fieldline.db: progress_updates table)
+```
+
+> [!NOTE]
+> **Pass 7 Scope Boundary**: Manual reports are stored as raw text in Pass 7. No AI extraction, activity matching, actual percent calculations, or activity progress mutations occur yet. Raw text integrity is strictly preserved for subsequent AI processing passes.
+
+---
+
 ## Component Boundaries & Directory Layout
 
 ```text
 backend/
   src/
     config/           # Validated environment configuration (env.ts) and structured logger (logger.ts)
-    routes/           # Thin Express route handlers (health.router.ts, project.router.ts)
-    validation/       # Runtime Zod schemas for request/response contracts (health.schema.ts, project.schema.ts)
+    routes/           # Thin Express route handlers (health, project, schedule, progress-update)
+    validation/       # Runtime Zod schemas for request/response contracts
     middleware/       # Centralized error handling, request logging, and Zod validation middleware
-    services/         # Pure application domain logic (health.service.ts, project.service.ts)
-    repositories/     # Direct SQLite persistence (ProjectRepository, SystemRepository)
+    services/         # Pure application domain logic (health, project, schedule-import, progress-update)
+      normalization/  # Date, number, unit, text, and schedule activity normalizers
+      validation/     # Multi-rule schedule validator engine
+    repositories/     # Direct SQLite persistence (Project, System, Schedule, Activity, ProgressUpdate)
     models/           # Strongly typed domain entity definitions and DTO contracts
     database/         # SQLite connection lifecycle, WAL pragmas, migrator, and migrations/
       migrations/     # Ordered migrations (0001, 0002, 0003, 0004)
       migrator.ts     # Schema migration runner with schema_migrations tracking
       db.ts           # initDatabase, getDatabase, runInTransaction, closeDatabase
       schema.ts       # Core tables list and schema constants
-    errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError)
+    errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError, NormalizationError, ScheduleValidationError)
     ai/               # Decoupled AI provider interfaces, mock adapters, contracts, and AI services
-    jobs/             # Local background/batch task workers (Pass 4+)
-  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (15 suites, 90 tests)
+    jobs/             # Local background/batch task workers
+  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (32 suites, 246 tests)
 frontend/
   src/
-    App.tsx           # FieldLine Project Management UI & Workspace Shell
-    index.css         # Visual design system tokens, cards, modals, and responsive layout
+    App.tsx           # FieldLine Project Management, Schedule Viewer & Manual Progress UI
+    index.css         # Visual design system tokens, cards, modals, timeline feeds, and responsive layout
     main.tsx          # React application root
 ```
 
@@ -221,15 +244,25 @@ frontend/
    - Complete Project Management REST API (`GET /api/projects`, `POST /api/projects`, `GET /api/projects/:projectId`, `PATCH /api/projects/:projectId`, `DELETE /api/projects/:projectId`).
    - `ProjectService` application domain layer with clean input normalization and boundary enforcement.
    - Runtime Zod input and output validation (`createProjectSchema`, `updateProjectSchema`, `projectIdParamSchema`).
-   - Project lifecycle UI: Empty state, project list/card selector with search filter, active project workspace, metadata overview, and sub-navigation with future pass indicators.
-   - Active project context persistence in `localStorage` across page reloads with graceful missing project fallback.
-   - Edit metadata modal and safe destructive delete confirmation modal.
+   - Project lifecycle UI: Empty state, project list/card selector with search filter, active project workspace, metadata overview, and sub-navigation.
+   - Active project context persistence in `localStorage` across page reloads.
 5. **Pass 4 — Schedule Importer**:
    - Multi-format schedule import pipeline supporting `.csv` and `.xlsx` files.
-   - Format-agnostic parser architecture (`ScheduleParser`, `CsvScheduleParser`, `XlsxScheduleParser`, `getScheduleParser`).
-   - Header aliasing engine recognizing standard industry variants (Activity ID, Task Name, Start/Finish Dates, WBS, Location, Planned Quantity, Unit).
-   - Atomic persistence via `ScheduleRepository.createWithActivities`: creates schedule, batch inserts activities, logs `schedule_imported` project event, and executes in single SQLite transaction with complete rollback on error.
-   - Intra-file duplicate activity ID detection and structural integrity checks.
-   - Schedule REST API (`POST /api/projects/:projectId/schedules/import`, `GET /api/projects/:projectId/schedules`, `GET /api/projects/:projectId/schedules/:scheduleId`, `GET /api/projects/:projectId/schedules/:scheduleId/activities`).
-   - Frontend Schedule Importer and Activity Verification Table with drag-and-drop file upload, upload state indicators, import summary metrics, schedule selector pills, and responsive data grid.
-   - 21 Vitest test suites (131 tests passing).
+   - Format-agnostic parser architecture (`ScheduleParser`, `CsvScheduleParser`, `XlsxScheduleParser`).
+   - Header aliasing engine recognizing standard industry variants.
+   - Atomic persistence via `ScheduleRepository.createWithActivities`.
+6. **Pass 5 — Schedule Normalization**:
+   - Canonical normalization for dates, numbers, units, text, and schedule rows.
+   - Comprehensive cross-format equivalence testing.
+7. **Pass 6 — Schedule Validation**:
+   - Structural and domain validation engine detecting scheduling errors (inverted dates, negative durations, invalid quantities).
+   - Validation issue payloads and user-friendly error banners.
+8. **Pass 7 — Manual Progress Reporting**:
+   - Dedicated `SqliteProgressUpdateRepository` with atomic `progress_reported` project event logging.
+   - `ProgressUpdateService` with strict project scoping, project existence validation, and cross-project isolation.
+   - Zod validation (`createProgressUpdateSchema`, `reportDateSchema`, `progressUpdateParamsSchema`).
+   - Project-scoped REST API (`POST /api/projects/:projectId/progress-updates`, `GET /api/projects/:projectId/progress-updates`, `GET /api/projects/:projectId/progress-updates/:updateId`).
+   - Verbatim preservation of user `rawText` without aggressive rewriting or mutation of activity progress.
+   - Presentation-grade frontend Progress Updates workspace tab: Manual field report input form, validation error/success indicators, and chronological update timeline ordered newest-first.
+   - 32 Vitest test suites (246 tests passing).
+

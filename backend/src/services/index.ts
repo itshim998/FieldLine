@@ -16,7 +16,14 @@ export {
 } from './schedule-import.service.js';
 export type { ScheduleImportService } from './schedule-import.service.js';
 
+export {
+  DefaultProgressUpdateService,
+  progressUpdateService
+} from './progress-update.service.js';
+export type { ProgressUpdateService, CreateManualUpdateInput } from './progress-update.service.js';
+
 export * from './normalization/index.js';
 export * from './validation/index.js';
+
 
 

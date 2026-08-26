@@ -126,9 +126,9 @@ Example response:
 - [x] **PASS 2 — SQLite and Persistence Foundation** *(Completed)*
 - [x] **PASS 3 — Project Management** *(Completed)*
 - [x] **PASS 4 — Schedule Importer** *(Completed)*
-- [ ] **PASS 5 — Schedule Normalization**
-- [ ] **PASS 6 — Schedule Validation**
-- [ ] **PASS 7 — Manual Progress Reporting**
+- [x] **PASS 5 — Schedule Normalization** *(Completed)*
+- [x] **PASS 6 — Schedule Validation** *(Completed)*
+- [x] **PASS 7 — Manual Progress Reporting** *(Completed)*
 - [ ] **PASS 8 — AI Extraction Layer**
 - [ ] **PASS 9 — Activity Matching Engine**
 - [ ] **PASS 10 — Progress Normalization**
