@@ -1,6 +1,6 @@
-# FieldLine — PASS 4: Schedule Importer
+# FieldLine — PASS 5: Schedule Normalization
 
-You are implementing PASS 4 — Schedule Importer.
+You are implementing PASS 5 — Schedule Normalization.
 
 FieldLine repository:
 
@@ -10,657 +10,638 @@ Local directory:
 
 C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
 
-PASS 0, PASS 1, PASS 2, and PASS 3 are complete.
+PASS 0 through PASS 4 are complete.
 
-Before coding, inspect the current repository carefully. Do not assume the earlier architecture is still exactly as originally described.
-
----
-
-# CURRENT REPOSITORY STATE
-
-PASS 2 already provides the database foundation.
-
-The existing SQLite schema already contains:
-
-- projects
-- schedules
-- activities
-- progress_updates
-- evidence
-- activity_matches
-- activity_progress
-- project_events
-
-The existing domain types already contain:
-
-- Schedule
-- CreateScheduleInput
-- Activity
-- CreateActivityInput
-
-The existing project lifecycle already allows a user to:
-
-- create a project;
-- select/open a project;
-- remain in a current project context.
-
-Build the importer on top of those existing foundations.
-
-Do NOT recreate the schema.
-
-Do NOT duplicate the project architecture.
+Before coding, inspect the current repository carefully and implement Pass 5 on top of the existing importer architecture.
 
 ---
 
-# OBJECTIVE
+# CURRENT STATE
 
-Import real schedule data into the currently selected FieldLine project.
-
-Initial supported formats:
-
-- CSV
-- XLSX
-
-The core pipeline is:
+PASS 4 already implements:
 
 ```text
-Uploaded file
+CSV / XLSX
     ↓
-file/type/size validation
+file validation
     ↓
 parser
     ↓
-column/header mapping
+header mapping
     ↓
-canonical import rows
+CanonicalScheduleImportRow
     ↓
-basic structural checks
+schedule/activity persistence
+
+The current canonical importer row contains:
+
+externalId
+name
+plannedStart
+plannedFinish
+description
+wbsCode
+location
+plannedQuantity
+unit
+
+The current parsers intentionally preserve much of the source representation.
+
+PASS 5 must introduce a deterministic normalization layer before persistence.
+
+OBJECTIVE
+
+Create the canonical internal activity representation.
+
+The core pipeline becomes:
+
+Uploaded CSV/XLSX
     ↓
-transaction
+parser
     ↓
-schedule record
+source-canonical rows
     ↓
-activity records
+NORMALIZATION
+    ↓
+normalized FieldLine activity representation
+    ↓
+repository
     ↓
 SQLite
 EXIT CRITERION
 
-A real CSV or XLSX schedule file can be uploaded from an open project and produce usable persisted FieldLine activities that can be visibly inspected in the UI.
+Equivalent schedule information from different CSV/XLSX source representations produces the same normalized internal activity format.
+
+For example, reasonable equivalent representations of:
+
+Activity ID
+Activity name
+Start date
+Finish date
+Quantity
+Unit
+whitespace
+missing values
+
+must converge to the same deterministic representation.
 
 CRITICAL PASS BOUNDARY
 
-Do NOT implement PASS 5 or PASS 6.
+Do NOT implement PASS 6.
 
-PASS 4 is the importer.
+PASS 5 is normalization, NOT schedule validation.
 
-Do not build:
+Do not implement:
 
-deep date normalization;
-quantity normalization;
-unit normalization;
-aggressive text normalization;
-advanced duplicate-resolution logic;
-comprehensive schedule validation;
-activity semantic validation;
 schedule quality scoring;
-AI schedule interpretation.
+impossible-date detection such as finish < start;
+dependency validation;
+duplicate-resolution policies;
+WBS hierarchy validation;
+semantic activity validation;
+AI-assisted normalization;
+schedule anomaly detection;
+business-rule validation.
 
-Those belong to later passes.
+Normalization may reject a value only when it is impossible to transform it into the canonical representation required by the application.
 
-The importer may perform only the minimum structural checks necessary to prevent obviously unusable data from reaching SQLite.
+Do not turn this into a validation engine.
 
 FIRST: INSPECT THE CURRENT REPOSITORY
 
-Before modifying anything, inspect:
+Inspect:
 
-current project router/service;
-current project workspace UI;
-existing database layer;
-schedule/activity schema;
-domain types;
-repository conventions;
-validation conventions;
-error handling;
-setup/reset behavior;
-tests;
-package.json.
+CanonicalScheduleImportRow;
+CSV parser;
+XLSX parser;
+header mapper;
+schedule import service;
+schedule repository;
+activity repository;
+importer tests;
+existing domain models;
+existing frontend importer;
+existing error handling;
+package dependencies.
 
-Determine exactly where the new importer should fit.
+Do not duplicate functionality already present in Pass 4.
 
-Preserve existing conventions.
+NORMALIZATION ARCHITECTURE
 
-ARCHITECTURE
+Create an explicit normalization boundary.
 
-The importer must follow:
+Prefer something conceptually like:
 
-React UI
+backend/src/services/normalization/
+    schedule-normalizer.ts
+    date-normalizer.ts
+    number-normalizer.ts
+    text-normalizer.ts
+    unit-normalizer.ts
+
+Adapt the structure to current repository conventions.
+
+Do not create empty abstractions.
+
+The architecture should be:
+
+ScheduleImportService
     ↓
-HTTP upload route
+Parser
     ↓
-file validation
-    ↓
-Import service
-    ↓
-parser adapter
-    ↓
-canonical import rows
-    ↓
-Schedule/Activity repositories
-    ↓
-SQLite
-
-Do NOT put:
-
-CSV parsing in routes;
-XLSX parsing in routes;
-SQL in services;
-SQL in parsers;
-database calls in the frontend.
-FILE UPLOAD
-
-Add local multipart upload support.
-
-Use a minimal library such as:
-
-multer
-
-Do not introduce cloud storage.
-
-Uploaded files must remain local.
-
-Prefer a temporary upload location and clean up temporary files after the import completes or fails.
-
-Do not expose arbitrary filesystem paths to the browser.
-
-SUPPORTED FILES
-
-Support:
-
-.csv
-.xlsx
-
-Reject unsupported formats cleanly.
-
-Also enforce a reasonable local file-size limit so a malformed huge upload cannot accidentally consume excessive memory.
-
-Do not invent a complicated document-management system.
-
-PARSERS
-
-Create separate parser boundaries.
-
-Conceptually:
-
-ScheduleParser
-├── CsvScheduleParser
-└── XlsxScheduleParser
-
-Each parser should produce the same canonical import representation.
-
-Do not let downstream services care whether the source was CSV or XLSX.
-
-For example, conceptually:
-
 CanonicalScheduleImportRow
+    ↓
+ScheduleNormalizer
+    ├── text normalization
+    ├── date normalization
+    ├── number normalization
+    ├── percentage normalization where applicable
+    ├── unit normalization
+    └── missing-value normalization
+    ↓
+Normalized activity inputs
+    ↓
+Repository
+CANONICAL INTERNAL REPRESENTATION
+
+Define a clear normalized representation.
+
+At minimum it should have:
+
+externalId: string
+name: string
+description: string | null
+wbsCode: string | null
+location: string | null
+plannedStart: string
+plannedFinish: string
+plannedQuantity: number | null
+unit: string | null
+
+Use the project's existing date/TypeScript conventions.
+
+The key requirement is that downstream persistence receives one consistent representation regardless of CSV/XLSX source formatting.
+
+Do not keep source-specific representations in the persistence layer.
+
+1. TEXT NORMALIZATION
+
+Normalize textual fields deterministically.
+
+For:
 
 externalId
 name
 description
 wbsCode
 location
-start
-finish
-quantity
 unit
 
-Adapt naming to the existing repository conventions.
+apply appropriate minimal normalization:
 
-HEADER MAPPING
+Whitespace
+trim leading/trailing whitespace;
+collapse repeated internal whitespace where safe;
+convert empty strings to null for nullable fields.
 
-Real schedule files will not necessarily use exactly one canonical header spelling.
+Example:
 
-Support reasonable aliases for the core columns.
+"  Excavation   Work  "
+→
+"Excavation Work"
 
-At minimum recognize variants of:
+Do not aggressively rewrite meaningful content.
 
-Activity ID
-Activity Name
-Description
-WBS
-Location
-Start
-Finish
-Quantity
-Unit
+IDs
 
-Examples of reasonable aliases include:
+For externalId:
 
-Activity ID
-ActivityID
-ID
-Task ID
-Activity
+trim whitespace;
+preserve the actual identifier semantics;
+do NOT arbitrarily remove punctuation;
+do NOT invent IDs;
+do NOT lowercase identifiers unless the existing application explicitly defines IDs as case-insensitive.
 
-Activity Name
-ActivityName
-Task Name
-Name
+The goal is canonical formatting, not changing identifiers.
 
-WBS
-WBS Code
-WBSCode
+Names
 
-Start
-Start Date
-Planned Start
-PlannedStart
+Trim and collapse unnecessary whitespace.
 
-Finish
-Finish Date
-Planned Finish
-PlannedFinish
+Do not change capitalization purely for aesthetics unless there is a documented canonical rule.
 
-Quantity
-Qty
-Planned Quantity
+2. DATE NORMALIZATION
 
-Unit
-UOM
-Units
+Create a dedicated deterministic date normalizer.
 
-Do not build a massive synonym engine.
+All normalized schedule dates should use one representation.
 
-Keep aliases explicit and maintainable.
+Prefer:
 
-Header matching can be case-insensitive and whitespace-tolerant.
+YYYY-MM-DD
 
-REQUIRED VS OPTIONAL COLUMNS
+unless the existing application has a stronger established convention.
 
-At minimum, the importer needs enough data to create an activity safely.
+Support common unambiguous source forms, including where safely possible:
 
-Required source concepts:
+YYYY-MM-DD
+YYYY/MM/DD
+YYYY-MM-DDTHH:mm:ss...
+Excel date values
+JavaScript Date values
 
-Activity ID
-Activity Name
-Start
-Finish
+Also support common day-first date representations where the interpretation is deterministic.
 
-Optional:
+Important:
 
-Description
-WBS
-Location
-Quantity
-Unit
+Do not silently guess between ambiguous formats such as:
 
-If required columns are absent, reject the file with a useful error explaining which required columns are missing.
+01/02/2026
 
-Do not silently import a file that cannot produce meaningful activities.
+unless the repository establishes an explicit rule.
 
-BASIC ROW HANDLING
+Choose a deterministic policy and document it.
 
-For each parsed row:
+A good approach is:
 
-trim obvious surrounding whitespace;
-convert empty strings to null where the database permits null;
-preserve source values otherwise;
-map them into the canonical import representation.
+ISO formats are unambiguous;
+Excel date values are interpreted using Excel semantics;
+unambiguous slash-form dates can be normalized;
+genuinely ambiguous dates should produce a clear normalization error rather than silently changing the date.
 
-Do NOT perform deep normalization.
+Do NOT yet enforce semantic rules such as:
 
-Do NOT change arbitrary date formats into a universal format in this pass unless the parser already gives a reliable date value.
+finish >= start
 
-Do not infer missing activity IDs or names.
+That belongs to PASS 6.
 
-Rows missing required activity identity fields should be rejected or reported clearly.
+EXCEL DATE HANDLING
 
-Prefer a deterministic import result rather than silently dropping bad rows.
+This is important.
 
-SCHEDULE RECORD
+CSV may provide:
 
-When importing a file, create one schedules record representing that import.
+2026-04-01
+01/04/2026
+Apr 1, 2026
 
-Populate sensible fields:
+while XLSX may provide an actual Excel date value.
 
-generated schedule ID;
-current project ID;
-schedule name;
-version;
-source type (csv or xlsx);
-original filename;
-baseline flag using the existing schema conventions.
+The normalization layer must ensure that equivalent date values from CSV/XLSX ultimately become the same canonical string.
 
-Do not invent sophisticated schedule-versioning logic yet.
+Do not leak SheetJS-specific date representations downstream.
 
-A simple imported schedule record is sufficient for this pass.
+3. NUMBER NORMALIZATION
 
-ACTIVITY PERSISTENCE
+Create a deterministic number normalizer.
 
-Each canonical import row becomes an activities record linked to:
+At minimum support reasonable numeric representations such as:
 
-current project
-+
-new schedule
+1250
+"1250"
+"1,250"
+"1.25E3"
+" 1250 "
 
-Map:
+where the representation is unambiguous.
 
-externalId    → external_id
-name          → name
-description   → description
-wbsCode       → wbs_code
-location      → location
-start         → planned_start
-finish        → planned_finish
-quantity      → planned_quantity
-unit          → unit
+Normalize them to a JavaScript number.
 
-Use the existing database constraints.
+Examples:
 
-Do not bypass the repository layer.
+"1,250" → 1250
+"1250.00" → 1250
+"1.25E3" → 1250
 
-REPOSITORIES
+Do not silently reinterpret ambiguous locale-specific decimal formats such as:
 
-Introduce repository boundaries for the persistence operations actually required by this pass.
+1.234,56
 
-At minimum provide the ability to:
+unless there is a deterministic rule.
 
-create schedule
-retrieve schedule
-list schedules for project
+Do NOT validate whether a quantity is sensible for the project. That belongs to later validation/domain logic.
 
-create activities for schedule
-retrieve/list activities for schedule
+4. PERCENTAGE NORMALIZATION
 
-Use typed repository interfaces.
+The current schedule activity representation should remain compatible with:
 
-The exact names should match the existing project repository style.
+baselineProgress
 
-Do not implement the full future schedule/activity CRUD surface unless genuinely necessary.
+even if Pass 4 currently defaults it to zero.
 
-TRANSACTIONAL IMPORT
+Where a source percentage is actually present and the importer supports it, normalize equivalent forms such as:
 
-The import must be atomic.
+0.5
+50
+"50%"
+" 50 % "
 
-Use the existing transaction boundary.
+according to one explicit semantic rule.
 
-The desired behavior is:
+The important distinction is:
 
-create schedule
-    ↓
-insert activities
-    ↓
-all succeed
-    ↓
-commit
+50%
+= 50 percent
 
-If any required row or database operation fails:
+whereas:
 
-rollback
+0.5
 
-The database must not be left with:
+must NOT be automatically assumed to mean 50% unless the source field semantics establish that convention.
 
-schedule created
-but only half of its activities imported
+Do not invent percentage data when the schedule does not provide it.
 
-Test this explicitly.
+Do not implement progress/actual-progress logic.
 
-DUPLICATES
+5. UNIT NORMALIZATION
 
-The existing database already protects:
+Normalize common equivalent unit representations to a deterministic canonical form.
 
-(schedule_id, external_id)
+Examples where justified:
 
-Do not invent a new duplicate policy.
+"kg" → "kg"
+"KGS" → "kg"
+"meter" → "m"
+"metre" → "m"
+"meters" → "m"
+"MT" → "t"         only if the semantic meaning is unambiguous
 
-For a duplicate activity ID within the same imported schedule, fail the import clearly rather than silently overwriting data.
+Keep the unit normalization dictionary small and explicit.
 
-Do not attempt merge/upsert behavior in Pass 4.
+Do not build a general-purpose units/conversion engine.
 
-IMPORT SERVICE
+Most importantly:
 
-Create an application service responsible for orchestration.
+Normalize unit labels, but do NOT convert quantities between units.
 
-Conceptually:
+For example:
 
-ScheduleImportService
+1000 kg
 
-It should:
+must not automatically become:
 
-identify the parser;
-parse the file;
-map headers;
-perform basic structural checks;
-create the schedule;
-create activities;
-commit atomically;
-return an import summary.
+1 t
 
-The service must not depend on Express request/response objects.
+in Pass 5.
 
-IMPORT RESULT
+Unit conversion is outside this pass.
 
-Return a useful structured result such as:
+Unknown units should be preserved in a normalized textual form rather than invented or silently discarded.
 
-schedule
-activitiesImported
-sourceType
-originalFilename
+6. MISSING VALUE NORMALIZATION
 
-Optionally include:
+Establish one representation for missing nullable values.
 
-rowCount
+For example, normalize:
 
-Do not build a giant import-reporting framework.
+""
+" "
+null
+undefined
 
-HTTP API
+to:
 
-Add a project-scoped schedule import endpoint.
+null
 
-Suggested shape:
+for nullable fields.
 
-POST /api/projects/:projectId/schedules/import
+Do not turn missing required fields into fabricated values.
 
-Use multipart form-data with a single file field, for example:
+Do not use:
 
-file
+"N/A"
+"unknown"
+"-"
 
-Validate:
+as fake data.
 
-project ID;
-file presence;
-supported file type;
-file size.
+For required fields such as:
 
-The route should remain thin and delegate to the import service.
+externalId
+name
+plannedStart
+plannedFinish
 
-Also expose a small read endpoint so the frontend can verify the result, for example:
+the normalizer should clearly report when no canonical value can be produced.
 
-GET /api/projects/:projectId/schedules
-GET /api/projects/:projectId/schedules/:scheduleId/activities
+7. NORMALIZER MUST BE DETERMINISTIC
 
-Keep these read endpoints minimal.
+The same input must always produce the same normalized output.
 
-They exist to support the importer workflow and demo verification.
+Do NOT:
 
-FRONTEND
+use an LLM;
+use current time;
+depend on locale;
+use random IDs;
+use browser state;
+inspect external services.
 
-Add an Import Schedule capability to the currently open project workspace.
+Normalization must be pure/repeatable.
 
-Do not replace the entire Pass 3 UI.
+Prefer pure functions where possible.
 
-Add only what is needed.
+8. IMPORTER INTEGRATION
 
-The user flow should be:
+Modify ScheduleImportService so the flow becomes:
 
-Open project
-    ↓
-Import Schedule
-    ↓
-Choose CSV/XLSX file
-    ↓
-Upload
-    ↓
-Import progress/state
-    ↓
-Success summary
-    ↓
-View imported activities
+parse
+ ↓
+canonical rows
+ ↓
+normalize
+ ↓
+normalized rows
+ ↓
+duplicate checks where already defined
+ ↓
+repository
 
-The UI should show:
+The repository should receive the normalized representation.
 
-selected filename;
-supported formats;
-upload state;
-success/failure;
-activities imported.
+Do not put normalization inside:
 
-After successful import, show a basic activity table containing at least:
+SQLite;
+repository SQL;
+React;
+HTTP routes.
+9. IMPORTANT DATA-PRESERVATION RULE
 
-Activity ID
-Activity Name
-WBS
-Location
-Start
-Finish
-Quantity
-Unit
+Normalization must never silently destroy meaningful source information.
 
-This table is a verification surface, not the final Activity Detail UI.
+Examples:
 
-Do NOT implement sorting, filtering, editing, progress, variance, risk, or AI matching yet.
+Do NOT:
 
-ERROR HANDLING
+"ACT-001/A"
+→
+"ACT001A"
 
-Use the existing AppError model.
+Do NOT:
 
-Expected importer errors include:
+"Pump Station 01"
+→
+"pump station 1"
 
-unsupported file type;
-missing file;
-file too large;
-missing required headers;
-malformed CSV;
-malformed XLSX;
-invalid row structure;
-duplicate activity within import;
-unknown project;
-database failure.
+Do NOT invent WBS codes.
 
-Return clear human-readable errors.
+Do NOT invent quantities.
 
-Do not expose raw parser stack traces.
+Do NOT invent units.
 
-CLEANUP
+Do NOT invent dates.
 
-Temporary uploaded files should be cleaned up after:
+Normalization should canonicalize representation, not reinterpret project information.
 
-successful import;
-failed import.
+10. ERROR MODEL
 
-Do not leave uploaded junk inside the repository.
+Use the existing AppError architecture.
 
-Permanent evidence/document storage belongs to later passes.
+Introduce a focused normalization error if useful, but do not create a new elaborate error hierarchy.
 
-TESTING
+A normalization failure should clearly identify:
 
-Add tests for:
+field;
+source value;
+reason;
+row where appropriate.
 
-Parser tests
+Example:
 
-CSV:
+Row 17: Could not normalize Start Date '31/31/2026'
 
-valid file;
-common headers;
-optional columns;
-missing required header;
-malformed input.
+Do not expose parser stack traces.
 
-XLSX:
+11. TESTS
 
-valid workbook;
-expected worksheet parsing;
-missing required header.
-Header mapping
+Create dedicated normalization tests.
 
-Verify supported aliases map to the same canonical fields.
+At minimum test:
 
-Import service
-creates schedule;
-creates activities;
-links everything to the current project;
-returns import summary.
-Transaction behavior
+Text
+"  Activity   A  " → "Activity A"
+" " → null
+IDs
 
-Verify:
+Verify whitespace normalization without destructive rewriting.
 
-successful import commits;
-failed import rolls back schedule and activities.
-Duplicate behavior
+Dates
 
-Duplicate activity IDs within one schedule must fail predictably.
+Test equivalent forms:
 
-API tests
+2026-04-01
+2026/04/01
+Excel date equivalent
+
+where supported.
+
+Test ambiguous dates according to the documented policy.
+
+Test invalid/unparseable values.
+
+Numbers
 
 Test:
 
-POST /api/projects/:projectId/schedules/import
-GET /api/projects/:projectId/schedules
-GET /api/projects/:projectId/schedules/:scheduleId/activities
+1250
+"1250"
+"1,250"
+"1250.00"
+"1.25E3"
+Percentages
 
-including validation/error cases.
+Test supported representations explicitly.
 
-Regression
+Units
 
-All Pass 0–3 tests must remain green.
+Test supported aliases.
 
-TEST DATA
+Missing values
 
-Create small deterministic test fixtures for both CSV and XLSX.
+Test empty/whitespace/null behavior.
 
-Keep them under a suitable test-fixture location.
+Canonical equivalence
 
-Do not add large proprietary sample files.
+Most importantly, provide cases where different source representations produce exactly the same normalized object.
 
-The fixtures should cover:
+For example:
 
-Activity ID
-Activity Name
-Description
-WBS
-Location
-Start
-Finish
-Quantity
-Unit
+CSV representation
+        ↓
+Normalizer
+        ↓
+Canonical Activity A
 
-and at least one reasonable alias variation.
+XLSX representation
+        ↓
+Normalizer
+        ↓
+Canonical Activity A
 
-DATABASE SAFETY
+The outputs should compare equal.
 
-Do not modify the migration history.
+12. IMPORTER REGRESSION TESTS
 
-Do not create a new migration unless a concrete schema change is actually required.
+Extend existing importer tests so that:
 
-The existing schedules and activities schema should already be sufficient for this pass.
+CSV import receives normalized values;
+XLSX import receives normalized values;
+CSV and XLSX fixtures containing equivalent data produce equivalent activity representations;
+persistence stores the normalized values.
 
-If you believe a schema change is genuinely necessary, STOP and explain why in the final report rather than silently expanding the scope.
+Do not remove existing parser tests.
 
-PASS BOUNDARY CHECK
+13. FRONTEND
+
+Pass 5 does NOT need a major UI redesign.
+
+The existing activity table can continue to display the normalized values.
+
+Optionally show a small import summary such as:
+
+Normalized successfully
+
+but do not build a normalization review UI yet.
+
+Pass 6 will eventually deal with validation and richer feedback.
+
+14. DATABASE
+
+Do NOT modify the existing migration chain unless absolutely necessary.
+
+The existing:
+
+schedules
+activities
+
+schema should be sufficient for normalization.
+
+If a schema change appears necessary, do not silently add one just to accommodate the implementation.
+
+Explain why it is needed in the final report.
+
+15. PASS 6 BOUNDARY CHECK
 
 Before committing, explicitly verify that you did NOT implement:
 
-schedule normalization;
-schedule validation engine;
-AI extraction;
-activity matching;
-progress reporting;
-variance;
-risk;
-evidence/document ingestion;
-assistant;
-dashboard analytics.
+finish-before-start validation;
+date-range validation;
+WBS hierarchy validation;
+semantic schedule validation;
+advanced duplicate resolution;
+schedule quality scoring;
+anomaly detection.
 
-Those are later passes.
+A value becoming canonical does NOT mean it is semantically valid.
+
+Example:
+
+plannedStart = 2026-05-10
+plannedFinish = 2026-05-01
+
+Pass 5 may represent both as canonical dates.
+
+PASS 6 decides that the relationship is invalid.
 
 VALIDATION
 
@@ -672,57 +653,57 @@ npm run setup
 npm run setup
 npm run demo:reset
 
-Then manually verify:
+Then run:
 
-1. Open FieldLine.
-2. Open an existing project.
-3. Import a real CSV schedule.
-4. Confirm successful import.
-5. Confirm activities appear.
-6. Import a real XLSX schedule.
-7. Confirm successful import.
-8. Confirm activities appear.
-9. Try an unsupported file.
-10. Confirm a clear error.
-11. Try a file missing a required header.
-12. Confirm a clear error.
-13. Confirm /api/health remains healthy.
+npm run dev
 
-Use real local fixture files during verification.
+Manually verify:
 
+Create/open a project.
+Import a CSV containing mixed formatting.
+Verify normalized values in the activity table.
+Import an equivalent XLSX file.
+Verify equivalent normalized values.
+Verify missing optional values become cleanly null/empty in the UI.
+Verify an invalid/unparseable normalization input produces a clear error.
+Verify /api/health remains healthy.
 SELF-REVIEW
 
-Inspect the final diff and ask:
+Before committing, inspect the final diff.
+
+Ask:
 
 Architecture
 
-Does the importer follow:
+Does the pipeline now remain:
 
-route
-→ validation
-→ import service
-→ parser
-→ repository
-→ SQLite
-Persistence
+parser
+→ canonical source row
+→ normalizer
+→ persistence
+Determinism
 
-Is the entire import atomic?
+Would the same source data always produce the same normalized object?
 
-Parsing
+Data preservation
 
-Do CSV and XLSX produce the same canonical representation?
+Did normalization avoid destructive rewriting?
+
+Cross-format consistency
+
+Do CSV and XLSX converge to the same internal structure?
 
 Scope
 
-Did anything from Pass 5 or Pass 6 accidentally get implemented?
+Did anything from PASS 6 or later leak in?
 
 Regression
 
-Does the complete existing project lifecycle still work?
+Does the complete Pass 3 project lifecycle and Pass 4 importer still work?
 
-Local-only architecture
+Local-only constraint
 
-Did we introduce any external storage/deployment service?
+Did you introduce any external deployment/storage/service dependency?
 
 The answer must be no.
 
@@ -733,11 +714,11 @@ Inspect:
 git status
 git diff
 
-Confirm only PASS 4 work is included.
+Confirm only PASS 5 work is included.
 
 Create:
 
-feat: implement FieldLine schedule importer
+feat: implement FieldLine schedule normalization
 
 Push to:
 
@@ -745,33 +726,31 @@ itshim998/FieldLine
 main
 COMPLETION CRITERIA
 
-PASS 4 is complete only when:
+PASS 5 is complete only when:
 
- CSV upload works.
- XLSX upload works.
- required headers are detected.
- common header aliases work.
- parser output is format-independent.
- schedule record is created.
- activity records are created.
- activities belong to the selected project.
- imports are transactional.
- failed imports leave no partial schedule/activity state.
- duplicate activity IDs are handled deterministically.
- import API works.
- imported schedules can be listed.
- imported activities can be viewed.
- frontend import flow works.
- unsupported files fail clearly.
- missing required headers fail clearly.
- temporary files are cleaned up.
- Pass 0–3 behavior remains intact.
+ A dedicated normalization layer exists.
+ Text is normalized deterministically.
+ whitespace is normalized.
+ missing nullable values become null consistently.
+ dates converge to one canonical representation.
+ Excel/CSV equivalent dates converge.
+ numbers converge to numeric values.
+ percentages are normalized where explicitly supported.
+ units are normalized through an explicit dictionary.
+ no unit conversion is performed.
+ IDs are normalized without destructive rewriting.
+ CSV and XLSX produce equivalent normalized activities.
+ normalized values are what reach SQLite.
+ normalization is deterministic and testable.
+ normalization failures are clear.
+ existing importer functionality remains intact.
+ Pass 6 validation logic was NOT implemented.
  npm test passes.
  npm run build passes.
- setup passes.
- demo reset passes.
- health endpoint remains healthy.
- no Pass 5+ functionality was implemented.
+ npm run setup passes.
+ repeated setup passes.
+ npm run demo:reset passes.
+ /api/health remains healthy.
  final diff reviewed.
  commit created.
  commit pushed.
@@ -779,33 +758,33 @@ FINAL REPORT
 
 Report:
 
-Files added/changed.
-Parser architecture.
-Header aliases supported.
-Schedule/activity repository changes.
-Import service flow.
-API endpoints.
-Frontend import flow.
-Transaction/rollback behavior.
-Tests added and total passing tests.
-Results of all validation commands.
-Manual CSV/XLSX verification.
-Any schema changes and why.
+Normalization architecture.
+Canonical internal representation.
+Date normalization rules.
+Number/percentage normalization rules.
+Unit normalization dictionary.
+Missing-value behavior.
+Files changed.
+Tests added.
+CSV/XLSX equivalence tests.
+Validation command results.
+Manual verification result.
+Any schema changes and justification.
 Self-review findings.
-Commit hash/message/branch/push status.
+Commit hash/message/branch/push result.
 
 Explicitly confirm:
 
-PASS 5 and later functionality were NOT implemented.
+PASS 6 and later functionality were NOT implemented.
 
 FINAL INSTRUCTION
 
-Implement PASS 4 — Schedule Importer only.
+Implement PASS 5 — Schedule Normalization only.
 
-The goal is simple:
+The objective is:
 
-A real CSV or XLSX schedule file should enter an open FieldLine project and become usable persisted activities.
+Different schedule-source representations should converge into one deterministic FieldLine activity representation before persistence.
 
-Do not jump ahead into normalization, validation engines, AI, progress, or analytics.
+Do not move into schedule validation, anomaly detection, AI, progress, or matching.
 
-Stop after PASS 4.
+Stop after PASS 5.

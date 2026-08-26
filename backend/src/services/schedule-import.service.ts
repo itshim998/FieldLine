@@ -4,6 +4,7 @@ import { ProjectRepository, projectRepository as defaultProjectRepo } from '../r
 import { ScheduleRepository, scheduleRepository as defaultScheduleRepo } from '../repositories/schedule.repository.js';
 import { ActivityRepository, activityRepository as defaultActivityRepo } from '../repositories/activity.repository.js';
 import { getScheduleParser } from './importer/parserFactory.js';
+import { ScheduleNormalizer, scheduleNormalizer as defaultNormalizer } from './normalization/index.js';
 import {
   Schedule,
   Activity,
@@ -30,16 +31,20 @@ export class DefaultScheduleImportService implements ScheduleImportService {
   private projectRepo: ProjectRepository;
   private scheduleRepo: ScheduleRepository;
   private activityRepo: ActivityRepository;
+  private normalizer: ScheduleNormalizer;
 
   constructor(
     projectRepo: ProjectRepository = defaultProjectRepo,
     scheduleRepo: ScheduleRepository = defaultScheduleRepo,
-    activityRepo: ActivityRepository = defaultActivityRepo
+    activityRepo: ActivityRepository = defaultActivityRepo,
+    normalizer: ScheduleNormalizer = defaultNormalizer
   ) {
     this.projectRepo = projectRepo;
     this.scheduleRepo = scheduleRepo;
     this.activityRepo = activityRepo;
+    this.normalizer = normalizer;
   }
+
 
   async importSchedule(
     projectId: string,
@@ -63,9 +68,12 @@ export class DefaultScheduleImportService implements ScheduleImportService {
         throw new ValidationError('Uploaded schedule contains no activity rows');
       }
 
-      // 4. Validate intra-file duplicate activity IDs
+      // 4. Deterministically normalize canonical rows (PASS 5)
+      const normalizedRows = this.normalizer.normalizeScheduleRows(canonicalRows);
+
+      // 5. Validate intra-file duplicate activity IDs
       const seenExternalIds = new Set<string>();
-      for (const row of canonicalRows) {
+      for (const row of normalizedRows) {
         const idLower = row.externalId.toLowerCase();
         if (seenExternalIds.has(idLower)) {
           throw new ConflictError(
@@ -75,24 +83,24 @@ export class DefaultScheduleImportService implements ScheduleImportService {
         seenExternalIds.add(idLower);
       }
 
-      // 5. Derive sensible schedule name
+      // 6. Derive sensible schedule name
       const ext = path.extname(file.originalname);
       const baseName = path.basename(file.originalname, ext).trim();
       const scheduleName = baseName || `${project.name} Schedule`;
 
-      // 6. Execute atomic persistence via repository boundary
-      const activityInputs: Omit<CreateActivityInput, 'scheduleId'>[] = canonicalRows.map((row) => ({
+      // 7. Execute atomic persistence via repository boundary using normalized inputs
+      const activityInputs: Omit<CreateActivityInput, 'scheduleId'>[] = normalizedRows.map((row) => ({
         projectId,
         externalId: row.externalId,
         name: row.name,
-        description: row.description ?? null,
-        wbsCode: row.wbsCode ?? null,
-        location: row.location ?? null,
+        description: row.description,
+        wbsCode: row.wbsCode,
+        location: row.location,
         plannedStart: row.plannedStart,
         plannedFinish: row.plannedFinish,
-        plannedQuantity: row.plannedQuantity ?? null,
-        unit: row.unit ?? null,
-        baselineProgress: 0.0
+        plannedQuantity: row.plannedQuantity,
+        unit: row.unit,
+        baselineProgress: row.baselineProgress ?? 0.0
       }));
 
       const { schedule } = this.scheduleRepo.createWithActivities(
@@ -109,11 +117,12 @@ export class DefaultScheduleImportService implements ScheduleImportService {
 
       return {
         schedule,
-        activitiesImported: canonicalRows.length,
-        rowCount: canonicalRows.length,
+        activitiesImported: normalizedRows.length,
+        rowCount: normalizedRows.length,
         sourceType,
         originalFilename: file.originalname
       };
+
     } finally {
       this.cleanupTempFile(file.path);
     }

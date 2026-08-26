@@ -84,8 +84,22 @@ export interface CanonicalScheduleImportRow {
   description?: string | null;
   wbsCode?: string | null;
   location?: string | null;
-  plannedQuantity?: number | null;
+  plannedQuantity?: number | string | null;
   unit?: string | null;
+  baselineProgress?: number | string | null;
+}
+
+export interface NormalizedScheduleActivity {
+  externalId: string;
+  name: string;
+  plannedStart: string;
+  plannedFinish: string;
+  description: string | null;
+  wbsCode: string | null;
+  location: string | null;
+  plannedQuantity: number | null;
+  unit: string | null;
+  baselineProgress: number;
 }
 
 export interface ScheduleImportSummary {
@@ -95,6 +109,7 @@ export interface ScheduleImportSummary {
   sourceType: ScheduleSourceType;
   originalFilename: string;
 }
+
 
 // ==========================================
 // 3. Activities

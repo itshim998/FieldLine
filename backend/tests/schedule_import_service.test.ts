@@ -154,4 +154,35 @@ describe('ScheduleImportService', () => {
     const activities = service.listScheduleActivities(testProjectId, imported.schedule.id);
     expect(activities).toHaveLength(5);
   });
+
+  it('should normalize activities during import before persisting to SQLite', async () => {
+    const unnormalizedCsvPath = path.join(fixturesDir, 'temp_unnorm.csv');
+    const content = [
+      'Activity ID,Activity Name,Description,WBS,Location,Start,Finish,Quantity,Unit',
+      '  ACT-NORM-01  ,"  Site   Clearing  ",,  1.1  ,"  Sector 1  ",2026/04/01,15-Apr-2026,"1,250",sqm'
+    ].join('\n');
+    fs.writeFileSync(unnormalizedCsvPath, content, 'utf-8');
+
+    const result = await service.importSchedule(testProjectId, {
+      path: unnormalizedCsvPath,
+      originalname: 'unnormalized.csv',
+      mimetype: 'text/csv'
+    });
+
+    const activities = activityRepo.listByScheduleId(result.schedule.id);
+    expect(activities).toHaveLength(1);
+    expect(activities[0]).toMatchObject({
+      externalId: 'ACT-NORM-01',
+      name: 'Site Clearing',
+      description: null,
+      wbsCode: '1.1',
+      location: 'Sector 1',
+      plannedStart: '2026-04-01',
+      plannedFinish: '2026-04-15',
+      plannedQuantity: 1250,
+      unit: 'm2',
+      baselineProgress: 0.0
+    });
+  });
 });
+

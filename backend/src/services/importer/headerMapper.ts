@@ -1,5 +1,6 @@
 import { CanonicalScheduleImportRow } from '../../models/domain.types.js';
 import { ValidationError } from '../../errors/AppError.js';
+import { normalizeNumber } from '../normalization/number-normalizer.js';
 
 export type CanonicalFieldKey = keyof CanonicalScheduleImportRow;
 
@@ -19,8 +20,10 @@ export const FIELD_DISPLAY_NAMES: Record<CanonicalFieldKey, string> = {
   wbsCode: 'WBS Code',
   location: 'Location',
   plannedQuantity: 'Quantity',
-  unit: 'Unit'
+  unit: 'Unit',
+  baselineProgress: 'Baseline Progress'
 };
+
 
 /**
  * Dictionary of supported header aliases for each canonical field.
@@ -141,8 +144,19 @@ const ALIAS_MAP: Record<CanonicalFieldKey, string[]> = {
     'unit of measurement',
     'unit_of_measure',
     'unit_of_measurement'
+  ],
+  baselineProgress: [
+    'baseline progress',
+    'baseline_progress',
+    'baselineprogress',
+    'progress',
+    'progress %',
+    'progress%',
+    'baseline %',
+    'baseline%'
   ]
 };
+
 
 /**
  * Normalizes a header string for alias matching.
@@ -307,8 +321,8 @@ export function transformRowToCanonical(
   if (rowData.plannedQuantity !== undefined && rowData.plannedQuantity !== null) {
     const qtyStr = String(rowData.plannedQuantity).trim();
     if (qtyStr !== '') {
-      const parsedNum = Number(qtyStr);
-      if (isNaN(parsedNum) || parsedNum < 0) {
+      const parsedNum = normalizeNumber(qtyStr, 'planned quantity', rowNumber);
+      if (parsedNum !== null && parsedNum < 0) {
         throw new ValidationError(
           `Row ${rowNumber}: Invalid planned quantity '${qtyStr}'. Must be a non-negative number.`
         );
@@ -317,7 +331,8 @@ export function transformRowToCanonical(
     }
   }
 
-  return {
+
+  const result: CanonicalScheduleImportRow = {
     externalId: externalIdRaw,
     name: nameRaw,
     plannedStart: startRaw,
@@ -328,4 +343,12 @@ export function transformRowToCanonical(
     plannedQuantity,
     unit
   };
+
+  if (rowData.baselineProgress !== undefined && rowData.baselineProgress !== null) {
+    result.baselineProgress = rowData.baselineProgress as string | number;
+  }
+
+  return result;
 }
+
+

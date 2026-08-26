@@ -16,3 +16,5 @@ export {
 } from './schedule-import.service.js';
 export type { ScheduleImportService } from './schedule-import.service.js';
 
+export * from './normalization/index.js';
+

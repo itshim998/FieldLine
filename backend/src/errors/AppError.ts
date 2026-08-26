@@ -50,3 +50,34 @@ export class DatabaseError extends AppError {
     super(message, 500, 'DATABASE_ERROR', details);
   }
 }
+
+export class NormalizationError extends AppError {
+  public readonly fieldName: string;
+  public readonly sourceValue: unknown;
+  public readonly reason: string;
+  public readonly rowNumber?: number;
+
+  constructor(
+    fieldName: string,
+    sourceValue: unknown,
+    reason: string,
+    rowNumber?: number
+  ) {
+    const displayVal = sourceValue === undefined ? 'undefined' : sourceValue === null ? 'null' : String(sourceValue);
+    const rowPrefix = rowNumber !== undefined ? `Row ${rowNumber}: ` : '';
+    const message = `${rowPrefix}Could not normalize ${fieldName} '${displayVal}': ${reason}`;
+
+    super(message, 400, 'NORMALIZATION_ERROR', {
+      fieldName,
+      sourceValue,
+      reason,
+      rowNumber
+    });
+
+    this.fieldName = fieldName;
+    this.sourceValue = sourceValue;
+    this.reason = reason;
+    this.rowNumber = rowNumber;
+  }
+}
+
