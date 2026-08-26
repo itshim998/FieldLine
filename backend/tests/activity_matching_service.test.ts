@@ -25,6 +25,9 @@ describe('ActivityMatchingService', () => {
   let testProjectId: string;
   let testProject2Id: string;
   let testScheduleId: string;
+  let testActivity1Id: string;
+  let testActivity2Id: string;
+  let testActivity3Id: string;
   let testUpdateId: string;
 
   beforeEach(() => {
@@ -66,7 +69,7 @@ describe('ActivityMatchingService', () => {
     });
     testScheduleId = s1.id;
 
-    activityRepo.create({
+    const a1 = activityRepo.create({
       projectId: testProjectId,
       scheduleId: testScheduleId,
       externalId: 'ACT-101',
@@ -76,8 +79,9 @@ describe('ActivityMatchingService', () => {
       plannedStart: '2026-09-01',
       plannedFinish: '2026-09-15'
     });
+    testActivity1Id = a1.id;
 
-    activityRepo.create({
+    const a2 = activityRepo.create({
       projectId: testProjectId,
       scheduleId: testScheduleId,
       externalId: 'ACT-102',
@@ -87,8 +91,9 @@ describe('ActivityMatchingService', () => {
       plannedStart: '2026-09-16',
       plannedFinish: '2026-09-30'
     });
+    testActivity2Id = a2.id;
 
-    activityRepo.create({
+    const a3 = activityRepo.create({
       projectId: testProjectId,
       scheduleId: testScheduleId,
       externalId: 'ACT-103',
@@ -98,6 +103,7 @@ describe('ActivityMatchingService', () => {
       plannedStart: '2026-10-01',
       plannedFinish: '2026-10-15'
     });
+    testActivity3Id = a3.id;
 
     const u1 = updateRepo.create({
       projectId: testProjectId,
@@ -177,7 +183,7 @@ describe('ActivityMatchingService', () => {
     expect(persisted).toHaveLength(2);
   });
 
-  it('should be idempotent: repeated matching replaces previous suggestions without duplicates', async () => {
+  it('should be idempotent: repeated matching replaces previous suggestions without duplicates (Test C)', async () => {
     const extraction: FieldProgressExtraction = {
       items: [
         {
@@ -190,11 +196,171 @@ describe('ActivityMatchingService', () => {
     };
 
     await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
-    expect(matchRepo.listByProgressUpdateId(testUpdateId, testProjectId)).toHaveLength(1);
+    const firstMatches = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
+    expect(firstMatches).toHaveLength(1);
+    expect(firstMatches[0].status).toBe('suggested');
 
     // Re-run matching
     await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
-    expect(matchRepo.listByProgressUpdateId(testUpdateId, testProjectId)).toHaveLength(1);
+    const secondMatches = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
+    expect(secondMatches).toHaveLength(1);
+    expect(secondMatches[0].status).toBe('suggested');
+  });
+
+  it('should preserve confirmed matches across automatic re-matching (Test A)', async () => {
+    // 1. Initial matching generates a suggested match
+    const extraction: FieldProgressExtraction = {
+      items: [
+        {
+          reference: 'foundation excavation',
+          location: 'Block B',
+          progress_percent: 60,
+          status: 'in_progress'
+        }
+      ]
+    };
+
+    await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
+    const initialMatches = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
+    expect(initialMatches).toHaveLength(1);
+    const initialMatchId = initialMatches[0].id;
+
+    // 2. Simulate human review confirming this match
+    db.prepare(`
+      UPDATE activity_matches 
+      SET status = 'confirmed', reviewed_by = 'Engineer Alice', reviewed_at = '2026-08-26T10:00:00Z'
+      WHERE id = ?
+    `).run(initialMatchId);
+
+    // 3. Re-run automatic matching
+    await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
+
+    // 4. Verify confirmed match still exists with all review metadata intact (not deleted/recreated)
+    const allMatches = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
+    const confirmedMatch = allMatches.find(m => m.id === initialMatchId);
+
+    expect(confirmedMatch).toBeDefined();
+    expect(confirmedMatch?.id).toBe(initialMatchId);
+    expect(confirmedMatch?.status).toBe('confirmed');
+    expect(confirmedMatch?.reviewedBy).toBe('Engineer Alice');
+    expect(confirmedMatch?.reviewedAt).toBe('2026-08-26T10:00:00Z');
+
+    // Newly generated suggestion also exists
+    const suggestedMatches = allMatches.filter(m => m.status === 'suggested');
+    expect(suggestedMatches).toHaveLength(1);
+  });
+
+  it('should preserve rejected matches across automatic re-matching (Test B)', async () => {
+    // 1. Manually create a rejected match with reviewer metadata using valid activity ID
+    const rejectedMatch = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivity3Id,
+      confidenceScore: 0.50,
+      matchMethod: 'text_similarity',
+      status: 'rejected',
+      reviewedBy: 'Supervisor Bob',
+      reviewedAt: '2026-08-26T11:00:00Z',
+      rationale: 'Rejected by site manager: wrong work package'
+    });
+
+    // 2. Run matching
+    const extraction: FieldProgressExtraction = {
+      items: [
+        {
+          reference: 'foundation excavation',
+          location: 'Block B',
+          progress_percent: 60,
+          status: 'in_progress'
+        }
+      ]
+    };
+
+    await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
+
+    // 3. Verify rejected match is preserved intact
+    const retrieved = matchRepo.getById(rejectedMatch.id);
+    expect(retrieved).not.toBeNull();
+    expect(retrieved?.id).toBe(rejectedMatch.id);
+    expect(retrieved?.status).toBe('rejected');
+    expect(retrieved?.reviewedBy).toBe('Supervisor Bob');
+    expect(retrieved?.reviewedAt).toBe('2026-08-26T11:00:00Z');
+    expect(retrieved?.rationale).toBe('Rejected by site manager: wrong work package');
+  });
+
+  it('should preserve confirmed and rejected matches while replacing suggested matches in mixed state (Test D)', async () => {
+    // 1. Create a confirmed match using valid activity ID
+    const mConfirmed = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivity1Id,
+      confidenceScore: 0.95,
+      matchMethod: 'exact_id',
+      status: 'confirmed',
+      reviewedBy: 'Lead Auditor',
+      reviewedAt: '2026-08-26T09:00:00Z'
+    });
+
+    // 2. Create a rejected match using valid activity ID
+    const mRejected = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivity3Id,
+      confidenceScore: 0.45,
+      matchMethod: 'text_similarity',
+      status: 'rejected',
+      reviewedBy: 'Lead Auditor',
+      reviewedAt: '2026-08-26T09:30:00Z'
+    });
+
+    // 3. Create an old suggestion using valid activity ID
+    const mOldSuggested = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivity2Id,
+      confidenceScore: 0.60,
+      matchMethod: 'text_similarity',
+      status: 'suggested'
+    });
+
+    expect(matchRepo.listByProgressUpdateId(testUpdateId, testProjectId)).toHaveLength(3);
+
+    // 4. Run automatic re-matching
+    const extraction: FieldProgressExtraction = {
+      items: [
+        {
+          reference: 'foundation excavation',
+          location: 'Block B',
+          progress_percent: 60,
+          status: 'in_progress'
+        }
+      ]
+    };
+
+    await service.matchProgressUpdate(testProjectId, testUpdateId, extraction);
+
+    // 5. Verify results:
+    const allMatches = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
+    
+    // Confirmed preserved
+    const retrievedConfirmed = allMatches.find(m => m.id === mConfirmed.id);
+    expect(retrievedConfirmed).toBeDefined();
+    expect(retrievedConfirmed?.status).toBe('confirmed');
+    expect(retrievedConfirmed?.reviewedBy).toBe('Lead Auditor');
+
+    // Rejected preserved
+    const retrievedRejected = allMatches.find(m => m.id === mRejected.id);
+    expect(retrievedRejected).toBeDefined();
+    expect(retrievedRejected?.status).toBe('rejected');
+    expect(retrievedRejected?.reviewedBy).toBe('Lead Auditor');
+
+    // Old suggestion replaced (no longer in DB)
+    expect(matchRepo.getById(mOldSuggested.id)).toBeNull();
+
+    // New suggestion created
+    const newSuggestions = allMatches.filter(m => m.status === 'suggested');
+    expect(newSuggestions).toHaveLength(1);
+    expect(newSuggestions[0].id).not.toBe(mOldSuggested.id);
   });
 
   it('should throw NotFoundError if progress update belongs to a different project', async () => {

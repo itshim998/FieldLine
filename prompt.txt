@@ -1,561 +1,254 @@
-## PASS 9 — Activity Matching Engine
+# PASS 9 Corrective Fix — Preserve Reviewed Activity Matches
 
-You are implementing **FieldLine PASS 9 — Activity Matching Engine**.
+Pass 9 is **not yet approved** because the current re-matching idempotency implementation deletes **all** `activity_matches` for a progress update before inserting new suggestions.
 
-Pass 8 is complete and approved.
+That is unsafe because future human-review states already exist in the domain:
 
-Your first task is to inspect the current repository carefully and implement Pass 9 around the architecture that actually exists today.
+```text
+suggested
+confirmed
+rejected
+```
 
-Do not assume the earlier roadmap maps 1:1 onto the current code.
+A re-run of the automatic matcher must **never destroy a `confirmed` or `rejected` match**.
+
+## Required correction
+
+Inspect the current `ActivityMatchingService` and `ActivityMatchRepository` implementation on `main` before changing anything.
+
+The current behavior is effectively:
+
+```text
+rerun matching
+    ↓
+deleteByProgressUpdateId(projectId, progressUpdateId)
+    ↓
+insert new suggestions
+```
+
+and that deletion currently affects every match regardless of status.
+
+Change this behavior so that automatic re-matching only replaces **automatically generated `suggested` matches**.
+
+The intended lifecycle is:
+
+```text
+First matching
+    ↓
+suggested match
+
+Rerun matching
+    ↓
+old suggested matches replaced
+    ↓
+confirmed matches preserved
+    ↓
+rejected matches preserved
+```
+
+Do **not** delete or overwrite human-reviewed state.
 
 ---
 
-# 1. Current architectural state
+## 1. Repository change
 
-FieldLine now has this pipeline:
+Modify the activity-match repository so the service can remove only suggestions belonging to a particular progress update/project.
 
-```text
-Raw field report
-      ↓
-Pass 8 AI extraction
-      ↓
-validated structured field facts
-```
-
-Pass 8 produces:
+Prefer a narrow method such as:
 
 ```ts
-{
-  items: [
-    {
-      reference: string,
-      location: string | null,
-      progress_percent: number | null,
-      status: 'unknown' | 'not_started' | 'in_progress' | 'completed' | 'delayed'
-    }
-  ]
-}
+deleteSuggestedByProgressUpdateId(
+  progressUpdateId: string,
+  projectId: string
+): number
 ```
 
-The extracted `reference` is explicitly a **textual work reference**, NOT a schedule activity identity.
+implemented with:
 
-Pass 9 now has one responsibility:
+```sql
+DELETE FROM activity_matches
+WHERE progress_update_id = ?
+  AND project_id = ?
+  AND status = 'suggested'
+```
 
-> Take those structured field facts and identify the most likely scheduled activity or activities they refer to.
+Keep strict project scoping.
 
-The central architectural principle remains:
+Do not weaken the existing composite foreign-key protections.
+
+Do not remove the existing general deletion methods unless they are demonstrably unnecessary.
+
+---
+
+## 2. Service change
+
+In:
 
 ```text
-AI interprets messy evidence
+backend/src/services/matching/activity-matching.service.ts
+```
+
+change the re-matching logic so it uses the new **suggested-only** deletion behavior.
+
+The persistence flow should become:
+
+```text
+calculate new candidates
         ↓
-structured facts
+delete previous suggested matches only
         ↓
-matching engine resolves activity identity
-        ↓
-later deterministic progress logic
+insert current suggested matches
 ```
 
-Do not allow the AI layer to define project truth.
-
----
-
-# 2. Important repository findings
-
-The repository already contains a complete domain model for activity matching.
-
-`ActivityMatch` already exists with:
+Never do:
 
 ```text
-id
-projectId
-progressUpdateId
-evidenceId
-activityId
-confidenceScore
-matchMethod
-matchedText
-rationale
-status
-reviewedBy
-reviewedAt
-createdAt
-updatedAt
+DELETE all activity_matches for update
 ```
 
-The existing enum values are:
-
-```text
-MatchMethod =
-  'exact_id'
-  | 'text_similarity'
-  | 'wbs_location'
-  | 'llm_assisted'
-  | 'manual'
-
-MatchStatus =
-  'suggested'
-  | 'confirmed'
-  | 'rejected'
-```
-
-Do not redefine these unless there is an actual deficiency.
-
-The existing `Activity` model contains:
-
-```text
-projectId
-scheduleId
-externalId
-name
-description
-wbsCode
-location
-plannedStart
-plannedFinish
-plannedQuantity
-unit
-baselineProgress
-```
-
-The existing activity repository already supports:
-
-```text
-getById()
-listByScheduleId()
-listByProjectId()
-countByProjectId()
-```
-
-The SQLite schema already contains the `activity_matches` table with project-scoped foreign-key integrity and:
-
-```text
-confidence_score 0..1
-match_method constrained to known enum
-status constrained to suggested/confirmed/rejected
-```
-
-Therefore:
-
-> Do NOT create a new migration merely to implement Pass 9.
-
-Use the existing schema unless you discover a genuine schema deficiency.
-
----
-
-# 3. Pass 9 objective
-
-Given:
-
-```text
-Project
-+
-validated field extraction
-```
-
-produce:
-
-```text
-candidate activity matches
-```
-
-with:
-
-```text
-matched activity
-confidence
-matching method
-matching rationale
-candidate alternatives
-```
-
-Example:
-
-### Schedule
-
-```text
-ACT-101 | Foundation excavation | Block B | WBS 3.1
-ACT-102 | Foundation concrete     | Block B | WBS 3.2
-ACT-103 | Column rebar             | Block C | WBS 4.1
-```
-
-### Extracted field fact
-
-```json
-{
-  "reference": "foundation work",
-  "location": "Block B",
-  "progress_percent": 60,
-  "status": "in_progress"
-}
-```
-
-Potential output:
-
-```text
-best match:
-ACT-101
-confidence: 0.87
-method: text_similarity
-rationale: "foundation" + "Block B" strongly align with activity name and location
-
-alternatives:
-ACT-102
-confidence: 0.78
-```
-
-The matcher must not silently commit a low-confidence result as confirmed.
-
----
-
-# 4. Match strategy
-
-Implement a deterministic layered strategy.
-
-Use this order:
-
-```text
-1. Exact activity/external ID
-2. Strong text match
-3. WBS/location metadata
-4. Semantic similarity seam
-5. LLM-assisted disambiguation seam
-```
-
-However, do NOT implement unnecessary advanced AI infrastructure merely because the roadmap mentions it.
-
-The important Pass 9 result is the **matching contract and deterministic engine**.
-
-Build the system so semantic/LLM methods can be added cleanly later.
-
----
-
-# 5. Layer 1 — exact activity ID
-
-First detect whether the extracted textual `reference` is actually an explicit activity identifier.
-
-Example:
-
-```text
-ACT-001
-ACT-001/A
-A10023
-```
-
-Compare against `Activity.externalId`.
-
-Rules:
-
-* exact normalized match → strongest possible result
-* confidence should be near 1.0
-* `matchMethod = 'exact_id'`
-* rationale should state that the external activity ID matched exactly
-
-Use the existing normalization helpers where appropriate rather than inventing another identifier normalization implementation. The existing text normalizer preserves punctuation/case in identifiers.
-
-Do not turn ordinary text like:
-
-```text
-"foundation work"
-```
-
-into a fabricated activity ID.
-
----
-
-# 6. Layer 2 — strong text matching
-
-Compare the extracted `reference` against:
-
-```text
-Activity.name
-Activity.description
-```
-
-Do not use database-side fuzzy matching.
-
-Keep the matching logic in a pure domain/application service.
-
-Create a deterministic text similarity implementation.
-
-It may use simple techniques such as:
-
-```text
-- normalized token comparison
-- token overlap
-- Jaccard similarity
-- containment
-- exact normalized phrase match
-```
-
-Do NOT introduce a heavyweight ML/embedding package in Pass 9 unless the existing project already contains one.
-
-The goal is:
-
-> deterministic, understandable matching first.
-
-Example:
-
-```text
-reference:
-"foundation excavation"
-
-activity:
-"Foundation Excavation at Block B"
-```
-
-should score strongly.
-
----
-
-# 7. Layer 3 — WBS and location metadata
-
-Use the extracted fact:
-
-```text
-location
-```
-
-and any schedule metadata available from activities:
-
-```text
-location
-wbsCode
-```
-
-to strengthen or weaken candidate scores.
-
-Examples:
-
-```text
-reference = foundation excavation
-location = Block B
-```
-
-Candidate:
-
-```text
-Foundation Excavation
-Block B
-WBS 3.1
-```
-
-should score significantly higher than:
-
-```text
-Foundation Excavation
-Block C
-```
-
-The matching engine should make the rationale explainable.
-
-Example:
-
-```text
-"Reference strongly matches activity name; location also matches."
-```
-
-Do not make location mandatory because some field reports legitimately omit it.
-
----
-
-# 8. Layer 4 — semantic similarity
-
-Do NOT immediately introduce external embedding infrastructure.
-
-Instead, design a clean interface/seam for semantic matching.
-
-For example:
+The service must continue to persist generated matches as:
 
 ```ts
-interface SemanticActivityMatcher {
-  score(reference: string, activity: Activity): Promise<number>;
-}
+status: 'suggested'
 ```
 
-A deterministic/local implementation may return:
+and never automatically create:
 
 ```text
-0
+confirmed
+rejected
 ```
-
-or a text-based semantic proxy if useful.
-
-The key requirement is architectural isolation:
-
-```text
-matching engine
-      ↓
-semantic matcher interface
-```
-
-rather than embedding provider logic directly into the core matcher.
-
-If the current repo does not have a genuine semantic similarity dependency, do not add one merely for this pass.
 
 ---
 
-# 9. Layer 5 — LLM-assisted disambiguation
+## 3. Critical regression tests
 
-Do not make the entire matcher dependent on an LLM.
+Add explicit tests proving reviewed matches survive automatic re-matching.
 
-Use the existing AI abstraction from Pass 8 only as an optional disambiguation layer.
+### Test A — confirmed survives
 
-The LLM must only be asked to choose among a **small set of already-qualified candidates**.
-
-For example:
+Set up:
 
 ```text
-Field fact:
-"foundation work at Block B"
-
-Candidates:
-ACT-101 Foundation Excavation — Block B
-ACT-102 Foundation Concrete — Block B
-ACT-103 Column Rebar — Block C
+suggested match
 ```
 
-The LLM may choose between the first two if deterministic scoring cannot safely distinguish them.
-
-It must not:
-
-* search the database
-* invent candidate activities
-* create activity IDs
-* mutate activity matches
-* decide project progress
-* calculate variance
-* calculate risk
-
-Use the existing `AIProvider`/`AIService` abstraction.
-
-If a clean LLM disambiguation implementation would materially expand the pass, create the abstraction and deterministic mock seam now, but keep production use optional.
-
----
-
-# 10. Candidate ranking
-
-The output of matching should preserve:
-
-```text
-best candidate
-+
-alternative candidates
-```
-
-Do not throw away runner-up information.
-
-Recommended result structure:
-
-```ts
-{
-  fact: FieldProgressItem,
-  bestMatch: CandidateMatch | null,
-  alternatives: CandidateMatch[]
-}
-```
-
-Where:
-
-```ts
-CandidateMatch = {
-  activityId: string,
-  activityExternalId: string,
-  activityName: string,
-  confidenceScore: number,
-  matchMethod: MatchMethod,
-  matchedText: string | null,
-  rationale: string
-}
-```
-
-Confidence must always satisfy:
-
-```text
-0 <= confidenceScore <= 1
-```
-
-Use deterministic score calculations.
-
-Document how the score is produced.
-
-Do not pretend the score is mathematically calibrated probability.
-
-It is a matching confidence score.
-
----
-
-# 11. Low-confidence behavior
-
-This is important.
-
-Do not automatically mark weak matches as confirmed.
-
-Recommended policy:
-
-```text
-high confidence
-    → suggested
-
-medium/ambiguous confidence
-    → suggested + alternatives
-
-low confidence / no useful candidate
-    → no automatic match
-```
-
-Use:
-
-```text
-status = 'suggested'
-```
-
-for newly generated match candidates.
-
-Do NOT create:
+then change that persisted row to:
 
 ```text
 status = 'confirmed'
 ```
 
-automatically.
+run Pass 9 matching again, and verify:
 
-Do not automatically mutate `activity_progress`.
+```text
+confirmed match still exists
+```
 
-That belongs to Pass 10.
+Then verify the newly-generated suggestions are also present as expected.
+
+The test must prove the confirmed row was **not deleted and recreated**.
+
+Ideally verify its:
+
+```text
+id
+status
+reviewedBy
+reviewedAt
+```
+
+remain intact.
 
 ---
 
-# 12. Persistence boundary
+### Test B — rejected survives
 
-The existing `activity_matches` table exists specifically for this pass.
-
-Create an `ActivityMatchRepository` only if one does not already exist.
-
-Current repository inspection shows there is no dedicated activity-match repository yet.
-
-Recommended:
+Repeat the same test with:
 
 ```text
-backend/src/repositories/activity-match.repository.ts
+status = 'rejected'
 ```
 
-Keep it narrow.
-
-At minimum:
+After re-running matching:
 
 ```text
-create()
-getById()
-getByIdAndProjectId()
-listByProgressUpdateId()
-listByProjectId()
+rejected match still exists
 ```
 
-Use the existing `ActivityMatch` / `CreateActivityMatchInput` domain types.
+and its review metadata remains intact.
 
-Maintain strict project isolation.
+---
 
-Never allow:
+### Test C — suggested is replaceable
+
+Keep the existing idempotency behavior for suggestions:
+
+```text
+run matching
+→ one suggested match
+
+run matching again
+→ old suggestion replaced
+→ no duplicate suggested rows
+```
+
+This test should still pass.
+
+---
+
+### Test D — mixed state
+
+Create:
+
+```text
+confirmed match
+rejected match
+suggested match
+```
+
+for the same progress update.
+
+Run matching again.
+
+Expected:
+
+```text
+confirmed → preserved
+rejected   → preserved
+suggested  → replaced
+```
+
+This is the strongest regression test and should be included.
+
+---
+
+## 4. Do not change the broader Pass 9 scope
+
+Do NOT introduce:
+
+* Pass 10 activity-progress logic
+* actual percentage updates
+* actual quantity calculations
+* planned-vs-actual calculations
+* variance
+* delay/risk logic
+* new migrations
+* new AI extraction logic
+* embeddings/vector databases
+* new external infrastructure
+
+The existing semantic matcher seam can remain as-is.
+
+The existing optional LLM disambiguation seam can remain as-is.
+
+This corrective task is specifically about **safe activity-match persistence lifecycle**.
+
+---
+
+## 5. Preserve current project isolation
+
+Continue enforcing:
 
 ```text
 project A progress update
@@ -563,425 +256,19 @@ project A progress update
 project B activity
 ```
 
-to create an activity match.
-
-The existing database schema already has composite project-scoped FKs; the repository/service must respect the same boundary.
-
----
-
-# 13. Should Pass 9 persist matches?
-
-Yes, but only as **suggestions**.
-
-The purpose of Pass 9 is to turn:
-
-```text
-structured fact
-```
-
-into:
-
-```text
-candidate activity match
-```
-
-and persist that candidate as:
-
-```text
-status = 'suggested'
-```
-
-Do not confirm it automatically.
-
-Do not mutate:
-
-```text
-activity_progress
-```
-
-Do not mutate:
-
-```text
-activities
-```
-
-Do not calculate actual progress.
-
-Pass 10 owns that.
-
----
-
-# 14. Recommended service architecture
-
-Use:
-
-```text
-FieldProgressExtraction
-        ↓
-ActivityMatchingService
-        ↓
-ActivityRepository
-        ↓
-matching algorithm
-        ↓
-candidate matches
-        ↓
-ActivityMatchRepository
-        ↓
-SQLite activity_matches
-```
-
-More explicitly:
-
-```text
-Route
- ↓
-validation
- ↓
-ActivityMatchingService
- ↓
-ActivityRepository
- ↓
-deterministic matcher
- ↓
-optional semantic matcher
- ↓
-optional LLM disambiguator
- ↓
-ActivityMatchRepository
- ↓
-SQLite
-```
-
-The AI service remains a dependency of the optional disambiguation component, not the core matching engine.
-
----
-
-# 15. API
-
-Expose a narrowly-scoped endpoint for testing/demo.
-
-Recommended:
-
-```text
-POST /api/projects/:projectId/progress-updates/:updateId/matches
-```
-
-The endpoint should:
-
-1. verify the project
-2. verify the progress update belongs to the project
-3. obtain the structured Pass 8 extraction associated with the report
-
-IMPORTANT:
-
-Pass 8 currently does not persist its extraction.
-
-Therefore, before implementation, inspect the current repository and decide the smallest clean interface for passing the validated extraction into Pass 9.
-
-Do NOT duplicate extraction persistence just to make the endpoint work.
-
-A sensible initial contract is to accept the validated structured extraction as request input for matching:
-
-```json
-{
-  "extraction": {
-    "items": [
-      {
-        "reference": "foundation work",
-        "location": "Block B",
-        "progress_percent": 60,
-        "status": "in_progress"
-      }
-    ]
-  }
-}
-```
-
-This keeps Pass 8 stateless and Pass 9 independently testable.
-
-Do not silently call the AI extraction endpoint from the matching service.
-
-The matching engine should consume structured facts, not raw text.
-
----
-
-# 16. API response
-
-Return a transparent result.
-
-Example:
-
-```json
-{
-  "matches": [
-    {
-      "fact": {
-        "reference": "foundation work",
-        "location": "Block B",
-        "progress_percent": 60,
-        "status": "in_progress"
-      },
-      "bestMatch": {
-        "activityId": "...",
-        "activityExternalId": "ACT-101",
-        "activityName": "Foundation Excavation",
-        "confidenceScore": 0.87,
-        "matchMethod": "text_similarity",
-        "matchedText": "foundation excavation",
-        "rationale": "Reference matches activity name and location matches Block B."
-      },
-      "alternatives": [
-        {
-          "activityId": "...",
-          "activityExternalId": "ACT-102",
-          "activityName": "Foundation Concrete",
-          "confidenceScore": 0.74,
-          "matchMethod": "wbs_location",
-          "matchedText": "foundation",
-          "rationale": "Same location and related foundation terminology."
-        }
-      ]
-    }
-  ]
-}
-```
-
-The actual exact field names may follow existing DTO conventions if the repo has a consistent pattern.
-
----
-
-# 17. Avoid a giant monolithic matcher
-
-Keep responsibilities separated.
-
-Suggested components:
-
-```text
-backend/src/services/matching/
-    activity-matching.service.ts
-    activity-match-scoring.ts
-    activity-match.types.ts
-    text-similarity.ts
-    semantic-matcher.ts
-    llm-disambiguator.ts
-```
-
-Use fewer files if the current project conventions make that cleaner.
-
-Do not create abstractions that have no immediate purpose.
-
-The essential conceptual split is:
-
-```text
-candidate generation
-        ↓
-candidate scoring
-        ↓
-candidate ranking
-        ↓
-optional disambiguation
-        ↓
-persistence
-```
-
----
-
-# 18. Tests
-
-Pass 9 requires comprehensive tests.
-
-### Exact ID
-
-Test:
-
-```text
-reference = exact externalId
-→ exact_id
-→ highest confidence
-```
-
-Also test that arbitrary human-language references do not get falsely classified as IDs.
-
-### Strong text match
-
-Test:
-
-```text
-"Foundation excavation"
-→ "Foundation Excavation at Block B"
-```
-
-produces a high deterministic score.
-
-### Location
-
-Test:
-
-```text
-same reference + same location
->
-same reference + different location
-```
-
-### WBS
-
-Test that WBS metadata can strengthen the score when relevant.
-
-### Alternatives
-
-Use intentionally ambiguous activities:
-
-```text
-Foundation Excavation
-Foundation Concrete
-Foundation Waterproofing
-```
-
-and verify:
-
-```text
-bestMatch
-+
-alternatives
-```
-
-are returned.
-
-### Low confidence
-
-Use a report like:
-
-```text
-"Some work continued near the site."
-```
-
-and verify no high-confidence activity is invented.
-
-### Cross-project protection
-
-Verify:
-
-```text
-Project A progress update
-+
-Project B activity
-```
-
 cannot produce a persisted match.
 
-### Persistence
+All new repository methods must remain project-scoped.
 
-Test:
-
-* create suggestion
-* retrieve suggestion
-* project-scoped lookup
-* list by progress update
-* list by project
-* cascade behavior where appropriate
-
-### Duplicate behavior
-
-Decide and test how repeated matching of the same fact behaves.
-
-Do not blindly create unlimited duplicate `activity_matches` rows for the exact same suggestion if the existing domain semantics do not support that.
-
-Prefer deterministic behavior.
-
-### AI disambiguation
-
-Test with the existing MockAIProvider.
-
-Do not require a network API.
-
-### Architecture
-
-Ensure:
-
-```text
-matching service
-```
-
-does not directly use SQLite.
-
-The repository must own SQL.
-
-AI components still must not import repositories/database.
+Do not introduce an unscoped deletion path into the service.
 
 ---
 
-# 19. No Pass 10 leakage
+## 6. Run full regression verification
 
-Absolutely do NOT implement:
+After the fix, run:
 
-```text
-activity_progress updates
-actualPercent
-actualQuantity
-planned-vs-actual calculations
-variance
-delay
-risk
-```
-
-Even though the match contains a progress percentage.
-
-Pass 9 only says:
-
-> "This field fact most likely refers to this scheduled activity."
-
-Pass 10 will decide how structured facts become actual activity progress.
-
----
-
-# 20. No UI requirement
-
-Do not build a full dashboard for Pass 9.
-
-A backend API plus strong deterministic tests is enough.
-
-A minimal manual endpoint test is useful, but Pass 20 owns the dashboard.
-
----
-
-# 21. Documentation
-
-Update:
-
-```text
-docs/ARCHITECTURE.md
-```
-
-to document:
-
-```text
-Pass 8 structured facts
-        ↓
-ActivityMatchingService
-        ↓
-candidate generation
-        ↓
-deterministic scoring
-        ↓
-optional semantic/LLM disambiguation
-        ↓
-suggested ActivityMatch
-```
-
-Explicitly document:
-
-> Pass 9 resolves identity candidates but does not modify activity progress or project truth.
-
-Do not change the authoritative 26-pass roadmap except to mark Pass 9 complete after implementation.
-
----
-
-# 22. Regression verification
-
-Run:
-
-```text
+```bash
 npm test
 npm run build
 npm run setup
@@ -994,59 +281,35 @@ Also verify:
 GET /api/health
 ```
 
-No regression in Passes 0–8 is acceptable.
+The full existing suite must continue passing.
 
-Do not rely on test count alone.
-
-Inspect the actual implementation and final diff before declaring the pass finished.
+Do not only run the new tests.
 
 ---
 
-# 23. Final diff review
+## 7. Inspect the final diff
 
-Before committing, explicitly verify:
+Before committing, verify:
 
 ```text
-[ ] Existing Activity model reused
-[ ] Existing ActivityRepository reused
-[ ] Existing ActivityMatch domain types reused
-[ ] Existing activity_matches table reused
-[ ] No unnecessary migration added
-[ ] ActivityMatchRepository added cleanly
-[ ] Matching algorithm is deterministic and explainable
-[ ] exact_id supported
-[ ] text_similarity supported
-[ ] wbs/location signals supported
-[ ] semantic matcher is isolated
-[ ] LLM disambiguation is optional and isolated
-[ ] low-confidence matches are not automatically confirmed
-[ ] alternatives preserved
-[ ] project isolation enforced
-[ ] match suggestions persisted as suggested
-[ ] activity_progress is untouched
-[ ] no Pass 10+ logic introduced
-[ ] no giant matcher service created
-[ ] no direct SQL in service layer
-[ ] AI layer still cannot access DB/repositories
-[ ] tests cover ambiguity and cross-project isolation
-[ ] npm test passes
-[ ] npm run build passes
-[ ] npm run setup passes
-[ ] npm run demo:reset passes
-[ ] /api/health healthy
-[ ] docs/ARCHITECTURE.md updated
-[ ] README updated only as needed
-[ ] 26-pass roadmap preserved
+[ ] confirmed matches are never deleted by automatic re-matching
+[ ] rejected matches are never deleted by automatic re-matching
+[ ] only suggested matches are replaced
+[ ] existing idempotency for suggested matches remains
+[ ] project isolation remains intact
+[ ] no Pass 10+ behavior was added
+[ ] no migration was added unnecessarily
+[ ] no unrelated files were changed
 ```
 
 ---
 
-# 24. Commit
+## 8. Commit
 
 Use:
 
 ```text
-feat: implement FieldLine activity matching engine
+fix: preserve reviewed activity matches during rematching
 ```
 
 Push to:
@@ -1056,18 +319,12 @@ itshim998/FieldLine
 main
 ```
 
-After implementation, report:
+After completion, report:
 
-1. actual matching architecture implemented
-2. scoring method and thresholds
-3. repository/API changes
-4. how ambiguity is handled
-5. whether semantic/LLM matching is implemented or only isolated as an extension seam
-6. test results
-7. build/setup verification
-8. commit SHA
-9. files changed
+1. exact persistence behavior before vs after
+2. files changed
+3. regression tests added
+4. full test/build/setup results
+5. commit SHA
 
-Do not claim Pass 9 is approved.
-
-Pass 9 will be independently reviewed after completion.
+Do **not** claim Pass 9 is approved. It will be independently reviewed again after this correction.

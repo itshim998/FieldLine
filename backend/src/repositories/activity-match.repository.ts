@@ -13,6 +13,7 @@ export interface ActivityMatchRepository {
   listByProjectId(projectId: string): ActivityMatch[];
   delete(id: string, projectId?: string): boolean;
   deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): number;
+  deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number;
 }
 
 interface ActivityMatchDbRow {
@@ -276,6 +277,24 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     } catch (err: unknown) {
       throw new DatabaseError(
         `Failed to delete activity matches for progress update: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare(`
+        DELETE FROM activity_matches 
+        WHERE progress_update_id = ? 
+          AND project_id = ? 
+          AND status = 'suggested'
+      `);
+      const result = stmt.run(progressUpdateId, projectId);
+      return result.changes;
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to delete suggested activity matches for progress report: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

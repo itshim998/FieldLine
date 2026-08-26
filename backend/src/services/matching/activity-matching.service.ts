@@ -144,8 +144,8 @@ export class ActivityMatchingService {
 
     // 5. Persist suggested matches if requested
     if (persist) {
-      // Clean up previous suggestions for this report to ensure idempotency on re-matching
-      this.activityMatchRepo.deleteByProgressUpdateId(progressUpdateId, projectId);
+      // Clean up only previous suggestions for this report to preserve human-reviewed confirmed/rejected matches
+      this.activityMatchRepo.deleteSuggestedByProgressUpdateId(progressUpdateId, projectId);
 
       const toPersist = matchResults
         .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)

@@ -262,6 +262,47 @@ describe('SqliteActivityMatchRepository', () => {
     expect(matchRepo.getById(match.id)).toBeNull();
   });
 
+  it('should delete only suggested matches via deleteSuggestedByProgressUpdateId while preserving confirmed and rejected rows', () => {
+    // 1. Suggested match
+    const mSuggested = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivityId,
+      confidenceScore: 0.85,
+      matchMethod: 'text_similarity',
+      status: 'suggested'
+    });
+
+    // 2. Confirmed match
+    const mConfirmed = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivity2Id,
+      confidenceScore: 0.95,
+      matchMethod: 'exact_id',
+      status: 'confirmed',
+      reviewedBy: 'Senior Engineer',
+      reviewedAt: '2026-08-26T10:00:00Z'
+    });
+
+    // 3. Delete only suggested matches
+    const deletedCount = matchRepo.deleteSuggestedByProgressUpdateId(testUpdateId, testProjectId);
+    expect(deletedCount).toBe(1);
+
+    // Verify suggested is deleted
+    expect(matchRepo.getById(mSuggested.id)).toBeNull();
+
+    // Verify confirmed is preserved
+    const retrievedConfirmed = matchRepo.getById(mConfirmed.id);
+    expect(retrievedConfirmed).not.toBeNull();
+    expect(retrievedConfirmed?.status).toBe('confirmed');
+    expect(retrievedConfirmed?.reviewedBy).toBe('Senior Engineer');
+
+    // Verify cross-project scoping: calling with testProject2Id deletes 0 rows
+    const crossDeleteCount = matchRepo.deleteSuggestedByProgressUpdateId(testUpdateId, testProject2Id);
+    expect(crossDeleteCount).toBe(0);
+  });
+
   it('should cascade delete activity matches when progress update is deleted', () => {
     const match = matchRepo.create({
       projectId: testProjectId,
