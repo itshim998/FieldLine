@@ -169,7 +169,24 @@ export class DefaultProgressService implements ProgressService {
       }
     }
 
-    const finalActualFinish = normalized.actualFinish;
+    let finalActualFinish = normalized.actualFinish;
+    const historicalFinishDates = history
+      .map(r => r.actualFinish)
+      .filter((d): d is string => d !== null && d !== undefined && d.length > 0)
+      .sort();
+
+    if (historicalFinishDates.length > 0) {
+      const earliestHistoricalFinish = historicalFinishDates[0];
+      if (finalActualFinish) {
+        finalActualFinish =
+          earliestHistoricalFinish < finalActualFinish
+            ? earliestHistoricalFinish
+            : finalActualFinish;
+      } else {
+        finalActualFinish = earliestHistoricalFinish;
+      }
+    }
+
 
     // 11. Idempotency Check: Avoid uncontrolled duplicate observations
     const existing = this.activityProgressRepo.findExistingObservation(

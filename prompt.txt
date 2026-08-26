@@ -1,1335 +1,289 @@
-# PASS 10 — Progress Normalization
+# PASS 10 Corrective Fix — Preserve Historical `actualFinish`
 
-You are implementing **FieldLine PASS 10 — Progress Normalization**.
+Pass 10 is **not yet approved**.
 
-Passes 0–9 are complete and approved.
+The current implementation correctly preserves the earliest historical `actualStart`, but it does **not** apply the same historical reconciliation to `actualFinish`.
 
-Your first task is to inspect the current repository on `main` and implement Pass 10 around the architecture that actually exists today.
+The problem is in:
 
-Do not assume the original roadmap maps perfectly onto the current repository.
-
----
-
-# 1. Current architectural state
-
-FieldLine currently has:
-
-```text
-Raw field report
-      ↓
-PASS 8 — AI Extraction
-      ↓
-structured field facts
-      ↓
-PASS 9 — Activity Matching
-      ↓
-activity match / scheduled activity identity
+```text id="f8u9p1"
+backend/src/services/progress/progress.service.ts
 ```
 
-Pass 10 now converts those facts into canonical activity execution progress.
-
-The target pipeline is:
-
-```text
-Pass 8 structured fact
-        ↓
-Pass 9 activity identity
-        ↓
-Progress Normalization
-        ↓
-canonical ActivityProgress
-        ↓
-SQLite activity_progress
-```
-
-The architectural principle is:
-
-> Pass 10 is deterministic domain normalization. It must not ask an LLM to calculate project progress.
-
----
-
-# 2. Existing repository facts
-
-The current domain model already defines:
+The current flow effectively does:
 
 ```ts
-ActivityExecutionStatus =
-  'not_started'
-  | 'started'
-  | 'in_progress'
-  | 'completed'
-  | 'delayed'
+const finalActualFinish = normalized.actualFinish;
 ```
 
-and:
-
-```ts
-ActivityProgress {
-  id
-  projectId
-  activityId
-  progressUpdateId
-  actualPercent
-  actualQuantity
-  actualStart
-  actualFinish
-  status
-  asOfDate
-  notes
-  createdAt
-  updatedAt
-}
-```
-
-The current `CreateActivityProgressInput` already supports the same fields.
-
-The SQLite `activity_progress` table already exists and enforces:
-
-```text
-actual_percent >= 0
-actual_percent <= 100
-actual_quantity >= 0 when present
-status ∈ {
-  not_started,
-  started,
-  in_progress,
-  completed,
-  delayed
-}
-```
-
-and relates the row to the project/activity/progress update.
-
-There is already a trigger enforcing that a nullable `progress_update_id` cannot belong to another project.
-
-There is currently **no dedicated ActivityProgressRepository** in the repository layer.
-
-Create one.
-
----
-
-# 3. Pass 10 objective
-
-Convert structured progress facts into canonical actual progress.
-
-Support these forms:
-
-### Percentage
-
-```text
-60% complete
-```
-
-→
-
-```text
-actualPercent = 60
-```
-
-### Quantity
-
-```text
-300 m³ completed
-```
-
-combined with:
-
-```text
-plannedQuantity = 500 m³
-```
-
-→
-
-```text
-actualQuantity = 300
-actualPercent = 60
-```
-
-### Status
-
-Support canonical execution status:
-
-```text
-not_started
-started
-in_progress
-completed
-delayed
-```
-
-The existing Pass 8 extraction status enum is:
-
-```text
-unknown
-not_started
-in_progress
-completed
-delayed
-```
-
-Map it deterministically into the existing ActivityExecutionStatus enum.
-
-For example:
-
-```text
-unknown      → no forced execution status unless another deterministic signal exists
-not_started  → not_started
-in_progress  → in_progress
-completed    → completed
-delayed      → delayed
-```
-
-`started` is available in `ActivityExecutionStatus` even though Pass 8 does not explicitly emit it. Use it only where deterministic normalization from the available evidence justifies it.
-
----
-
-# 4. Core rule — quantity-derived percentage
-
-This is one of the most important rules in Pass 10.
-
-When both:
-
-```text
-actualQuantity
-plannedQuantity
-```
-
-are available and valid:
-
-```text
-actualPercent =
-  actualQuantity / plannedQuantity * 100
-```
-
-Do this in normal application code.
-
-Do NOT:
-
-* ask an LLM to calculate it
-* trust an LLM-supplied percentage when deterministic quantity data exists
-* use floating-point garbage outside 0–100
-* silently ignore contradictory quantities
+So a later-arriving completed report can overwrite the historical completion date.
 
 Example:
 
-```text
-plannedQuantity = 500 m3
-actualQuantity  = 300 m3
-
-actualPercent = 60
-```
-
-Use a deterministic rounding policy and document it.
-
-Recommended:
-
-```text
-round to 2 decimal places
-```
-
-Example:
-
-```text
-233 / 500 * 100 = 46.6
-```
-
----
-
-# 5. Percentage precedence
-
-Define and document a deterministic precedence order.
-
-Recommended:
-
-```text
-1. Quantity-derived percentage
-2. Explicit reported percentage
-3. Completion status fallback
-4. No safe percentage
-```
-
-Meaning:
-
-### Case A
-
-```text
-planned = 500
-actual = 300
-reported = 50%
-```
-
-Canonical result:
-
-```text
-actualQuantity = 300
-actualPercent = 60
-```
-
-because deterministic quantity math is authoritative.
-
-### Case B
-
-```text
-plannedQuantity unavailable
-reported = 60%
-```
-
-Canonical result:
-
-```text
-actualPercent = 60
-```
-
-### Case C
-
-```text
-plannedQuantity unavailable
-actualQuantity unavailable
-status = completed
-```
-
-Canonical result may be:
-
-```text
-actualPercent = 100
-status = completed
-```
-
-because completed is a deterministic canonical state.
-
-### Case D
-
-```text
-plannedQuantity unavailable
-actualQuantity unavailable
-status = in_progress
-```
-
-Do NOT invent a percentage.
-
-The normalization result should indicate that no numeric percentage could safely be derived.
-
----
-
-# 6. Never exceed 100%
-
-If quantity math produces:
-
-```text
-actualQuantity > plannedQuantity
-```
-
-do NOT silently invent another scale.
-
-Use deterministic policy.
-
-Recommended:
-
-```text
-actualPercent = min(100, calculatedPercent)
-```
-
-but retain the actual quantity.
-
-Example:
-
-```text
-planned = 500 m3
-actual = 550 m3
-
-actualQuantity = 550
-actualPercent = 100
-```
-
-Also preserve an explanatory note such as:
-
-```text
-"Quantity-derived progress exceeded 100%; actual percent was capped at 100."
-```
-
-Do not silently throw away the overrun.
-
-This preserves useful physical quantity evidence while respecting the ActivityProgress percentage invariant.
-
----
-
-# 7. Units matter
-
-Do not divide:
-
-```text
-300 m3
-```
-
-by:
-
-```text
-500 tonnes
-```
-
-and call the result 60%.
-
-Only derive a quantity-based percentage when the units are compatible.
-
-Use the existing schedule `unit` field.
-
-The normalization logic must compare normalized unit strings conservatively.
-
-Examples:
-
-```text
-m3
-m³
-```
-
-should be treated as equivalent if the existing normalization utilities already support that representation.
-
-But:
-
-```text
-m3
-tonnes
-```
-
-must not be treated as compatible.
-
-Do not invent unit conversions in Pass 10.
-
-Do not introduce a full unit-conversion engine.
-
-If units are incompatible:
-
-```text
-quantity-derived percentage unavailable
-```
-
-and fall back to explicit percentage if one exists.
-
----
-
-# 8. Quantity extraction
-
-Pass 8 currently outputs only:
-
-```text
-reference
-location
-progress_percent
-status
-```
-
-There is intentionally no quantity field in the current extraction contract.
-
-Therefore, do NOT redesign Pass 8 casually.
-
-Instead inspect how Pass 10 should obtain quantity information from the current repository architecture.
-
-The safest initial implementation is:
-
-```text
-Pass 10 input
-+
-explicit actualQuantity supplied by caller
-```
-
-alongside the already validated Pass 8 fact.
-
-For example:
-
-```json
-{
-  "fact": {
-    "reference": "concrete pouring",
-    "location": "Block B",
-    "progress_percent": null,
-    "status": "in_progress"
-  },
-  "activity": {
-    "...matched activity identity..."
-  },
-  "actualQuantity": 300,
-  "quantityUnit": "m3"
-}
-```
-
-Do not use an LLM inside Pass 10 to convert arbitrary prose into quantity unless the current repository clearly demonstrates a safe established mechanism for it.
-
-Quantity extraction from raw prose belongs to a future refinement of the extraction layer.
-
-The key Pass 10 capability is **normalization**, not another AI extraction pass.
-
----
-
-# 9. Input must be tied to an actual matched activity
-
-Do NOT allow Pass 10 to accept:
-
-```text
-fact + arbitrary activityId
-```
-
-without validating the activity belongs to the same project.
-
-Use the existing Pass 9 match architecture.
-
-Preferred flow:
-
-```text
-projectId
-progressUpdateId
-matchId
-fact
-+
-optional actualQuantity
-```
-
-The service should verify:
-
-```text
-project exists
-progress update belongs to project
-activity match belongs to project
-matched activity belongs to project
-```
-
-Never allow:
-
-```text
-Project A
-+
-Project B activity
-```
-
-to produce ActivityProgress.
-
-The current activity schema and project-scoped matching schema already enforce important cross-project boundaries.
-
----
-
-# 10. Which match statuses may feed Progress Normalization?
-
-This boundary must be explicit.
-
-Do NOT automatically convert a `rejected` match into actual activity progress.
-
-Recommended policy:
-
-```text
-confirmed
-    → allowed
-
-suggested
-    → allowed only if explicitly requested by the caller for deterministic demo/workflow use
-
-rejected
-    → rejected
-```
-
-Prefer the safest default:
-
-```text
-only confirmed matches mutate ActivityProgress
-```
-
-However, the current project does not yet appear to have a full human-review confirmation workflow.
-
-Therefore:
-
-* design the service so match status is checked
-* make `confirmed` the safe production default
-* provide a clearly named option for demo/test usage of a `suggested` match, if necessary
-* never silently treat `rejected` as valid
-* never automatically change a match from suggested → confirmed
-
-Do not build the full Pass 19 review system now.
-
----
-
-# 11. Separate normalization from persistence
-
-Create a pure deterministic normalization module.
-
-Recommended:
-
-```text
-backend/src/services/progress/
-    progress-normalization.types.ts
-    progress-normalization.ts
-```
-
-The pure normalizer should not import:
-
-```text
-better-sqlite3
-repositories
-Express
-routes
-```
-
-It should accept domain data and return canonical normalized progress.
-
-For example:
-
-```ts
-normalizeProgress({
-  fact,
-  activity,
-  actualQuantity,
-  quantityUnit
-})
-```
-
-returning something like:
-
-```ts
-{
-  actualPercent: 60,
-  actualQuantity: 300,
-  status: 'in_progress',
-  asOfDate: '2026-08-26',
-  notes: [...]
-}
-```
-
-The result should make it obvious how the percentage was derived.
-
----
-
-# 12. Recommended normalization result metadata
-
-Preserve the provenance of the canonical value.
-
-Recommended internal result:
-
-```ts
-{
-  actualPercent: number | null,
-  actualQuantity: number | null,
-  status: ActivityExecutionStatus,
-  percentSource:
-    | 'quantity_derived'
-    | 'reported_percent'
-    | 'completed_status'
-    | 'unavailable',
-  quantityUnit: string | null,
-  notes: string | null
-}
-```
-
-This metadata does not necessarily need to become a new database column.
-
-It may be folded into `notes`.
-
-Do not introduce a migration solely for provenance unless the existing schema clearly requires one.
-
----
-
-# 13. Handling `actualPercent` being NOT NULL
-
-The current SQLite schema requires:
-
-```text
-actual_percent NOT NULL
-```
-
-Therefore Pass 10 cannot persist a row when there is genuinely no safe numeric percentage.
-
-Do NOT fabricate a percentage just to satisfy the schema.
-
-Instead:
-
-```text
-normalization succeeds
-→ numeric percentage unavailable
-→ persistence rejected with a clear validation/domain error
-```
-
-Example:
-
-```text
-"Some foundation work continued."
-```
-
-with:
-
-```text
-status = in_progress
-plannedQuantity = null
-actualQuantity = null
-progress_percent = null
-```
-
-must NOT become:
-
-```text
-actualPercent = 50
-```
-
-Instead return an explicit error such as:
-
-```text
-Cannot persist ActivityProgress because no deterministic actual percentage is available.
-```
-
-This is an important safety rule.
-
----
-
-# 14. Actual start / finish dates
-
-Use deterministic status information to populate dates only when justified.
-
-Recommended:
-
-### Started
-
-If normalized status is `started` or `in_progress` and no existing actual start exists:
-
-```text
-actualStart = asOfDate
-```
-
-### Completed
-
-If normalized status is `completed`:
-
-```text
-actualFinish = asOfDate
-```
-
-Do not overwrite an earlier actual start/finish blindly.
-
-Inspect existing activity-progress history first.
-
-Preserve historical truth.
-
-Do not rewrite an existing earlier actual start merely because another progress report arrived later.
-
----
-
-# 15. ActivityProgress persistence semantics
-
-Create:
-
-```text
-backend/src/repositories/activity-progress.repository.ts
-```
-
-with appropriate methods.
-
-At minimum consider:
-
-```text
-create()
-getById()
-getByIdAndProjectId()
-listByActivityId()
-listByProgressUpdateId()
-getLatestByActivityId()
-```
-
-Use the existing:
-
-```text
-ActivityProgress
-CreateActivityProgressInput
-```
-
-domain types.
-
-Do NOT modify the schema unless necessary.
-
-The current table does not define a uniqueness constraint that would support a simplistic database upsert.
-
-Therefore do NOT implement:
-
-```text
-UPDATE activity_progress SET ...
-```
-
-as a blind overwrite of historical records.
-
-Prefer append-only progress observations:
-
-```text
-one ActivityProgress row
-per activity
-per accepted progress observation
-```
-
-and retrieve the latest canonical observation when needed.
-
-This is important because later passes will need historical progress.
-
----
-
-# 16. Determining the canonical latest observation
-
-Use:
-
-```text
-asOfDate
-createdAt
-id
-```
-
-as deterministic ordering signals.
-
-A later report should not be allowed to retroactively overwrite an earlier observation merely because it was processed later.
-
-For example:
-
-```text
+```text id="xgj1wi"
 Report A
 asOfDate = 2026-08-20
-actual = 40%
+status = completed
+→ actualFinish = 2026-08-20
 
 Report B
 asOfDate = 2026-08-26
-actual = 60%
+status = completed
+→ current code produces actualFinish = 2026-08-26
 ```
 
-latest canonical observation = 60%.
-
-But:
-
-```text
-Report A
-asOfDate = 2026-08-26
-actual = 60%
-
-Report B
-asOfDate = 2026-08-20
-actual = 40%
-```
-
-do not treat Report B as newer just because it was processed later.
+That is incorrect for FieldLine's append-only historical observation model.
 
 ---
 
-# 17. Progress monotonicity
+# Required Fix
 
-Do NOT silently enforce monotonic progress across all activities in Pass 10.
+## 1. Preserve the earliest established `actualFinish`
 
-Construction projects can have corrections, rework, measurement corrections, or revised reporting.
+Mirror the existing `actualStart` reconciliation logic.
 
-Pass 10 should normalize each observation deterministically.
+Before persisting the new observation:
 
-Do not reject:
+1. Load existing `activity_progress` history for the activity.
+2. Collect all non-null `actualFinish` values.
+3. Determine the earliest historical finish date.
+4. If a historical finish exists, preserve it rather than replacing it with a later date.
 
-```text
-60% → 55%
-```
+Conceptually:
 
-merely because it decreased.
+```ts id="9m6d2e"
+let finalActualFinish = normalized.actualFinish;
 
-Later domain logic can determine whether that is a correction, rework, or anomaly.
+const historicalFinishDates = history
+  .map(r => r.actualFinish)
+  .filter((d): d is string => d !== null && d !== undefined && d.length > 0)
+  .sort();
 
----
+if (historicalFinishDates.length > 0) {
+  const earliestHistoricalFinish = historicalFinishDates[0];
 
-# 18. API
-
-Expose a focused endpoint.
-
-Recommended:
-
-```text
-POST /api/projects/:projectId/progress-updates/:updateId/progress
-```
-
-Request:
-
-```json
-{
-  "matchId": "...",
-  "fact": {
-    "reference": "foundation excavation",
-    "location": "Block B",
-    "progress_percent": 60,
-    "status": "in_progress"
+  if (finalActualFinish) {
+    finalActualFinish =
+      earliestHistoricalFinish < finalActualFinish
+        ? earliestHistoricalFinish
+        : finalActualFinish;
+  } else {
+    finalActualFinish = earliestHistoricalFinish;
   }
 }
 ```
 
-For quantity support:
+Use the same deterministic date representation already used elsewhere in the repository.
 
-```json
-{
-  "matchId": "...",
-  "fact": {
-    "reference": "foundation concrete",
-    "location": "Block B",
-    "progress_percent": null,
-    "status": "in_progress"
-  },
-  "actualQuantity": 300,
-  "quantityUnit": "m3"
-}
-```
-
-The route should:
-
-1. validate request with Zod
-2. verify project
-3. verify progress update belongs to project
-4. verify match belongs to project/update
-5. verify match status according to the Pass 10 policy
-6. retrieve the matched activity
-7. run pure normalization
-8. persist a canonical ActivityProgress observation
-9. return the normalized result
-
-Do not route through Pass 8's HTTP endpoint.
-
-Do not call the AI extraction API from the normalization service.
+Do not introduce a new date abstraction unless the current codebase requires it.
 
 ---
 
-# 19. Persistence must be atomic
+# 2. Preserve historical truth, not processing order
 
-The logical operation is:
+The key rule is:
 
-```text
-validate match
-+
-normalize progress
-+
-persist ActivityProgress
+```text id="h2h2p0"
+asOfDate determines chronology
+not insertion time
+not processing time
 ```
 
-Do not perform unrelated mutations in this transaction.
+Example:
 
-If Pass 10 records a `progress_updated` project event, that event and the ActivityProgress insertion should be atomic just as Pass 7 established atomic persistence for manual progress reporting.
+```text id="x6s4bq"
+Observation A:
+asOfDate = 2026-08-20
+actualFinish = 2026-08-20
 
-Do not swallow event failures.
-
-If an event is added:
-
-```text
-activity_progress INSERT
-+
-progress_updated project_event INSERT
+Observation B:
+asOfDate = 2026-08-26
+actualFinish = 2026-08-26
 ```
 
-must be one transaction.
+The second observation must preserve:
 
-If event insertion fails:
-
-```text
-ROLLBACK BOTH
+```text id="7e6kl4"
+actualFinish = 2026-08-20
 ```
+
+because the activity was already observed as completed earlier.
+
+Also test the reverse arrival order:
+
+```text id="2fb4qg"
+insert 2026-08-26 observation first
+then insert 2026-08-20 observation
+```
+
+The historical result must still resolve correctly according to `asOfDate`.
 
 ---
 
-# 20. Project events
+# 3. Do NOT alter existing `actualStart` behavior
 
-The existing domain event list already contains:
+The current `actualStart` historical reconciliation is correct.
 
-```text
-progress_updated
+Keep it intact.
+
+Pass 10 must now have symmetrical handling:
+
+```text id="r2a88g"
+actualStart
+→ earliest known historical start
+
+actualFinish
+→ earliest known historical finish
 ```
 
-so Pass 10 may record a project event when canonical activity progress is created.
-
-Use:
-
-```text
-event_type = 'progress_updated'
-entity_type = 'activity_progress'
-entity_id = activityProgress.id
-```
-
-Keep payload concise and useful.
-
-Do not add unrelated events.
+Do not replace the current implementation with a generalized abstraction unless that genuinely improves the existing code without unnecessary refactoring.
 
 ---
 
-# 21. Duplicate/idempotency behavior
+# 4. Add regression tests
 
-Think carefully about repeated requests.
+Update:
 
-A repeated normalization call for the **same match + same progress update + same asOfDate** should not create uncontrolled duplicate observations.
-
-Implement deterministic behavior.
-
-Recommended:
-
-```text
-same project
-+
-same progressUpdateId
-+
-same activityId
-+
-same asOfDate
-+
-same normalized observation
+```text id="vh2uc1"
+backend/tests/progress_service.test.ts
 ```
 
-→ return/reuse the existing observation rather than endlessly creating duplicates.
+Add at least these tests.
 
-Do not introduce a database uniqueness constraint unless genuinely necessary.
+### Test A — later completed observation preserves earlier finish
 
-Application-level deterministic lookup is acceptable for this pass, provided race-safety is considered.
-
----
-
-# 22. Tests
-
-Pass 10 needs strong tests.
-
-## Percentage tests
+1. Create a confirmed match.
+2. Normalize a completed observation:
 
 ```text
-60% → 60
-0% → 0
-100% → 100
-```
-
-Reject/clamp invalid ranges appropriately.
-
----
-
-## Quantity-derived tests
-
-```text
-planned = 500 m3
-actual = 300 m3
-→ 60%
-```
-
-Test decimals:
-
-```text
-planned = 500
-actual = 233
-→ 46.6
-```
-
----
-
-## Quantity precedence
-
-```text
-planned = 500
-actual = 300
-reported = 40%
-→ actualPercent = 60
-```
-
-The quantity-derived result wins.
-
----
-
-## Unit compatibility
-
-Test:
-
-```text
-m3 vs m³
-→ compatible where existing normalizer supports it
-```
-
-and:
-
-```text
-m3 vs tonnes
-→ incompatible
-```
-
-and ensure incompatible quantities do not generate a false percentage.
-
----
-
-## Status tests
-
-```text
-not_started
-started
-in_progress
-completed
-delayed
-```
-
-Test deterministic mapping from Pass 8 statuses.
-
----
-
-## Completion fallback
-
-```text
+asOfDate = 2026-08-20
 status = completed
-no quantity
-no percentage
-→ actualPercent = 100
+progress_percent = 100
 ```
-
----
-
-## Missing numeric progress
-
-```text
-status = in_progress
-no quantity
-no percentage
-→ cannot persist
-```
-
-Do not invent 0, 50, or any arbitrary number.
-
----
-
-## Quantity overrun
-
-```text
-planned = 500
-actual = 550
-
-→ actualQuantity = 550
-→ actualPercent = 100
-→ note/provenance indicates cap
-```
-
----
-
-## Historical observations
 
 Verify:
 
 ```text
-2026-08-20 = 40%
-2026-08-26 = 60%
+actualFinish = 2026-08-20
 ```
 
-→ latest = 60%.
+3. Create a second progress update.
+4. Normalize another completed observation:
 
-Also test reverse processing order to ensure `asOfDate`, not processing time, defines chronology.
+```text
+asOfDate = 2026-08-26
+status = completed
+progress_percent = 100
+```
+
+Verify:
+
+```text
+actualFinish = 2026-08-20
+```
+
+The test must prove that the earlier finish date was preserved.
 
 ---
 
-## Actual start/finish
+### Test B — late-arriving older report
 
-Test that:
+Create:
 
-```text
-in_progress
-→ actualStart populated when absent
+```text id="k6rr4t"
+first:
+asOfDate = 2026-08-26
+status = completed
 ```
 
-and:
+then later process:
 
-```text
-completed
-→ actualFinish populated
+```text id="2c9g9m"
+second:
+asOfDate = 2026-08-20
+status = completed
 ```
 
-without overwriting previously established earlier dates.
+Verify the newly-created observation has:
+
+```text id="jd8rfb"
+actualFinish = 2026-08-20
+```
+
+and that historical ordering remains based on `asOfDate`.
+
+This protects against implementation accidentally using creation order.
 
 ---
 
-## Match-status safety
+### Test C — existing finish survives non-completed later report
 
-Test:
+Verify that once an activity has an established historical `actualFinish`, a later `in_progress` or `delayed` observation does not erase it.
 
-```text
-confirmed match → allowed
-rejected match → rejected
-suggested match → rejected by default
+Example:
+
+```text id="uv8ikp"
+2026-08-20 → completed → actualFinish = 2026-08-20
+
+2026-08-26 → delayed/in_progress
 ```
 
-If a demo/test override is intentionally provided, test that override explicitly and ensure it never turns rejected matches into valid progress.
+The newer observation should preserve:
 
-Do not automatically confirm suggestions.
+```text
+actualFinish = 2026-08-20
+```
+
+Do not set it back to `null`.
 
 ---
 
-## Project isolation
+# 5. Add repository-level coverage where useful
 
-Test:
+The repository already supports historical ordering through:
 
-```text
-Project A update
-+
-Project B match
+```text id="dd3y7o"
+ORDER BY as_of_date DESC, created_at DESC, id DESC
 ```
 
-is rejected.
+Do not change that.
 
-Also test:
-
-```text
-Project A match
-+
-Project B activity
-```
-
-is rejected.
+A repository test can be added if needed, but the critical behavioral regression belongs in the `ProgressService` test because the reconciliation logic lives there.
 
 ---
 
-## Persistence
+# 6. Preserve all existing Pass 10 behavior
 
-Test:
+Do NOT change:
 
-```text
-create
-retrieve
-list by activity
-list by update
-latest by activity
-```
+* quantity-derived percentage arithmetic
+* percentage precedence
+* unit compatibility
+* overrun capping
+* status mapping
+* `actualStart` preservation
+* match-status policy
+* project isolation
+* idempotency
+* atomic `activity_progress + progress_updated` persistence
+* append-only observation history
 
-and cross-project isolation.
+Do NOT introduce:
 
----
-
-## Atomicity
-
-If creating a `progress_updated` event, simulate event failure and prove:
-
-```text
-activity_progress row = absent
-project_event row = absent
-```
-
-This is mandatory if Pass 10 introduces event logging.
-
----
-
-## Idempotency
-
-Repeated identical normalization requests should not create uncontrolled duplicates.
+* Pass 11 variance logic
+* delay detection
+* risk scoring
+* schedule slippage
+* forecasting
+* trend analysis
+* new AI calls
+* new migrations unless genuinely unavoidable
 
 ---
 
-# 23. No Pass 11+ leakage
+# 7. Regression verification
 
-Do NOT implement:
-
-```text
-planned-vs-actual variance
-delay detection
-risk scoring
-schedule slippage
-forecasting
-trend analysis
-```
-
-Those belong to later passes.
-
-Pass 10 only establishes:
-
-> canonical actual activity progress observations.
-
----
-
-# 24. No AI calculation
-
-Do NOT add any new LLM call to calculate:
-
-```text
-actualPercent
-actualQuantity
-status
-```
-
-The only intelligence required is the already-existing Pass 8 structured fact and Pass 9 identity.
-
-Pass 10 should be deterministic.
-
----
-
-# 25. Architecture
-
-Recommended structure:
-
-```text
-backend/src/services/progress/
-    progress-normalization.ts
-    progress-normalization.types.ts
-    progress.service.ts
-```
-
-and:
-
-```text
-backend/src/repositories/activity-progress.repository.ts
-```
-
-Use existing project conventions where they are better.
-
-The service layer must not import:
-
-```text
-better-sqlite3
-```
-
-or execute SQL directly.
-
-Repositories own persistence.
-
----
-
-# 26. Documentation
-
-Update:
-
-```text
-docs/ARCHITECTURE.md
-```
-
-to describe:
-
-```text
-Pass 8
-structured field facts
-        ↓
-Pass 9
-activity identity
-        ↓
-Pass 10
-deterministic progress normalization
-        ↓
-ActivityProgress observations
-```
-
-Explicitly document:
-
-```text
-Quantity-derived percentage is calculated in application code.
-
-LLM output is never trusted for deterministic quantity arithmetic.
-
-ActivityProgress is historical/observational rather than a blind mutable overwrite.
-```
-
-Do not change the authoritative 26-pass roadmap except to mark Pass 10 completed after successful implementation.
-
----
-
-# 27. Migration policy
-
-Before adding a migration, inspect the existing schema carefully.
-
-The current `activity_progress` table already exists, so a migration is probably unnecessary.
-
-Do NOT add one merely to create a convenience uniqueness constraint.
-
-Only create a migration if the current schema makes a required Pass 10 invariant impossible to implement safely.
-
-If a migration is truly necessary:
-
-* keep it minimal
-* preserve existing data
-* add migration tests
-* document exactly why it is required
-
----
-
-# 28. Regression verification
-
-Run:
+Run the complete suite:
 
 ```bash
 npm test
@@ -1340,62 +294,41 @@ npm run demo:reset
 
 Also verify:
 
-```text
+```text id="49y6zs"
 GET /api/health
 ```
 
-The complete Pass 0–9 regression suite must remain green.
+All existing Pass 0–10 tests must remain green.
 
-Do not rely on test count alone.
-
-Inspect the final diff.
+The final test count should be at least the current **355 tests**, plus the new regression coverage.
 
 ---
 
-# 29. Final diff review
+# 8. Final diff review
 
-Before committing, confirm:
+Before committing, verify:
 
-```text
-[ ] Existing ActivityProgress domain types reused
-[ ] Existing activity_progress schema reused
-[ ] ActivityProgressRepository added
-[ ] Deterministic normalization module added
-[ ] Quantity-derived percentage implemented in code
-[ ] Explicit reported percentage supported
-[ ] Status normalization supported
-[ ] Unit compatibility handled conservatively
-[ ] No fabricated percentage when evidence is insufficient
-[ ] actual_percent NOT NULL invariant respected
-[ ] Historical observations are preserved
-[ ] Chronology uses asOfDate
-[ ] Cross-project safety enforced
-[ ] Match status policy enforced
-[ ] Suggested/rejected matches are not silently treated as confirmed
-[ ] ActivityProgress persistence is isolated from Pass 11+
-[ ] No AI calculation added
-[ ] No variance/delay/risk logic added
-[ ] Idempotency implemented
-[ ] Atomic progress_updated event persistence if events are added
-[ ] Tests cover quantity, percentage, status, units, history, isolation, idempotency
-[ ] npm test passes
-[ ] npm run build passes
-[ ] npm run setup passes
-[ ] npm run demo:reset passes
-[ ] /api/health healthy
-[ ] docs/ARCHITECTURE.md updated
-[ ] README updated only as needed
-[ ] 26-pass roadmap preserved
+```text id="cnwubp"
+[ ] Earliest historical actualFinish is preserved
+[ ] actualStart behavior remains intact
+[ ] asOfDate, not processing order, determines chronology
+[ ] Later completed reports cannot overwrite earlier completion dates
+[ ] Later non-completed reports cannot erase established actualFinish
+[ ] No Pass 11+ logic introduced
+[ ] No unnecessary migration added
+[ ] Tests explicitly cover the historical finish behavior
+[ ] Full regression suite passes
+[ ] Build/setup/reset/health verification passes
 ```
 
 ---
 
-# 30. Commit
+# 9. Commit
 
 Use:
 
 ```text
-feat: implement FieldLine progress normalization
+fix: preserve historical activity finish dates
 ```
 
 Push to:
@@ -1405,19 +338,12 @@ itshim998/FieldLine
 main
 ```
 
-After implementation, report:
+After completion, report:
 
-1. actual normalization architecture
-2. percentage precedence rules
-3. quantity/unit handling
-4. ActivityProgress persistence semantics
-5. match-status policy
-6. idempotency behavior
-7. tests and results
-8. build/setup verification
-9. files changed
-10. commit SHA
+1. exact change made
+2. tests added
+3. complete test/build/setup results
+4. files changed
+5. commit SHA
 
-Do not claim Pass 10 is approved.
-
-Pass 10 will be independently reviewed after implementation.
+Do **not** claim Pass 10 is approved. It will be independently reviewed again after this correction.

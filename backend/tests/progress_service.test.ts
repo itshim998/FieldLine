@@ -297,7 +297,163 @@ describe('Pass 10 — ProgressService Integration Tests', () => {
       expect(p2.actualStart).toBe('2026-08-10');
       expect(p2.actualPercent).toBe(70);
     });
+
+    it('preserves earliest historical actualFinish when a later completed observation arrives (Test A)', () => {
+      // 1. First completed report as of 2026-08-20
+      const p1 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: testUpdateId,
+        matchId: testConfirmedMatchId,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 100,
+          status: 'completed'
+        },
+        asOfDate: '2026-08-20'
+      });
+      expect(p1.actualFinish).toBe('2026-08-20');
+
+      // 2. Second completed report arriving later as of 2026-08-26
+      const u2 = updateRepo.create({
+        projectId: testProjectId,
+        reportDate: '2026-08-26',
+        sourceType: 'manual',
+        rawText: 'Re-confirmed completed'
+      });
+      const m2 = matchRepo.create({
+        projectId: testProjectId,
+        progressUpdateId: u2.id,
+        activityId: testActivityId,
+        confidenceScore: 0.95,
+        matchMethod: 'exact_id',
+        status: 'confirmed'
+      });
+
+      const p2 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: u2.id,
+        matchId: m2.id,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 100,
+          status: 'completed'
+        },
+        asOfDate: '2026-08-26'
+      });
+
+      // Must preserve the earlier finish date 2026-08-20 rather than overwriting with 2026-08-26
+      expect(p2.actualFinish).toBe('2026-08-20');
+    });
+
+    it('correctly sets actualFinish on late-arriving older report (Test B)', () => {
+      // 1. Process newer report first as of 2026-08-26
+      const p1 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: testUpdateId,
+        matchId: testConfirmedMatchId,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 100,
+          status: 'completed'
+        },
+        asOfDate: '2026-08-26'
+      });
+      expect(p1.actualFinish).toBe('2026-08-26');
+
+      // 2. Later process older report as of 2026-08-20
+      const u2 = updateRepo.create({
+        projectId: testProjectId,
+        reportDate: '2026-08-20',
+        sourceType: 'manual',
+        rawText: 'Excavation finished early'
+      });
+      const m2 = matchRepo.create({
+        projectId: testProjectId,
+        progressUpdateId: u2.id,
+        activityId: testActivityId,
+        confidenceScore: 0.95,
+        matchMethod: 'exact_id',
+        status: 'confirmed'
+      });
+
+      const p2 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: u2.id,
+        matchId: m2.id,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 100,
+          status: 'completed'
+        },
+        asOfDate: '2026-08-20'
+      });
+
+      // The 2026-08-20 observation must have finish date 2026-08-20 (earlier than 2026-08-26)
+      expect(p2.actualFinish).toBe('2026-08-20');
+
+      // Historical listing should be ordered by asOfDate DESC
+      const history = progressRepo.listByActivityId(testActivityId, testProjectId);
+      expect(history).toHaveLength(2);
+      expect(history[0].asOfDate).toBe('2026-08-26');
+      expect(history[1].asOfDate).toBe('2026-08-20');
+    });
+
+    it('preserves established actualFinish during a later non-completed report (Test C)', () => {
+      // 1. Initial report as of 2026-08-20 is completed
+      const p1 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: testUpdateId,
+        matchId: testConfirmedMatchId,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 100,
+          status: 'completed'
+        },
+        asOfDate: '2026-08-20'
+      });
+      expect(p1.actualFinish).toBe('2026-08-20');
+
+      // 2. Later report as of 2026-08-26 is delayed/rework
+      const u2 = updateRepo.create({
+        projectId: testProjectId,
+        reportDate: '2026-08-26',
+        sourceType: 'manual',
+        rawText: 'Minor snag delayed'
+      });
+      const m2 = matchRepo.create({
+        projectId: testProjectId,
+        progressUpdateId: u2.id,
+        activityId: testActivityId,
+        confidenceScore: 0.95,
+        matchMethod: 'exact_id',
+        status: 'confirmed'
+      });
+
+      const p2 = service.normalizeAndRecordProgress({
+        projectId: testProjectId,
+        updateId: u2.id,
+        matchId: m2.id,
+        fact: {
+          reference: 'Foundation Excavation',
+          location: 'Block B',
+          progress_percent: 90,
+          status: 'delayed'
+        },
+        asOfDate: '2026-08-26'
+      });
+
+      // The actualFinish established on 2026-08-20 must not be erased to null
+      expect(p2.actualFinish).toBe('2026-08-20');
+      expect(p2.actualPercent).toBe(90);
+      expect(p2.status).toBe('delayed');
+    });
   });
+
 
   describe('Idempotency Behavior', () => {
     it('returns existing observation when repeated with identical parameters', () => {
