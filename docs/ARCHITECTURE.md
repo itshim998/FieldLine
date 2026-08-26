@@ -95,23 +95,28 @@ SQLite (Local Storage with WAL Mode & Foreign Keys ON: database/fieldline.db)
 
 ---
 
-### 3. AI Structured Extraction Pipeline
+### 3. AI Structured Extraction Pipeline (Pass 8)
 
 ```text
-AI Service (Orchestration & Workflow Coordination)
-    ↓
-AI Adapter / Provider (External API or Local Mock)
-    ↓
-Raw Structured Response (Untrusted Provider Output)
-    ↓
-Validation (Strict Zod Schema Enforcement)
-    ↓
-Service (Consumes Validated & Typed Contract)
+Raw field report (Unstructured text)
+      ↓
+FieldProgressExtractionService (Input validation & Prompt builder)
+      ↓
+AIService (Provider coordination & Safety)
+      ↓
+AIProvider (MockAIProvider / Gemini / LLM Adapter)
+      ↓
+Raw Structured Response (Untrusted provider output)
+      ↓
+Zod FieldProgressExtraction contract (Strict validation, bounded items)
+      ↓
+Validated structured facts ({ items: [{ reference, location, progress_percent, status }] })
 ```
 
 > [!IMPORTANT]
-> **AI Isolation Principle: AI code must not directly manipulate the database.**
-> The AI layer must never query SQLite, import repository modules, or write directly to the database. AI is strictly used for extraction, summarization, and structured interpretation. Application services decide truth, validation, and persistence.
+> **AI Isolation & Scope Boundary Principle**:
+> Pass 8 extracts textual field facts only. It does not identify scheduled activities, mutate activity progress, or define project truth.
+> The AI layer must never query SQLite, import repository modules, or write directly to the database. Activity identity and schedule linking belong strictly to **Pass 9 — Activity Matching Engine**.
 
 ---
 
@@ -219,9 +224,9 @@ backend/
       db.ts           # initDatabase, getDatabase, runInTransaction, closeDatabase
       schema.ts       # Core tables list and schema constants
     errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError, NormalizationError, ScheduleValidationError)
-    ai/               # Decoupled AI provider interfaces, mock adapters, contracts, and AI services
+    ai/               # Decoupled AI provider interfaces, mock adapters, contracts (FieldProgressExtraction), and services
     jobs/             # Local background/batch task workers
-  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (32 suites, 246 tests)
+  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (36 suites, 280 tests)
 frontend/
   src/
     App.tsx           # FieldLine Project Management, Schedule Viewer & Manual Progress UI
@@ -264,5 +269,13 @@ frontend/
    - Project-scoped REST API (`POST /api/projects/:projectId/progress-updates`, `GET /api/projects/:projectId/progress-updates`, `GET /api/projects/:projectId/progress-updates/:updateId`).
    - Verbatim preservation of user `rawText` without aggressive rewriting or mutation of activity progress.
    - Presentation-grade frontend Progress Updates workspace tab: Manual field report input form, validation error/success indicators, and chronological update timeline ordered newest-first.
-   - 32 Vitest test suites (246 tests passing).
+9. **Pass 8 — AI Extraction Layer**:
+   - Dedicated `FieldProgressExtractionService` that validates inputs and transforms raw field-report text into structured field facts.
+   - Strict Zod contract (`fieldProgressExtractionSchema`, `fieldProgressItemSchema`, `fieldProgressStatusEnum`) with bounded outputs (max 20 items, max 200 character strings, strict status enum).
+   - Conservative interpretation: numeric `progress_percent` extracted only when explicitly stated; `location` and `progress_percent` strictly `null` when absent; no fabricated activity IDs.
+   - Dedicated REST endpoint `POST /api/ai/field-progress/extract` with input and output Zod validation.
+   - Deterministic test fixtures for Cases A–D (explicit percentage, no percentage, ambiguous progress, completed work).
+   - Pure interpretation pipeline: zero database mutations, no activity matching (reserved for Pass 9), no project truth calculation.
+   - 36 Vitest test suites (280 tests passing).
+
 

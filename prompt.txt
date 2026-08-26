@@ -1,827 +1,827 @@
-# FieldLine — PASS 7: Manual Progress Reporting
+# PASS 8 — AI Extraction Layer
 
-You are implementing PASS 7 — Manual Progress Reporting.
+You are implementing **FieldLine PASS 8 — AI Extraction Layer**.
 
-FieldLine repository:
+Before changing anything, inspect the actual repository on `main` and understand the existing architecture. Do not assume the earlier planning description exactly matches the current code.
 
-itshim998/FieldLine
+## Current architectural context
 
-Local directory:
+Pass 7 is complete.
 
-C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
+Current progress pipeline:
 
-PASS 0 through PASS 6 are complete.
+```text
+Manual field report
+        ↓
+progress_updates.raw_text
+```
 
-Before coding, inspect the current repository and build this pass on top of the existing architecture.
+Pass 7 intentionally stores raw field reports without interpreting them.
+
+The repository already contains an AI foundation from the earlier architecture work:
+
+```text
+backend/src/ai/contracts/
+backend/src/ai/providers/
+backend/src/ai/services/
+```
+
+The existing architecture includes:
+
+```text
+AIProvider
+    ↓
+AIService
+    ↓
+Zod validation
+```
+
+The existing `AIProvider` interface already provides:
+
+```ts
+generateText(...)
+generateStructured(...)
+```
+
+and explicitly states that providers must not know about databases, repositories, or application business rules.
+
+The existing `AIService.extractStructured()` already performs provider invocation and strict Zod validation.
+
+### IMPORTANT
+
+Do **not** create a second AI service/provider abstraction.
+
+Do **not** bypass the existing `AIService`.
+
+Do **not** let the AI provider access SQLite, repositories, projects, activities, or progress tables.
+
+Build Pass 8 on top of the current architecture.
 
 ---
 
-# CURRENT STATE
+# Pass 8 objective
 
-The Pass 2 database already contains the `progress_updates` table.
+Convert messy field-report language into **structured field facts**.
 
-It already supports:
-
-- project_id
-- report_date
-- reporter_name
-- reporter_role
-- source_type
-- raw_text
-- status
-- created_at
-- updated_at
-
-The existing `source_type` domain includes:
+Example input:
 
 ```text
-manual
-voice
-pdf
-xlsx
-image
-text
+Foundation work at Block B is 60% complete.
+Concrete pouring started today.
+```
 
-The existing status domain includes:
+Conceptual output:
 
-received
-processed
-reviewed
+```json
+{
+  "items": [
+    {
+      "reference": "foundation work",
+      "location": "Block B",
+      "progress_percent": 60,
+      "status": "in_progress"
+    }
+  ]
+}
+```
 
-Do NOT create a new migration unless the repository inspection proves one is genuinely required.
+The important architectural distinction is:
 
-Do NOT redesign the existing schema.
+> AI extracts facts from the report. It does NOT decide which scheduled activity the report belongs to.
 
-OBJECTIVE
+Activity identity belongs to **Pass 9 — Activity Matching Engine**.
 
-Build the simplest working manual field-update workflow before introducing AI.
+---
 
-A supervisor should be able to enter something like:
+# 1. Inspect the current repository first
 
-Foundation work at Block B is 60% complete. Concrete pouring started today.
-
-FieldLine must persist:
-
-raw update text;
-report date;
-timestamp;
-reporter;
-project;
-source type;
-status.
-EXIT CRITERION
-
-A manually entered progress update can be:
-
-created
-→ persisted
-→ retrieved
-→ displayed
-
-inside the currently selected FieldLine project.
-
-CRITICAL PASS BOUNDARY
-
-This pass is RAW MANUAL REPORTING ONLY.
-
-Do NOT implement:
-
-AI extraction;
-activity matching;
-activity progress calculation;
-actual percent updates;
-actual quantity calculation;
-planned vs actual;
-variance;
-delay detection;
-risk;
-evidence upload;
-document ingestion;
-voice transcription;
-automatic progress inference.
-
-A sentence containing:
-
-"60% complete"
-
-must remain part of raw_text.
-
-Do NOT write 60 into:
-
-activity_progress.actual_percent
-
-Do not modify activities as a result of manual report submission.
-
-The only persistence target for this pass is the progress_updates workflow.
-
-FIRST: INSPECT THE CURRENT REPOSITORY
+Before implementation:
 
 Inspect:
 
-backend/src/models/domain.types.ts
-database schema/migrations
-repository conventions
-service conventions
-route conventions
-Zod validation conventions
-AppError handling
-project workspace frontend
-existing schedules/activity UI
-existing project-scoped API patterns
-test conventions
+```text
+backend/src/ai/
+backend/src/errors/
+backend/src/models/
+backend/src/services/
+backend/src/routes/
+backend/tests/
+docs/ARCHITECTURE.md
+README.md
+```
 
-In particular, reuse:
+Also inspect the existing Pass 7 implementation so the new extraction workflow consumes the correct raw field-report representation.
 
-ProjectService / ProjectRepository patterns
-ScheduleImportService / ScheduleRepository patterns
+Confirm the current AI abstraction before modifying anything.
 
-Do not invent a second architecture.
+Do not duplicate existing functionality.
 
-TARGET ARCHITECTURE
+---
+
+# 2. Define a FieldLine-specific extraction contract
+
+The current generic AI extraction contract is not the Pass 8 domain contract.
+
+Create a dedicated contract for field-progress extraction.
+
+Recommended location:
+
+```text
+backend/src/ai/contracts/field-progress-extraction.contract.ts
+```
+
+Use Zod.
+
+The contract should represent:
+
+```ts
+{
+  items: [
+    {
+      reference: string,
+      location: string | null,
+      progress_percent: number | null,
+      status: ...
+    }
+  ]
+}
+```
+
+Use a strict status enum.
+
+Recommended values:
+
+```text
+unknown
+not_started
+in_progress
+completed
+delayed
+```
 
 Use:
 
-React UI
-    ↓
-HTTP route
-    ↓
-Zod validation
-    ↓
-ProgressUpdateService
-    ↓
-ProgressUpdateRepository
-    ↓
-SQLite
-
-Routes must remain thin.
-
-Services must not depend on Express objects.
-
-Repositories must contain the SQL.
-
-Frontend must use the API and must not access SQLite directly.
-
-1. PROGRESS UPDATE DOMAIN TYPES
-
-The existing domain already contains:
-
-ProgressUpdate
-CreateProgressUpdateInput
-
-Reuse those types.
-
-Do not create duplicate models.
-
-If additional DTOs are genuinely required for API responses, introduce them cleanly and minimally.
-
-2. PROGRESS UPDATE REPOSITORY
-
-Create:
-
-backend/src/repositories/progress-update.repository.ts
-
-using the same interface/implementation pattern as the existing repositories.
-
-At minimum support:
-
-create()
-getById()
-listByProjectId()
-countByProjectId()
-
-Optionally add delete() only if the current UI genuinely needs it.
-
-Do not implement a large future CRUD surface.
-
-The repository owns all direct SQL access.
-
-3. CREATE BEHAVIOR
-
-Creating a manual progress update should populate:
-
-project_id       → current project
-report_date      → supplied report date
-reporter_name    → supplied reporter name
-reporter_role    → supplied reporter role, if entered
-source_type      → "manual"
-raw_text         → exact user-entered update text
-status           → "received"
-
-Do not silently rewrite the raw report text.
-
-The raw text is valuable source evidence for later AI extraction.
-
-Preserve it exactly apart from whatever transport serialization is unavoidable.
-
-4. TIMESTAMP SEMANTICS
-
-The database already provides:
-
-created_at
-updated_at
-
-Use those as the persisted timestamp fields.
-
-Do not invent another custom timestamp column.
-
-The API response should expose the existing timestamps.
-
-For a newly created update:
-
-created_at
-≈
-updated_at
-
-Use the existing SQLite timestamp conventions.
-
-5. REPORT DATE
-
-The update should have a separate:
-
-reportDate
-
-representing the date the field report refers to.
-
-This is distinct from:
-
-createdAt
-
-which represents when FieldLine received/stored it.
-
-The UI should allow the user to specify report date.
-
-Default it to the current local date where appropriate, but do not silently confuse:
-
-report date
+```text
+progress_percent: number | null
+```
 
 with:
 
-database creation timestamp
-6. REPORTER
+```text
+0 <= progress_percent <= 100
+```
 
-Allow the manual reporter to provide:
+### Bounded output
 
-reporterName
-reporterRole
+Do not allow unbounded AI output.
 
-Reporter role is optional.
+Use a bounded maximum number of extracted items.
 
-Do not implement user authentication or account management.
+Recommended:
 
-The reporter identity is simply data stored with the manual report for this pass.
+```text
+maximum 20 items
+```
 
-7. VALIDATION
+Also enforce reasonable maximum lengths for:
 
-Create Zod request validation.
+```text
+reference
+location
+```
 
-At minimum:
+Recommended limits:
 
-Create progress update
-rawText
-reportDate
-reporterName
-reporterRole
+```text
+reference <= 200 characters
+location <= 200 characters
+```
+
+Do not accept arbitrary nested structures.
+
+Do not use `.passthrough()` for the extraction contract.
+
+The final parsed object should contain only the expected fields.
+
+---
+
+# 3. Be conservative about missing information
+
+The AI must NOT invent facts.
 
 Rules:
 
-rawText required;
-trim surrounding whitespace for validation;
-reject empty/whitespace-only raw text;
-reasonable maximum length to prevent accidental massive payloads;
-reportDate must be a valid canonical date;
-reporterName optional but, if supplied, must not be whitespace-only;
-reporterRole optional.
+### `reference`
 
-Do NOT normalize the actual stored rawText.
+Extract the human-readable work reference mentioned in the report.
+
+Example:
+
+```text
+"foundation work"
+"concrete pouring"
+"Pier P12 excavation"
+```
+
+Do NOT turn it into an activity ID.
+
+Do NOT generate identifiers such as:
+
+```text
+ACT-001
+WBS-3.2.4
+activity_123
+```
+
+unless the report explicitly contains such a value as ordinary text.
+
+### `location`
+
+Extract only if explicitly present.
+
+Otherwise:
+
+```json
+null
+```
+
+### `progress_percent`
+
+Extract only when explicitly stated or unambiguously represented in the field report.
+
+Do NOT calculate progress from language such as:
+
+```text
+"work has started"
+"nearly finished"
+"making good progress"
+```
+
+Those phrases may support a status, but they do not justify inventing a numeric percentage.
+
+If no defensible percentage exists:
+
+```json
+null
+```
+
+### `status`
+
+Infer only from the report language.
+
+Do not fabricate a status when the report is genuinely ambiguous.
+
+Use:
+
+```text
+unknown
+```
+
+where appropriate.
+
+---
+
+# 4. Prompt design
+
+Create a dedicated extraction prompt builder.
+
+Recommended location:
+
+```text
+backend/src/ai/services/field-progress-extraction.service.ts
+```
+
+or an equivalent clearly separated FieldLine AI service module.
+
+Keep the prompt explicit and deterministic.
+
+The prompt should instruct the model:
+
+```text
+You are extracting structured facts from a construction/infrastructure field progress report.
+
+Extract only information explicitly supported by the report.
+
+Do not invent activity IDs.
+Do not perform schedule matching.
+Do not select an existing project activity.
+Do not calculate project truth.
+Do not calculate progress from unsupported language.
+Do not infer quantities that are not present.
+
+Return only the requested JSON structure.
+```
+
+The prompt must make the distinction explicit:
+
+```text
+reference ≠ activity identity
+```
 
 For example:
 
-" Foundation work at Block B is 60% complete. "
+> "foundation work" is a textual work reference, not an activity ID.
 
-may be validated as non-empty but the stored value should retain the user's entered text rather than being aggressively rewritten.
+The model must return the structured contract only.
 
-Use the existing validation/error architecture.
+Do not ask the model for explanations outside the JSON contract.
 
-8. DATE HANDLING
+---
 
-Use the existing project date conventions.
+# 5. FieldProgressExtractionService
 
-Do not create another date-normalization system.
+Create a dedicated application-facing service responsible for the FieldLine extraction operation.
 
-For the manual report date, accept a simple canonical date from the UI:
+Recommended:
 
-YYYY-MM-DD
+```text
+backend/src/ai/services/field-progress-extraction.service.ts
+```
 
-and validate it cleanly.
+Conceptually:
 
-Do not introduce natural-language date parsing.
+```ts
+extractFromReport(rawText: string): Promise<FieldProgressExtraction>
+```
 
-Do not interpret:
+Responsibilities:
 
-"today"
+1. Validate the input is a non-empty string.
+2. Enforce a reasonable maximum raw input length.
+3. Build the explicit extraction prompt.
+4. Call the existing `AIService.extractStructured(...)`.
+5. Return the validated structured extraction result.
+6. Translate provider/extraction failures into the existing application error model where appropriate.
 
-inside the backend as a special semantic language feature.
+It must NOT:
 
-The frontend may default the input to today's date.
+* query SQLite
+* import repositories
+* access activities
+* access schedules
+* mutate `progress_updates`
+* mutate `activities`
+* mutate `activity_progress`
+* create `activity_matches`
+* calculate variance
+* calculate risk
+* call Pass 9 logic
 
-9. API
+---
 
-Create project-scoped progress-update endpoints.
+# 6. Provider handling
+
+Do NOT create a new provider interface.
+
+Use the existing:
+
+```text
+AIProvider
+```
+
+and:
+
+```text
+AIService
+```
+
+architecture.
+
+### Important design decision
+
+For Pass 8, the extraction workflow must be fully testable without requiring a live external API key.
+
+Therefore:
+
+* keep the existing `MockAIProvider`
+* use dependency injection in tests
+* do not make the test suite depend on network access
+
+The existing mock provider may need to be extended so that it can return a valid FieldProgressExtraction response for this new contract.
+
+Do not make the mock's generic response accidentally masquerade as the new domain contract.
+
+Use explicit test fixtures for FieldLine extraction.
+
+---
+
+# 7. Do not persist extracted facts yet
+
+This is extremely important.
+
+Pass 8 is an **interpretation layer**, not a persistence/domain-truth layer.
+
+Do NOT create:
+
+```text
+extracted_progress
+field_facts
+ai_results
+activity_progress rows
+activity_matches rows
+```
+
+Do NOT add a migration unless an actual existing schema deficiency makes one unavoidable.
+
+At the end of Pass 8:
+
+```text
+raw report
+    ↓
+AI extraction
+    ↓
+validated structured facts
+```
+
+and then the result stops there.
+
+Pass 9 will consume the structured facts for activity matching.
+
+---
+
+# 8. API exposure
+
+The extraction capability must be callable so that the workflow can be tested and demonstrated, but keep the endpoint narrowly scoped.
+
+Add a dedicated endpoint only if the existing application architecture has no better existing entry point.
+
+Recommended:
+
+```text
+POST /api/ai/field-progress/extract
+```
+
+Request:
+
+```json
+{
+  "rawText": "Foundation work at Block B is 60% complete."
+}
+```
+
+Response:
+
+```json
+{
+  "extraction": {
+    "items": [
+      {
+        "reference": "foundation work",
+        "location": "Block B",
+        "progress_percent": 60,
+        "status": "in_progress"
+      }
+    ]
+  }
+}
+```
+
+### API rules
+
+Validate the request with Zod.
+
+Reject:
+
+* missing `rawText`
+* empty `rawText`
+* whitespace-only `rawText`
+* excessively large `rawText`
+
+Return an appropriate application error when AI extraction fails.
+
+Do not persist the extraction.
+
+Do not require a project ID for this endpoint unless the existing architecture demonstrates a concrete reason to do so.
+
+Do not attach the extraction to a scheduled activity.
+
+---
+
+# 9. Tests
+
+This pass must have strong tests.
 
 At minimum:
 
-POST /api/projects/:projectId/progress-updates
-GET  /api/projects/:projectId/progress-updates
-GET  /api/projects/:projectId/progress-updates/:updateId
-
-The POST endpoint creates a manual update.
-
-The backend must force:
-
-sourceType = "manual"
-status = "received"
-
-Do NOT allow the client to spoof these fields.
-
-The GET collection should return project-scoped updates, preferably newest first by report/creation time in a deterministic way.
-
-The GET-by-ID endpoint must verify that the update belongs to the requested project.
-
-An update from another project must not be exposed.
-
-10. SERVICE
-
-Create:
-
-ProgressUpdateService
-
-with a minimal application surface such as:
-
-createManualUpdate()
-listProjectUpdates()
-getProjectUpdate()
-
-The service should:
-
-verify the project exists;
-validate/application-check the relevant input;
-force manual source/status semantics;
-call the repository;
-optionally record a project event;
-return the persisted update.
-
-Do not put SQL into the service.
-
-Do not put Express objects into the service.
-
-11. PROJECT EVENTS
-
-The existing domain already contains a project event type:
-
-progress_reported
-
-Use it where appropriate.
-
-A successful manual update can create a project event such as:
-
-event_type = progress_reported
-entity_type = progress_updates
-entity_id = <update ID>
-summary = Manual progress report received
-
-If an event is created, keep it inside the same logical operation as the progress update.
-
-Do not create a general event framework.
-
-Do not make event creation more complicated than necessary.
-
-If the existing project/event conventions make this unnecessary for Pass 7, explain the decision in the final report.
-
-12. TRANSACTION / ATOMICITY
-
-A manual progress update is a small operation.
-
-If both:
-
-progress_updates
-project_events
-
-are written, they should be atomic.
-
-Use the existing SQLite transaction mechanism where appropriate.
-
-If only progress_updates is written, the repository operation itself is enough.
-
-Do not build a large transaction abstraction.
-
-13. FRONTEND
-
-Add a simple manual progress reporting workflow to the currently open project workspace.
-
-The current project workspace already contains future sections for later functionality.
-
-Make the Progress Updates area functional for PASS 7.
-
-The user flow should be:
-
-Open Project
-    ↓
-Progress Updates
-    ↓
-Enter Field Update
-    ↓
-Submit
-    ↓
-Success
-    ↓
-Update appears in history/timeline
-14. MANUAL UPDATE FORM
-
-Create a simple form with:
-
-Report date
-
-Date input.
-
-Default to today's local date.
-
-Reporter name
-
-Text input.
-
-Reporter role
-
-Optional text input.
-
-Field update
-
-Large textarea.
-
-Example placeholder:
-
-Foundation work at Block B is 60% complete.
-Concrete pouring started today.
-
-Submit button:
-
-Record Field Update
-
-Do not add AI extraction controls yet.
-
-Do not ask the user for activity ID.
-
-Do not ask for percentage as a separate field.
-
-The entire purpose is to preserve the raw human report.
-
-15. UPDATE HISTORY
-
-After submission, display the stored progress updates for the current project.
-
-Each update should show at minimum:
-
-report date;
-created timestamp;
-reporter name;
-reporter role if available;
-source badge: Manual;
-raw update text;
-status badge: Received.
-
-Display newest updates first.
-
-Keep the UI presentation-grade but simple.
-
-No charts.
-
-No progress bars derived from the text.
-
-No activity linking.
-
-16. CURRENT PROJECT
-
-Use the existing Pass 3 current-project context.
-
-The progress update API must always operate against the selected project.
-
-Do not introduce another project selector specifically for progress updates.
-
-If no project is currently open, the existing project-selection flow should remain responsible for resolving that state.
-
-17. ERROR HANDLING
-
-Use the existing AppError architecture.
-
-Handle:
-
-project not found;
-update not found;
-invalid report text;
-invalid report date;
-invalid reporter fields;
-database failure.
-
-Return useful errors to the frontend.
-
-Do not expose raw SQLite errors.
-
-18. TESTING
-
-Add dedicated repository tests:
-
-Repository
-create manual progress update;
-retrieve by ID;
-list by project;
-count by project;
-project scoping;
-timestamps populated.
-
-Add service tests:
-
-project existence;
-source type forced to manual;
-status forced to received;
-raw text preserved;
-reporter stored;
-project event behavior if implemented.
-
-Add router/API tests:
-
-POST /api/projects/:projectId/progress-updates
-GET /api/projects/:projectId/progress-updates
-GET /api/projects/:projectId/progress-updates/:updateId
+### Contract tests
 
 Test:
 
-valid creation;
-empty raw text;
-invalid date;
-missing project;
-cross-project access;
-list ordering.
-19. FRONTEND VALIDATION
+```text
+valid extraction
+empty items
+maximum 20 items
+more than 20 items rejected
+progress_percent < 0 rejected
+progress_percent > 100 rejected
+invalid status rejected
+missing required reference rejected
+overlong reference rejected
+overlong location rejected
+unexpected extra fields rejected
+```
 
-Test or manually verify:
+### Service tests
 
-1. Open a project.
-2. Open Progress Updates.
-3. Enter a manual report.
-4. Submit it.
-5. Confirm success.
-6. Confirm the report appears in history.
-7. Refresh the browser.
-8. Confirm the report still appears.
-9. Enter another report.
-10. Confirm newest-first ordering.
+Test:
 
-Do not implement actual progress calculations from the submitted text.
+```text
+valid raw text → valid structured extraction
+blank input rejected
+oversized input rejected
+provider failure converted to application error
+schema-invalid AI response rejected
+```
 
-20. RAW TEXT INTEGRITY
+Test the important semantic boundaries:
 
-This is important.
+```text
+reference is preserved as text
+location may be null
+progress_percent may be null
+status may be unknown
+```
 
-Suppose the user submits:
+### Provider isolation tests
 
-Foundation work at Block B is 60% complete. Concrete pouring started today.
+Use the existing mock provider.
 
-The database must store exactly that report as the raw_text.
+Prove that:
 
-Do not:
+```text
+AI service
+    ↓
+provider
+```
 
-extract "60";
-rewrite the sentence;
-split it into activities;
-assign it to an activity;
-create activity_progress;
-create activity_matches.
+works without SQLite.
 
-Those belong to later passes.
+The AI layer must not import:
 
-21. PASS 8+ BOUNDARY
+```text
+repositories
+database
+projectRepository
+activityRepository
+```
 
-Before committing, explicitly verify that you did NOT implement:
+Add/update architecture tests if necessary to enforce this boundary.
 
-AI extraction;
-activity matching;
-progress normalization;
-actual progress calculation;
-variance;
-risk;
-evidence/document processing;
-assistant.
+### Route tests
 
-This pass exists specifically to establish a reliable human-entered raw report that later AI functionality can consume.
+Test:
 
-22. DATABASE
+```text
+POST valid request → 200
+invalid request → 4xx
+provider failure → appropriate error response
+schema-invalid AI response → appropriate error response
+```
 
-Do NOT modify the migration chain unless a concrete schema deficiency is discovered.
+Do not test only the happy path.
 
-The existing progress_updates table should already be sufficient.
+---
 
-Do not create:
+# 10. Example golden extraction fixtures
 
-manual_progress_updates
-field_reports
-raw_reports
+Add deterministic test fixtures for at least these cases.
 
-or another duplicate table.
+### Case A — explicit percentage
 
-progress_updates is the source of truth.
+Input:
 
-23. DOCUMENTATION
+```text
+Foundation work at Block B is 60% complete.
+Concrete pouring started today.
+```
+
+Expected facts should include an item corresponding to foundation work with:
+
+```text
+location = Block B
+progress_percent = 60
+```
+
+Do not require the model to create a second item for "Concrete pouring" unless the report provides enough explicit information to justify it.
+
+### Case B — no percentage
+
+Input:
+
+```text
+Excavation work started at Pier P12 today.
+```
+
+Expected:
+
+```text
+reference = excavation work
+location = Pier P12
+progress_percent = null
+status = in_progress
+```
+
+### Case C — ambiguous progress
+
+Input:
+
+```text
+Work is moving well at Block C.
+```
+
+Do not fabricate a percentage.
+
+A valid result may contain:
+
+```text
+progress_percent = null
+```
+
+and should use an appropriately conservative status.
+
+### Case D — completed work
+
+Input:
+
+```text
+Rebar installation at Column C14 has been completed.
+```
+
+Expected:
+
+```text
+status = completed
+```
+
+without inventing a percentage unless explicitly present.
+
+---
+
+# 11. Preserve the fundamental FieldLine principle
+
+Pass 8 must reinforce:
+
+```text
+Messy field evidence
+        ↓
+AI interpretation
+        ↓
+structured facts
+        ↓
+human review where needed
+        ↓
+deterministic domain logic
+```
+
+The AI is an interpreter.
+
+It is NOT the source of project truth.
+
+The following belong to later passes:
+
+```text
+Pass 9  → Activity Matching
+Pass 10 → Progress Normalization
+Pass 11 → Planned vs Actual
+Pass 12 → Delay / Risk
+```
+
+Do not implement any of them now.
+
+---
+
+# 12. Documentation
 
 Update:
 
+```text
 docs/ARCHITECTURE.md
+```
 
-to show:
+to document:
 
-Manual Progress UI
-    ↓
-Progress Update API
-    ↓
-ProgressUpdateService
-    ↓
-ProgressUpdateRepository
-    ↓
-SQLite progress_updates
+```text
+Raw field report
+      ↓
+FieldProgressExtractionService
+      ↓
+AIService
+      ↓
+AIProvider
+      ↓
+Zod FieldProgressExtraction contract
+      ↓
+Validated structured facts
+```
 
-Also document that:
+Explicitly document:
 
-Manual reports are stored as raw text in Pass 7. No AI extraction or activity progress mutation occurs yet.
+> Pass 8 extracts textual field facts only. It does not identify scheduled activities, mutate activity progress, or define project truth.
 
-Update the README only enough to mark Pass 7 complete.
+Update the README only enough to mark Pass 8 appropriately after successful implementation.
 
-Do not alter the authoritative 26-pass roadmap.
+Do NOT alter the authoritative 26-pass roadmap.
 
-24. SELF-REVIEW
+---
 
-Before committing, inspect the final implementation.
+# 13. No unnecessary infrastructure
 
-Architecture
+Do NOT introduce:
 
-Is it:
+* Docker
+* PostgreSQL
+* Redis
+* queues
+* workers
+* cloud storage
+* microservices
+* deployment infrastructure
+* a new database
+* a new AI framework
 
-UI
-→ route
-→ validation
-→ service
-→ repository
-→ SQLite
-Data
+Keep the implementation inside the existing local modular monolith.
 
-Does the stored record preserve:
+---
 
-raw text;
-report date;
-reporter;
-project;
-source type;
-status;
-timestamps?
-Project isolation
+# 14. Regression verification
 
-Can one project's update be retrieved through another project's endpoint?
+Before considering Pass 8 complete, run:
 
-It must not.
-
-Raw text
-
-Is the original report preserved exactly?
-
-Scope
-
-Did any AI/progress calculation/matching logic leak into this pass?
-
-Regression
-
-Do Pass 0–6 workflows still work?
-
-VALIDATION COMMANDS
-
-Run:
-
+```text
 npm test
 npm run build
 npm run setup
-npm run setup
 npm run demo:reset
+```
 
-Then run:
+Also verify:
 
-npm run dev
+```text
+/api/health
+```
 
-Manually verify:
+No Pass 0–7 regression is acceptable.
 
-Create/open a project.
-Open Progress Updates.
+Do not use test count alone as proof of completion. Inspect the actual implementation and verify the architecture boundaries.
 
-Enter:
+---
 
-Foundation work at Block B is 60% complete. Concrete pouring started today.
+# 15. Final review before commit
 
-Submit it.
-Verify it appears in the update history.
-Verify sourceType = manual.
-Verify status = received.
-Verify the exact raw text is preserved.
-Verify reporter and report date are displayed.
-Refresh and confirm persistence.
-Create a second update and verify newest-first ordering.
-Verify /api/health remains healthy.
-GIT
+Inspect your own diff carefully.
 
-Inspect:
+Confirm:
 
-git status
-git diff
+```text
+[ ] Existing AIProvider abstraction reused
+[ ] Existing AIService reused
+[ ] FieldLine-specific extraction contract added
+[ ] Explicit extraction prompt added
+[ ] Strict Zod validation enforced
+[ ] Output bounded
+[ ] Missing facts represented conservatively
+[ ] AI never performs activity matching
+[ ] AI never mutates project truth
+[ ] No extraction persistence added
+[ ] No migration added unless genuinely necessary
+[ ] Mock provider remains usable for deterministic tests
+[ ] Route is narrow and testable
+[ ] Tests cover provider failure and invalid AI output
+[ ] npm test passes
+[ ] npm run build passes
+[ ] npm run setup passes
+[ ] npm run demo:reset passes
+[ ] /api/health returns healthy
+[ ] No Pass 9+ functionality introduced
+[ ] docs/ARCHITECTURE.md updated
+[ ] README updated without changing the 26-pass roadmap
+```
 
-Confirm only PASS 7 work is included.
+---
 
-Do not commit:
+# 16. Commit
 
-.env
-SQLite runtime files
-WAL/journal files
-dist
-uploads
-secrets
-unrelated prompt artifacts if avoidable
+Use:
 
-Create:
-
-feat: implement FieldLine manual progress reporting
+```text
+feat: implement FieldLine AI extraction layer
+```
 
 Push to:
 
+```text
 itshim998/FieldLine
 main
-COMPLETION CRITERIA
+```
 
-PASS 7 is complete only when:
+After implementation, report:
 
- ProgressUpdateRepository exists.
- ProgressUpdateService exists.
- Zod request validation exists.
- Manual progress API exists.
- Project-scoped retrieval works.
- Raw update text is preserved.
- Report date is stored.
- Reporter name is stored.
- Reporter role can be stored.
- Source type is forced to manual.
- Status is initially received.
- Timestamps are persisted.
- Project isolation is enforced.
- Progress Update history is displayed.
- Refresh preserves the history.
- No actual activity progress is mutated.
- No AI extraction exists.
- No activity matching exists.
- Pass 0–6 functionality remains intact.
- npm test passes.
- npm run build passes.
- setup passes.
- repeated setup passes.
- demo reset passes.
- health endpoint remains healthy.
- manual browser flow verified.
- final diff reviewed.
- commit created.
- commit pushed.
-FINAL REPORT
+1. concise summary of the actual implementation
+2. files changed
+3. extraction contract
+4. API endpoint added
+5. tests and results
+6. build/setup verification
+7. commit SHA
 
-Report:
-
-Current repository architecture used.
-ProgressUpdateRepository implementation.
-ProgressUpdateService implementation.
-API endpoints.
-Validation rules.
-Raw text preservation behavior.
-Reporter/timestamp/source/status behavior.
-Project isolation behavior.
-Frontend progress-update workflow.
-Tests added and total passing tests.
-Validation command results.
-Manual browser verification.
-Any schema changes and why.
-Self-review findings.
-Commit hash/message/branch/push result.
-
-Explicitly confirm:
-
-PASS 8 and later functionality were NOT implemented.
-
-FINAL INSTRUCTION
-
-Implement PASS 7 — Manual Progress Reporting only.
-
-The goal is:
-
-A supervisor can enter a raw field update, FieldLine stores it reliably against the correct project, and the user can immediately see the persisted update.
-
-Do not interpret the report yet.
-
-Stop after PASS 7.
+Do not claim Pass 8 is approved. It must be independently reviewed after you finish.

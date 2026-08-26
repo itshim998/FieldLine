@@ -53,7 +53,23 @@ export class MockAIProvider implements AIProvider {
       return this.mockStructuredResponse;
     }
 
-    // Default valid mock extraction contract
+    // Default valid FieldLine field-progress extraction payload
+    const defaultFieldProgressPayload = {
+      items: [
+        {
+          reference: 'foundation work',
+          location: 'Block B',
+          progress_percent: 60,
+          status: 'in_progress'
+        }
+      ]
+    };
+
+    if (_schema.safeParse(defaultFieldProgressPayload).success) {
+      return defaultFieldProgressPayload;
+    }
+
+    // Default valid generic mock extraction contract
     return {
       summary: 'Mock extracted summary of field progress',
       confidenceScore: 0.95,

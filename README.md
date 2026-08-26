@@ -129,7 +129,7 @@ Example response:
 - [x] **PASS 5 — Schedule Normalization** *(Completed)*
 - [x] **PASS 6 — Schedule Validation** *(Completed)*
 - [x] **PASS 7 — Manual Progress Reporting** *(Completed)*
-- [ ] **PASS 8 — AI Extraction Layer**
+- [x] **PASS 8 — AI Extraction Layer** *(Completed)*
 - [ ] **PASS 9 — Activity Matching Engine**
 - [ ] **PASS 10 — Progress Normalization**
 - [ ] **PASS 11 — Planned vs Actual Engine**
