@@ -157,6 +157,50 @@ Transparent API Response ({ matches: [{ fact, bestMatch, alternatives }] })
 
 ---
 
+### 5. Progress Normalization Pipeline (Pass 10)
+
+```text
+Pass 8 Structured Fact ({ reference, location, progress_percent, status })
+        +
+Pass 9 Matched Activity Identity (Activity: plannedQuantity, unit, plannedStart, plannedFinish)
+        +
+Caller Context (optional actualQuantity, quantityUnit, asOfDate, matchId)
+        ↓
+POST /api/projects/:projectId/progress-updates/:updateId/progress
+        ↓
+ProgressService (Verification: project, update, matchId, matchStatus, matched activity)
+        ↓
+Pure Progress Normalization (progress-normalization.ts)
+  ├── 1. Unit Compatibility Verification (conservative normalizeUnit comparison)
+  ├── 2. Quantity-Derived Arithmetic (actualQuantity / plannedQuantity * 100, round 2 decimals)
+  ├── 3. Percentage Precedence (Quantity math > Reported % > Completed status fallback > Unavailable)
+  ├── 4. Capping Rule (min(100, calculatedPercent) + note provenance preserving actual quantity)
+  ├── 5. Deterministic Status Mapping (not_started, started, in_progress, completed, delayed)
+  └── 6. Start/Finish Date Derivation (actualStart on started/in_progress, actualFinish on completed)
+        ↓
+Historical Reconciliation & Idempotency Check
+  ├── Earliest actualStart preserved across chronological observations
+  └── Existing identical observation returned if re-submitted
+        ↓
+SqliteActivityProgressRepository (Atomic Transaction)
+  ├── 1. INSERT INTO activity_progress
+  └── 2. INSERT INTO project_events (event_type = 'progress_updated')
+        ↓
+Canonical ActivityProgress Observation (Persisted to SQLite)
+```
+
+> [!IMPORTANT]
+> **Pass 10 Core Architectural Invariants**:
+> 1. **Quantity-Derived Percentage in Code**: Quantity arithmetic (`actualQuantity / plannedQuantity * 100`) is calculated deterministically in TypeScript. LLM output is never trusted for mathematical progress calculations.
+> 2. **Authoritative Quantity Precedence**: Valid quantity arithmetic strictly overrides contradictory reported percentages.
+> 3. **No Arbitrary Percentages**: If no deterministic percentage can be derived (e.g., text like "excavation continued" with no quantity and no percentage), persistence is rejected with a clear validation error. Zero/arbitrary progress is never fabricated.
+> 4. **Observational Chronology**: `activity_progress` rows are append-only observations ordered chronologically by `as_of_date` rather than processing timestamp. Earlier historical start dates are never overwritten by later reports.
+> 5. **Match Status Policy**: By default, only `confirmed` matches are normalized into `activity_progress`. `rejected` matches are always blocked. `suggested` matches require an explicit `allowSuggested: true` parameter.
+> 6. **Zero Pass 11+ Leakage**: Pass 10 establishes canonical actual observations only. Planned-vs-actual variance calculations, delay detection, and forecasting belong strictly to subsequent passes.
+
+---
+
+
 ## Persistence Architecture
 
 ```text
@@ -247,14 +291,15 @@ SQLite (database/fieldline.db: progress_updates table)
 backend/
   src/
     config/           # Validated environment configuration (env.ts) and structured logger (logger.ts)
-    routes/           # Thin Express route handlers (health, project, schedule, progress-update, ai, activity-matching)
+    routes/           # Thin Express route handlers (health, project, schedule, progress-update, ai, activity-matching, progress)
     validation/       # Runtime Zod schemas for request/response contracts
     middleware/       # Centralized error handling, request logging, and Zod validation middleware
     services/         # Pure application domain logic (health, project, schedule-import, progress-update)
+      progress/       # Progress normalization domain (progress-normalization, progress.service, types)
       matching/       # Activity matching engine (activity-matching.service, activity-match-scoring, text-similarity, semantic-matcher, llm-disambiguator)
       normalization/  # Date, number, unit, text, and schedule activity normalizers
       validation/     # Multi-rule schedule validator engine
-    repositories/     # Direct SQLite persistence (Project, System, Schedule, Activity, ProgressUpdate, ActivityMatch)
+    repositories/     # Direct SQLite persistence (Project, System, Schedule, Activity, ProgressUpdate, ActivityMatch, ActivityProgress)
     models/           # Strongly typed domain entity definitions and DTO contracts
     database/         # SQLite connection lifecycle, WAL pragmas, migrator, and migrations/
       migrations/     # Ordered migrations (0001, 0002, 0003, 0004)
@@ -264,7 +309,7 @@ backend/
     errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError, NormalizationError, ScheduleValidationError)
     ai/               # Decoupled AI provider interfaces, mock adapters, contracts (FieldProgressExtraction), and services
     jobs/             # Local background/batch task workers
-  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (40 suites, 313 tests)
+  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (44 suites, 355 tests)
 frontend/
   src/
     App.tsx           # FieldLine Project Management, Schedule Viewer & Manual Progress UI
@@ -321,6 +366,17 @@ frontend/
     - Idempotent re-matching and persistence of match candidates strictly with `status = 'suggested'`.
     - Strict boundary preservation: zero mutations to `activity_progress` or actual progress calculations (reserved for Pass 10).
     - REST endpoints `POST /api/projects/:projectId/progress-updates/:updateId/matches` and `GET /api/projects/:projectId/progress-updates/:updateId/matches`.
-    - 40 Vitest test suites (313 tests passing).
+11. **Pass 10 — Progress Normalization**:
+    - Pure deterministic progress normalization engine (`normalizeProgress`) computing canonical execution status, quantity math, and derived percentages.
+    - Quantity arithmetic executed exclusively in application code (`actualQuantity / plannedQuantity * 100`) with 2-decimal rounding.
+    - Strict percentage precedence: Quantity-derived > Reported percentage > Completed fallback (100%) > Unavailable (`null`).
+    - Conservative unit compatibility enforcement via `normalizeUnit` (`m3` === `m³`, `m3` !== `tonnes`).
+    - Quantity overrun capping rule at 100% while preserving physical actual quantity and provenance notes.
+    - Observational chronology: append-only `activity_progress` history ordered by `as_of_date`, preserving earliest historical `actualStart` dates.
+    - Match-status safety policy: only `confirmed` matches normalized by default; `rejected` blocked; `suggested` requires explicit `allowSuggested: true`.
+    - Dedicated `SqliteActivityProgressRepository` with atomic `activity_progress` + `progress_updated` event insertion.
+    - REST endpoints `POST /api/projects/:projectId/progress-updates/:updateId/progress`, `GET /api/projects/:projectId/activities/:activityId/progress`, `GET /api/projects/:projectId/activities/:activityId/progress/latest`.
+    - 44 Vitest test suites (355 tests passing).
+
 
 

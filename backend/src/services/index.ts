@@ -38,5 +38,26 @@ export { computeTextSimilarity } from './matching/text-similarity.js';
 export * from './normalization/index.js';
 export * from './validation/index.js';
 
+export {
+  DefaultProgressService,
+  progressService
+} from './progress/progress.service.js';
+export type {
+  ProgressService,
+  NormalizeAndRecordProgressInput
+} from './progress/progress.service.js';
+
+export {
+  normalizeProgress,
+  areUnitsCompatible,
+  mapExtractionStatus
+} from './progress/progress-normalization.js';
+export type {
+  NormalizeProgressInput,
+  ProgressNormalizationResult,
+  PercentDerivationSource
+} from './progress/progress-normalization.types.js';
+
+
 
 

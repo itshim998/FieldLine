@@ -33,3 +33,10 @@ export {
   activityMatchRepository
 } from './activity-match.repository.js';
 export type { ActivityMatchRepository } from './activity-match.repository.js';
+
+export {
+  SqliteActivityProgressRepository,
+  activityProgressRepository
+} from './activity-progress.repository.js';
+export type { ActivityProgressRepository } from './activity-progress.repository.js';
+

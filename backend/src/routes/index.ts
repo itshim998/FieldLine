@@ -5,6 +5,7 @@ import { scheduleRouter } from './schedule.router.js';
 import { progressUpdateRouter } from './progress-update.router.js';
 import { aiRouter } from './ai.router.js';
 import { activityMatchingRouter } from './activity-matching.router.js';
+import { progressRouter } from './progress.router.js';
 
 export const apiRouter = Router();
 
@@ -14,6 +15,8 @@ apiRouter.use(scheduleRouter);
 apiRouter.use(progressUpdateRouter);
 apiRouter.use(aiRouter);
 apiRouter.use(activityMatchingRouter);
+apiRouter.use(progressRouter);
+
 
 
 
