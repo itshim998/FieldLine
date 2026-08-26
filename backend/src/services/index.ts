@@ -58,6 +58,30 @@ export type {
   PercentDerivationSource
 } from './progress/progress-normalization.types.js';
 
+export {
+  DefaultProgressSnapshotService,
+  progressSnapshotService,
+  validateSnapshotDate,
+  getTodayDateString
+} from './snapshot/progress-snapshot.service.js';
+export type { ProgressSnapshotService } from './snapshot/progress-snapshot.types.js';
+
+export {
+  diffInCalendarDays,
+  calculatePlannedProgress,
+  calculateVariance,
+  isOverdue,
+  calculateActivitySnapshot,
+  calculateSnapshotSummary,
+  calculateProjectSnapshot
+} from './snapshot/progress-snapshot.calculator.js';
+export type {
+  PlannedProgressCalculation,
+  VarianceCalculation,
+  ProgressSnapshotInput
+} from './snapshot/progress-snapshot.types.js';
+
+
 
 
 

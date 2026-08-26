@@ -20,6 +20,11 @@ export interface ActivityProgressRepository {
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityProgress[];
   listByProjectId(projectId: string): ActivityProgress[];
   getLatestByActivityId(activityId: string, projectId?: string): ActivityProgress | null;
+  getLatestByActivityIdAsOfDate(
+    activityId: string,
+    projectId: string,
+    asOfDate: string
+  ): ActivityProgress | null;
   findExistingObservation(
     projectId: string,
     activityId: string,
@@ -336,6 +341,28 @@ export class SqliteActivityProgressRepository implements ActivityProgressReposit
     } catch (err: unknown) {
       throw new DatabaseError(
         `Failed to fetch latest activity progress: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  getLatestByActivityIdAsOfDate(
+    activityId: string,
+    projectId: string,
+    asOfDate: string
+  ): ActivityProgress | null {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare(`
+        SELECT * FROM activity_progress 
+        WHERE activity_id = ? AND project_id = ? AND as_of_date <= ?
+        ORDER BY as_of_date DESC, created_at DESC, id DESC 
+        LIMIT 1
+      `);
+      const row = stmt.get(activityId, projectId, asOfDate) as ActivityProgressDbRow | undefined;
+      return row ? mapRowToActivityProgress(row) : null;
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to fetch latest activity progress as of date: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

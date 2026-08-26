@@ -6,6 +6,7 @@ import { progressUpdateRouter } from './progress-update.router.js';
 import { aiRouter } from './ai.router.js';
 import { activityMatchingRouter } from './activity-matching.router.js';
 import { progressRouter } from './progress.router.js';
+import { progressSnapshotRouter } from './progress-snapshot.router.js';
 
 export const apiRouter = Router();
 
@@ -16,6 +17,8 @@ apiRouter.use(progressUpdateRouter);
 apiRouter.use(aiRouter);
 apiRouter.use(activityMatchingRouter);
 apiRouter.use(progressRouter);
+apiRouter.use(progressSnapshotRouter);
+
 
 
 

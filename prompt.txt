@@ -1,291 +1,1065 @@
-# PASS 10 Corrective Fix — Preserve Historical `actualFinish`
+# PASS 11 — Planned vs Actual Engine
 
-Pass 10 is **not yet approved**.
+You are implementing **FieldLine PASS 11 — Planned vs Actual Engine**.
 
-The current implementation correctly preserves the earliest historical `actualStart`, but it does **not** apply the same historical reconciliation to `actualFinish`.
+Passes 0–10 are complete and approved.
 
-The problem is in:
+Your first task is to inspect the current repository on `main` and implement Pass 11 around the architecture that actually exists today.
 
-```text id="f8u9p1"
-backend/src/services/progress/progress.service.ts
-```
-
-The current flow effectively does:
-
-```ts
-const finalActualFinish = normalized.actualFinish;
-```
-
-So a later-arriving completed report can overwrite the historical completion date.
-
-Example:
-
-```text id="xgj1wi"
-Report A
-asOfDate = 2026-08-20
-status = completed
-→ actualFinish = 2026-08-20
-
-Report B
-asOfDate = 2026-08-26
-status = completed
-→ current code produces actualFinish = 2026-08-26
-```
-
-That is incorrect for FieldLine's append-only historical observation model.
+Do not assume the original roadmap maps 1:1 onto the current code.
 
 ---
 
-# Required Fix
+# 1. Current architectural state
 
-## 1. Preserve the earliest established `actualFinish`
+FieldLine now has this pipeline:
 
-Mirror the existing `actualStart` reconciliation logic.
+```text id="f1k8p2"
+Raw field report
+      ↓
+PASS 8 — AI extraction
+      ↓
+structured field facts
+      ↓
+PASS 9 — Activity matching
+      ↓
+activity identity / suggested or reviewed match
+      ↓
+PASS 10 — Progress normalization
+      ↓
+historical ActivityProgress observations
+```
 
-Before persisting the new observation:
+Pass 11 must now answer:
 
-1. Load existing `activity_progress` history for the activity.
-2. Collect all non-null `actualFinish` values.
-3. Determine the earliest historical finish date.
-4. If a historical finish exists, preserve it rather than replacing it with a later date.
+> **"As of a specific date, what was planned to happen, what has actually happened, and what is the variance?"**
 
-Conceptually:
+The target pipeline is:
 
-```ts id="9m6d2e"
-let finalActualFinish = normalized.actualFinish;
+```text id="t9d3q7"
+Baseline Activity schedule
+        +
+ActivityProgress history
+        ↓
+PASS 11 Planned vs Actual Engine
+        ↓
+read-only progress snapshot
+        ↓
+activity-level variance + project-level summary
+```
 
-const historicalFinishDates = history
-  .map(r => r.actualFinish)
-  .filter((d): d is string => d !== null && d !== undefined && d.length > 0)
-  .sort();
+Pass 11 is an **analytical/read-only layer**.
 
-if (historicalFinishDates.length > 0) {
-  const earliestHistoricalFinish = historicalFinishDates[0];
+It must not modify project truth.
 
-  if (finalActualFinish) {
-    finalActualFinish =
-      earliestHistoricalFinish < finalActualFinish
-        ? earliestHistoricalFinish
-        : finalActualFinish;
-  } else {
-    finalActualFinish = earliestHistoricalFinish;
+---
+
+# 2. Existing repository facts
+
+The current `Activity` model contains:
+
+```text id="jmw4y8"
+id
+projectId
+scheduleId
+externalId
+name
+description
+wbsCode
+location
+plannedStart
+plannedFinish
+plannedQuantity
+unit
+baselineProgress
+```
+
+The existing activity repository already provides:
+
+```text id="g7ax5c"
+getById()
+listByScheduleId()
+listByProjectId()
+countByProjectId()
+```
+
+with project-wide activity retrieval already implemented.
+
+Pass 10 provides historical `ActivityProgress` observations containing:
+
+```text id="m2e6a7"
+activityId
+projectId
+progressUpdateId
+actualPercent
+actualQuantity
+actualStart
+actualFinish
+status
+asOfDate
+notes
+```
+
+and the repository supports:
+
+```text id="p9x4a1"
+listByActivityId()
+getLatestByActivityId()
+listByProjectId()
+```
+
+with chronology ordered by:
+
+```text
+as_of_date DESC
+created_at DESC
+id DESC
+```
+
+The Pass 10 implementation deliberately treats these records as **historical observations**, not a single mutable current-state row.
+
+Do not change that architecture.
+
+---
+
+# 3. Pass 11 objective
+
+Build a deterministic engine that produces a complete project progress snapshot.
+
+For each activity, calculate:
+
+```text id="8w4m9u"
+plannedProgress
+actualProgress
+progressVariance
+plannedStart
+plannedFinish
+actualStart
+actualFinish
+plannedDuration
+elapsed/current state
+execution status
+overdue flag
+```
+
+The engine must also expose a project-level summary.
+
+The core activity-level concept is:
+
+```text id="q2v6kj"
+progressVariance = actualProgress - plannedProgress
+```
+
+Interpretation:
+
+```text
+positive  → ahead
+zero      → on plan
+negative  → behind
+```
+
+Do not use an LLM.
+
+Do not introduce predictive/forecasting logic.
+
+---
+
+# 4. Snapshot date is fundamental
+
+Pass 11 must be explicitly **as-of a snapshot date**.
+
+Recommended API shape:
+
+```text id="5v4x4w"
+GET /api/projects/:projectId/progress-snapshot?asOfDate=2026-08-26
+```
+
+If `asOfDate` is omitted, use the current local/application date according to the existing repository conventions.
+
+Do not use JavaScript process time repeatedly throughout calculations.
+
+Resolve one canonical snapshot date at the start of the request.
+
+This matters because all planned and actual calculations must reference the same date.
+
+---
+
+# 5. Planned progress calculation
+
+The current schedule model provides planned start and finish dates but does not contain a full planned-progress curve.
+
+Therefore, unless inspection of the current code reveals an already-established baseline curve, use this deterministic baseline model:
+
+### Before planned start
+
+```text id="0l4pdm"
+asOfDate < plannedStart
+→ plannedProgress = 0
+```
+
+### On or after planned finish
+
+```text id="tj5rc8"
+asOfDate >= plannedFinish
+→ plannedProgress = 100
+```
+
+### During planned window
+
+Use linear elapsed-duration progress:
+
+```text id="z3x5kq"
+plannedProgress =
+  elapsedDays / plannedDurationDays * 100
+```
+
+Clamp to:
+
+```text
+0 <= plannedProgress <= 100
+```
+
+Example:
+
+```text id="c7h2x1"
+plannedStart  = 2026-08-01
+plannedFinish = 2026-08-11
+snapshot      = 2026-08-06
+
+elapsed = 5 days
+duration = 10 days
+
+plannedProgress = 50%
+```
+
+### Date semantics
+
+Use a single clearly documented convention for date arithmetic.
+
+Prefer calendar-day arithmetic based on `YYYY-MM-DD` dates.
+
+Do not use time-of-day or timezone-sensitive calculations for schedule dates.
+
+Avoid off-by-one errors.
+
+Test boundary dates explicitly.
+
+---
+
+# 6. Existing `baselineProgress`
+
+The `Activity` model contains:
+
+```text
+baselineProgress
+```
+
+Do not silently reinterpret this field.
+
+Before implementation:
+
+1. inspect how `baselineProgress` is used across the repository
+2. determine whether it represents an established schedule baseline value or an import field
+3. if it already has a defined meaning, preserve that meaning
+4. do not overwrite it
+
+For Pass 11, the analytical planned-progress-as-of-date calculation should remain deterministic and explainable.
+
+If the current repository does not contain a defined time-phased baseline curve, do not invent one.
+
+Document the linear schedule-date model clearly.
+
+---
+
+# 7. Actual progress selection
+
+For each activity and snapshot date:
+
+Select the **latest ActivityProgress observation whose `asOfDate <= snapshotDate`**.
+
+This is critical.
+
+Do NOT simply use:
+
+```text
+getLatestByActivityId(activityId)
+```
+
+if that method may return a future-dated observation relative to the requested snapshot.
+
+Pass 11 needs:
+
+```text id="u9n7m3"
+latest observation
+WHERE as_of_date <= snapshotDate
+ORDER BY as_of_date DESC,
+         created_at DESC,
+         id DESC
+LIMIT 1
+```
+
+Add a repository method if necessary:
+
+```ts id="0s9d3w"
+getLatestByActivityIdAsOfDate(
+  activityId: string,
+  projectId: string,
+  asOfDate: string
+): ActivityProgress | null
+```
+
+Do not mutate the existing semantics of `getLatestByActivityId()`.
+
+---
+
+# 8. Activities with no actual progress
+
+If no ActivityProgress observation exists for an activity as of the snapshot date:
+
+```text id="qg6z8t"
+actualProgress = 0
+actual status = not_started
+actualStart = null
+actualFinish = null
+```
+
+Do not fabricate an observation in SQLite.
+
+The snapshot may represent the absence of observations as a derived `not_started` state.
+
+Do not insert an ActivityProgress row just because the snapshot is being generated.
+
+---
+
+# 9. Actual state/status
+
+Use the latest actual progress observation's status when one exists.
+
+Possible states:
+
+```text id="a9m1v4"
+not_started
+started
+in_progress
+completed
+delayed
+```
+
+For activities with no observation:
+
+```text
+not_started
+```
+
+Do not infer a different status from the variance alone.
+
+For example:
+
+```text
+plannedProgress = 50
+actualProgress = 40
+```
+
+does not automatically mean:
+
+```text
+delayed
+```
+
+That belongs to later delay/risk logic.
+
+---
+
+# 10. Actual start / finish
+
+Use the selected historical ActivityProgress observation:
+
+```text id="5r4j8n"
+actualStart
+actualFinish
+```
+
+If no observation exists:
+
+```text
+null
+```
+
+Do not rewrite historical dates.
+
+Do not calculate a new actual start/finish in Pass 11.
+
+Pass 10 owns actual-progress normalization and historical date preservation.
+
+---
+
+# 11. Planned duration
+
+For every activity:
+
+```text id="n5j4q7"
+plannedDurationDays =
+  plannedFinish - plannedStart
+```
+
+Use one documented calendar-day convention.
+
+Recommended:
+
+```text id="e9q4x2"
+same-day activity:
+plannedDurationDays = 0
+```
+
+For reporting purposes you may also expose:
+
+```text id="67mv8c"
+plannedDurationDaysInclusive
+```
+
+if that makes the semantics clearer, but avoid unnecessary duplicate fields.
+
+Do not invent actual duration if the activity has never started.
+
+If an actual start exists and the snapshot is after that date, an activity-level `elapsedActualDays` may be useful, but do not turn that into schedule variance unless explicitly required.
+
+---
+
+# 12. Overdue definition
+
+Pass 11 needs an explicit, deterministic definition.
+
+For this pass:
+
+```text id="x5t7m2"
+overdue =
+  snapshotDate > plannedFinish
+  AND actualProgress < 100
+```
+
+That means:
+
+```text
+planned finish passed
++
+activity is not complete
+=
+overdue
+```
+
+Do NOT classify an activity as overdue merely because its actual progress is below planned progress while the planned finish date has not passed.
+
+Example:
+
+```text
+planned progress = 60
+actual progress = 40
+snapshot = mid-schedule
+
+→ behind plan
+→ NOT overdue
+```
+
+This distinction is important.
+
+Do not introduce Pass 12 risk scoring or delay detection yet.
+
+---
+
+# 13. Variance
+
+For each activity:
+
+```text id="q7r1s0"
+progressVariance =
+  actualProgress - plannedProgress
+```
+
+Round deterministically, preferably to 2 decimal places.
+
+Example:
+
+```text
+planned = 60
+actual = 40
+
+variance = -20
+```
+
+Do not call this "delay" automatically.
+
+Use neutral terminology:
+
+```text
+ahead
+on_plan
+behind
+```
+
+Optionally derive:
+
+```ts id="m3r8f2"
+varianceState:
+  'ahead'
+  | 'on_plan'
+  | 'behind'
+```
+
+with a very small tolerance if justified.
+
+Recommended exact policy:
+
+```text id="t2j6k4"
+variance > 0.01 → ahead
+variance < -0.01 → behind
+otherwise        → on_plan
+```
+
+Document the tolerance.
+
+Do not overcomplicate this.
+
+---
+
+# 14. Zero-duration activities
+
+Handle:
+
+```text id="az7k2w"
+plannedStart === plannedFinish
+```
+
+explicitly.
+
+Recommended:
+
+```text
+before date → plannedProgress = 0
+on/after date → plannedProgress = 100
+```
+
+Do not divide by zero.
+
+Add dedicated tests.
+
+---
+
+# 15. Invalid schedule dates
+
+Activities should normally already be validated by the schedule-import pipeline.
+
+Nevertheless, Pass 11 must fail safely if it encounters invalid/inconsistent date data.
+
+Examples:
+
+```text id="a0pcj7"
+plannedFinish < plannedStart
+invalid date format
+```
+
+Do not silently generate nonsensical planned percentages.
+
+Either:
+
+* reject the affected activity with a domain validation error, or
+* represent the activity as `data_error` in the snapshot if the existing reporting conventions support per-row errors.
+
+Prefer consistency with the existing application error model.
+
+Do not invent another error framework.
+
+---
+
+# 16. Project snapshot response
+
+Create a clearly typed result.
+
+Recommended shape:
+
+```ts id="y9z7e6"
+{
+  projectId: string,
+  asOfDate: string,
+  generatedAt: string,
+
+  activities: [
+    {
+      activityId: string,
+      externalId: string,
+      name: string,
+      wbsCode: string | null,
+      location: string | null,
+
+      plannedStart: string,
+      plannedFinish: string,
+      plannedDurationDays: number,
+
+      actualStart: string | null,
+      actualFinish: string | null,
+
+      plannedProgress: number,
+      actualProgress: number,
+      progressVariance: number,
+
+      varianceState: 'ahead' | 'on_plan' | 'behind',
+
+      status: 'not_started' | 'started' | 'in_progress' | 'completed' | 'delayed',
+      overdue: boolean
+    }
+  ],
+
+  summary: {
+    totalActivities: number,
+    notStarted: number,
+    started: number,
+    inProgress: number,
+    completed: number,
+    delayed: number,
+    overdue: number,
+    ahead: number,
+    onPlan: number,
+    behind: number
   }
 }
 ```
 
-Use the same deterministic date representation already used elsewhere in the repository.
+You may add small useful metadata fields when the current code conventions support them.
 
-Do not introduce a new date abstraction unless the current codebase requires it.
-
----
-
-# 2. Preserve historical truth, not processing order
-
-The key rule is:
-
-```text id="h2h2p0"
-asOfDate determines chronology
-not insertion time
-not processing time
-```
-
-Example:
-
-```text id="x6s4bq"
-Observation A:
-asOfDate = 2026-08-20
-actualFinish = 2026-08-20
-
-Observation B:
-asOfDate = 2026-08-26
-actualFinish = 2026-08-26
-```
-
-The second observation must preserve:
-
-```text id="7e6kl4"
-actualFinish = 2026-08-20
-```
-
-because the activity was already observed as completed earlier.
-
-Also test the reverse arrival order:
-
-```text id="2fb4qg"
-insert 2026-08-26 observation first
-then insert 2026-08-20 observation
-```
-
-The historical result must still resolve correctly according to `asOfDate`.
+Do not create speculative project KPIs.
 
 ---
 
-# 3. Do NOT alter existing `actualStart` behavior
+# 17. Project-level aggregation
 
-The current `actualStart` historical reconciliation is correct.
+The minimum required project snapshot is:
 
-Keep it intact.
-
-Pass 10 must now have symmetrical handling:
-
-```text id="r2a88g"
-actualStart
-→ earliest known historical start
-
-actualFinish
-→ earliest known historical finish
+```text
+all activities
++
+per-activity planned/actual/variance/state
++
+summary counts
 ```
 
-Do not replace the current implementation with a generalized abstraction unless that genuinely improves the existing code without unnecessary refactoring.
+Do NOT invent a project percentage using a naive average of activity percentages.
+
+Do NOT average activities with completely different scopes/quantities unless the repository already defines a valid weighting mechanism.
+
+A simple activity count summary is safer for Pass 11.
+
+If you identify a legitimate existing quantity-based aggregation mechanism in the repository, inspect it carefully before using it.
+
+Do not create a new weighting philosophy in this pass.
 
 ---
 
-# 4. Add regression tests
-
-Update:
-
-```text id="vh2uc1"
-backend/tests/progress_service.test.ts
-```
-
-Add at least these tests.
-
-### Test A — later completed observation preserves earlier finish
-
-1. Create a confirmed match.
-2. Normalize a completed observation:
-
-```text
-asOfDate = 2026-08-20
-status = completed
-progress_percent = 100
-```
-
-Verify:
-
-```text
-actualFinish = 2026-08-20
-```
-
-3. Create a second progress update.
-4. Normalize another completed observation:
-
-```text
-asOfDate = 2026-08-26
-status = completed
-progress_percent = 100
-```
-
-Verify:
-
-```text
-actualFinish = 2026-08-20
-```
-
-The test must prove that the earlier finish date was preserved.
-
----
-
-### Test B — late-arriving older report
+# 18. API
 
 Create:
 
-```text id="k6rr4t"
-first:
-asOfDate = 2026-08-26
-status = completed
+```text id="9m5w2q"
+GET /api/projects/:projectId/progress-snapshot
 ```
 
-then later process:
-
-```text id="2c9g9m"
-second:
-asOfDate = 2026-08-20
-status = completed
-```
-
-Verify the newly-created observation has:
-
-```text id="jd8rfb"
-actualFinish = 2026-08-20
-```
-
-and that historical ordering remains based on `asOfDate`.
-
-This protects against implementation accidentally using creation order.
-
----
-
-### Test C — existing finish survives non-completed later report
-
-Verify that once an activity has an established historical `actualFinish`, a later `in_progress` or `delayed` observation does not erase it.
-
-Example:
-
-```text id="uv8ikp"
-2026-08-20 → completed → actualFinish = 2026-08-20
-
-2026-08-26 → delayed/in_progress
-```
-
-The newer observation should preserve:
+Query parameter:
 
 ```text
-actualFinish = 2026-08-20
+asOfDate=YYYY-MM-DD
 ```
 
-Do not set it back to `null`.
+Behavior:
 
----
-
-# 5. Add repository-level coverage where useful
-
-The repository already supports historical ordering through:
-
-```text id="dd3y7o"
-ORDER BY as_of_date DESC, created_at DESC, id DESC
+```text
+valid project
+→ 200 snapshot
 ```
 
-Do not change that.
+```text
+unknown project
+→ existing NotFoundError / appropriate 404
+```
 
-A repository test can be added if needed, but the critical behavioral regression belongs in the `ProgressService` test because the reconciliation logic lives there.
+```text
+invalid asOfDate
+→ existing validation error / appropriate 4xx
+```
 
----
+Do not persist the snapshot.
 
-# 6. Preserve all existing Pass 10 behavior
+Do not add a snapshot table.
 
-Do NOT change:
-
-* quantity-derived percentage arithmetic
-* percentage precedence
-* unit compatibility
-* overrun capping
-* status mapping
-* `actualStart` preservation
-* match-status policy
-* project isolation
-* idempotency
-* atomic `activity_progress + progress_updated` persistence
-* append-only observation history
-
-Do NOT introduce:
-
-* Pass 11 variance logic
-* delay detection
-* risk scoring
-* schedule slippage
-* forecasting
-* trend analysis
-* new AI calls
-* new migrations unless genuinely unavoidable
+This is a read-only analytical endpoint.
 
 ---
 
-# 7. Regression verification
+# 19. Project isolation
 
-Run the complete suite:
+The snapshot must be strictly project-scoped.
 
-```bash
+Every activity included must satisfy:
+
+```text id="w8v2s6"
+activity.projectId === requested projectId
+```
+
+Every actual-progress lookup must also be project-scoped.
+
+Never allow an ActivityProgress record from another project to influence the snapshot.
+
+Add a cross-project regression test.
+
+---
+
+# 20. Recommended architecture
+
+Keep the analytical logic pure and testable.
+
+Suggested structure:
+
+```text id="8k7p4v"
+backend/src/services/snapshot/
+    progress-snapshot.types.ts
+    progress-snapshot.calculator.ts
+    progress-snapshot.service.ts
+```
+
+Possible responsibilities:
+
+```text
+progress-snapshot.calculator.ts
+    ↓
+pure date/progress/variance calculations
+
+progress-snapshot.service.ts
+    ↓
+project verification
+activity retrieval
+historical progress retrieval
+snapshot assembly
+
+route
+    ↓
+HTTP validation + response
+```
+
+Repositories own SQL.
+
+The calculator should not import:
+
+```text
+better-sqlite3
+repositories
+Express
+```
+
+---
+
+# 21. Repository changes
+
+Add only the repository methods genuinely required.
+
+Most importantly, support:
+
+```text id="0j4v4z"
+getLatestByActivityIdAsOfDate(...)
+```
+
+Do not repeatedly retrieve the entire progress history for every calculation if a direct SQL query can safely answer the as-of request.
+
+However, do not prematurely optimize with complex SQL.
+
+Keep it readable.
+
+For a reasonable demo dataset, an activity-by-activity lookup is acceptable.
+
+---
+
+# 22. No persistence
+
+Pass 11 must NOT create:
+
+```text
+variance_records
+progress_snapshots
+delay_records
+risk_records
+```
+
+No migration is expected.
+
+No `activity_progress` mutation is allowed.
+
+No project event is required for a read-only snapshot.
+
+This pass calculates a view of existing truth.
+
+---
+
+# 23. Tests
+
+Add comprehensive tests.
+
+### Planned progress
+
+Test:
+
+```text id="8l3gk2"
+before start → 0
+on start → 0
+midpoint → 50
+on finish → 100
+after finish → 100
+```
+
+### Zero duration
+
+```text id="v1q9px"
+start = finish
+before → 0
+on/after → 100
+```
+
+### Actual progress selection
+
+Test:
+
+```text id="u9m2ca"
+2026-08-10 → 30%
+2026-08-20 → 60%
+snapshot = 2026-08-15
+→ actual = 30%
+```
+
+and:
+
+```text
+snapshot = 2026-08-25
+→ actual = 60%
+```
+
+Also test a future observation:
+
+```text
+2026-09-01 → 90%
+snapshot = 2026-08-25
+→ MUST NOT be used
+```
+
+### No observations
+
+```text id="w8q5s0"
+no actual progress
+→ actualProgress = 0
+→ status = not_started
+```
+
+### Variance
+
+```text id="2gk7cn"
+planned 60
+actual 40
+→ -20
+→ behind
+```
+
+and:
+
+```text
+planned 40
+actual 60
+→ +20
+→ ahead
+```
+
+plus tolerance boundaries around ±0.01.
+
+### Overdue
+
+Test:
+
+```text id="jj3t9n"
+snapshot > plannedFinish
+actual < 100
+→ overdue = true
+```
+
+and:
+
+```text
+snapshot > plannedFinish
+actual = 100
+→ overdue = false
+```
+
+and:
+
+```text
+snapshot <= plannedFinish
+actual < planned
+→ behind = true
+→ overdue = false
+```
+
+### Status propagation
+
+Test all five execution statuses:
+
+```text
+not_started
+started
+in_progress
+completed
+delayed
+```
+
+### Historical dates
+
+Ensure snapshot uses:
+
+```text id="m91h7x"
+actualStart
+actualFinish
+```
+
+from the selected historical observation and does not recompute them.
+
+### Project isolation
+
+Test that Project A snapshot cannot include Project B activities or progress.
+
+### Complete project snapshot
+
+Create a small project with several activities representing:
+
+```text id="j5f3o8"
+not started
+started
+in progress
+completed
+overdue
+ahead
+behind
+```
+
+and verify the full summary counts.
+
+### Invalid schedule data
+
+Test an activity with:
+
+```text
+plannedFinish < plannedStart
+```
+
+and ensure the service handles it according to the selected error policy.
+
+---
+
+# 24. Determinism
+
+The snapshot must be deterministic for:
+
+```text id="k1h0re"
+same project
++
+same asOfDate
++
+same database state
+```
+
+The calculated values must not depend on:
+
+* AI
+* network
+* current time during internal calculations
+* insertion order except where explicitly specified as a deterministic tie-breaker
+
+`generatedAt` may use the current time because it is metadata, but it must NOT affect any analytical result.
+
+---
+
+# 25. No Pass 12+ leakage
+
+Do NOT implement:
+
+```text id="rq2h6w"
+delay detection beyond overdue
+risk scoring
+risk severity
+forecasting
+recovery actions
+schedule compression
+trend analysis
+alerts
+notifications
+```
+
+Pass 11 establishes the fundamental planned-vs-actual comparison.
+
+Later passes will consume it.
+
+---
+
+# 26. Documentation
+
+Update:
+
+```text id="2f7nxs"
+docs/ARCHITECTURE.md
+```
+
+to document:
+
+```text id="b7x2k1"
+Baseline Activity Schedule
+        +
+Historical ActivityProgress
+        ↓
+Pass 11 Snapshot Calculator
+        ↓
+planned vs actual
+        ↓
+variance
+        ↓
+current execution state
+        ↓
+read-only project snapshot
+```
+
+Explicitly document:
+
+* snapshot is as-of-date based
+* actual history is selected using `asOfDate`
+* planned progress uses the deterministic schedule-date model unless an established baseline curve exists
+* Pass 11 does not persist analytics
+* Pass 11 does not mutate ActivityProgress
+
+Do not change the authoritative 26-pass roadmap except to mark Pass 11 complete after successful implementation.
+
+---
+
+# 27. Migration policy
+
+A schema migration should **not** be necessary for Pass 11.
+
+Do not add one.
+
+Use existing:
+
+```text
+activities
+activity_progress
+```
+
+data.
+
+---
+
+# 28. Regression verification
+
+Run:
+
+```bash id="7y1l6q"
 npm test
 npm run build
 npm run setup
@@ -294,56 +1068,82 @@ npm run demo:reset
 
 Also verify:
 
-```text id="49y6zs"
+```text
 GET /api/health
 ```
 
-All existing Pass 0–10 tests must remain green.
+The complete Pass 0–10 regression suite must remain green.
 
-The final test count should be at least the current **355 tests**, plus the new regression coverage.
+Do not rely solely on test count.
+
+Inspect the final diff and the actual implementation.
 
 ---
 
-# 8. Final diff review
+# 29. Final diff review
 
-Before committing, verify:
+Before committing, confirm:
 
-```text id="cnwubp"
-[ ] Earliest historical actualFinish is preserved
-[ ] actualStart behavior remains intact
-[ ] asOfDate, not processing order, determines chronology
-[ ] Later completed reports cannot overwrite earlier completion dates
-[ ] Later non-completed reports cannot erase established actualFinish
-[ ] No Pass 11+ logic introduced
-[ ] No unnecessary migration added
-[ ] Tests explicitly cover the historical finish behavior
-[ ] Full regression suite passes
-[ ] Build/setup/reset/health verification passes
+```text id="j6k8s2"
+[ ] Existing Activity model reused
+[ ] Existing ActivityProgress history reused
+[ ] No snapshot/variance migration added
+[ ] As-of-date semantics implemented
+[ ] Future ActivityProgress observations excluded
+[ ] Planned progress deterministic
+[ ] Zero-duration activities handled
+[ ] Planned duration calculated deterministically
+[ ] Actual progress comes from historical observation
+[ ] Missing actual progress defaults to derived not_started / 0%
+[ ] Variance = actual - planned
+[ ] Variance state is explainable
+[ ] Overdue definition is explicit and date-based
+[ ] Project summary counts are correct
+[ ] Cross-project isolation enforced
+[ ] Snapshot is read-only
+[ ] No ActivityProgress mutations
+[ ] No AI usage
+[ ] No Pass 12+ risk/delay engine
+[ ] Tests cover boundaries and historical behavior
+[ ] npm test passes
+[ ] npm run build passes
+[ ] npm run setup passes
+[ ] npm run demo:reset passes
+[ ] /api/health healthy
+[ ] docs/ARCHITECTURE.md updated
+[ ] README updated only as needed
+[ ] 26-pass roadmap preserved
 ```
 
 ---
 
-# 9. Commit
+# 30. Commit
 
 Use:
 
-```text
-fix: preserve historical activity finish dates
+```text id="x0h7m3"
+feat: implement FieldLine planned vs actual engine
 ```
 
 Push to:
 
-```text
+```text id="c4b2k8"
 itshim998/FieldLine
 main
 ```
 
-After completion, report:
+After implementation, report:
 
-1. exact change made
-2. tests added
-3. complete test/build/setup results
-4. files changed
-5. commit SHA
+1. planned-progress calculation semantics
+2. as-of actual-progress selection semantics
+3. variance and overdue definitions
+4. snapshot response shape
+5. repository changes
+6. test results
+7. build/setup/reset/health verification
+8. files changed
+9. commit SHA
 
-Do **not** claim Pass 10 is approved. It will be independently reviewed again after this correction.
+Do not claim Pass 11 is approved.
+
+Pass 11 will be independently reviewed after implementation.

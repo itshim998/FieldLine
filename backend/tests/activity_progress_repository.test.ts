@@ -312,4 +312,71 @@ describe('SqliteActivityProgressRepository', () => {
       });
     }).toThrow(DatabaseError);
   });
+
+  it('should retrieve latest observation as-of date and exclude future observations', () => {
+    // Observation at 2026-08-10: 25%
+    const o1 = progressRepo.create({
+      projectId: testProjectId,
+      activityId: testActivityId,
+      actualPercent: 25,
+      asOfDate: '2026-08-10'
+    });
+
+    // Observation at 2026-08-20: 50%
+    const o2 = progressRepo.create({
+      projectId: testProjectId,
+      activityId: testActivityId,
+      actualPercent: 50,
+      asOfDate: '2026-08-20'
+    });
+
+    // Observation at 2026-08-30: 75%
+    const o3 = progressRepo.create({
+      projectId: testProjectId,
+      activityId: testActivityId,
+      actualPercent: 75,
+      asOfDate: '2026-08-30'
+    });
+
+    // As of 2026-08-05 (before any obs): null
+    expect(
+      progressRepo.getLatestByActivityIdAsOfDate(testActivityId, testProjectId, '2026-08-05')
+    ).toBeNull();
+
+    // As of 2026-08-15 (between o1 and o2): should return o1 (25%)
+    const resAug15 = progressRepo.getLatestByActivityIdAsOfDate(
+      testActivityId,
+      testProjectId,
+      '2026-08-15'
+    );
+    expect(resAug15).not.toBeNull();
+    expect(resAug15?.id).toBe(o1.id);
+    expect(resAug15?.actualPercent).toBe(25);
+
+    // As of 2026-08-25 (between o2 and o3): should return o2 (50%)
+    const resAug25 = progressRepo.getLatestByActivityIdAsOfDate(
+      testActivityId,
+      testProjectId,
+      '2026-08-25'
+    );
+    expect(resAug25).not.toBeNull();
+    expect(resAug25?.id).toBe(o2.id);
+    expect(resAug25?.actualPercent).toBe(50);
+
+    // As of 2026-09-01 (after o3): should return o3 (75%)
+    const resSep01 = progressRepo.getLatestByActivityIdAsOfDate(
+      testActivityId,
+      testProjectId,
+      '2026-09-01'
+    );
+    expect(resSep01).not.toBeNull();
+    expect(resSep01?.id).toBe(o3.id);
+    expect(resSep01?.actualPercent).toBe(75);
+
+    // Cross-project check: querying for testProject2Id should return null
+    expect(
+      progressRepo.getLatestByActivityIdAsOfDate(testActivityId, testProject2Id, '2026-09-01')
+    ).toBeNull();
+  });
 });
+

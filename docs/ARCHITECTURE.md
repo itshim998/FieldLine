@@ -200,6 +200,46 @@ Canonical ActivityProgress Observation (Persisted to SQLite)
 
 ---
 
+### 6. Planned vs Actual Engine Pipeline (Pass 11)
+
+```text
+Baseline Activity Schedule (plannedStart, plannedFinish, plannedQuantity, unit)
+        +
+Historical ActivityProgress (actualPercent, actualQuantity, actualStart, actualFinish, status)
+        ↓
+GET /api/projects/:projectId/progress-snapshot?asOfDate=YYYY-MM-DD
+        ↓
+ProgressSnapshotService (Verify project, resolve canonical asOfDate, project-scoped data fetch)
+        ↓
+Pure Progress Snapshot Calculator (progress-snapshot.calculator.ts)
+  ├── 1. As-Of Actual Selection (Latest observation WHERE as_of_date <= snapshotDate; derived 0% / not_started if none)
+  ├── 2. Planned Progress Calculation (Linear elapsed-duration model: elapsed / duration * 100, clamped [0, 100])
+  │      - Before start: 0%
+  │      - On/after finish: 100%
+  │      - Zero-duration milestones: 0% before date, 100% on/after date
+  ├── 3. Progress Variance Calculation (progressVariance = actualProgress - plannedProgress, rounded to 2 decimals)
+  ├── 4. Variance State Categorization (ahead if > 0.01, behind if < -0.01, on_plan otherwise)
+  ├── 5. Overdue Flag Evaluation (overdue = snapshotDate > plannedFinish AND actualProgress < 100)
+  ├── 6. Activity Snapshot Compilation ({ activityId, externalId, planned/actual progress, variance, status, overdue })
+  └── 7. Project-Level Summary Aggregation (totalActivities, notStarted, started, inProgress, completed, delayed, overdue, ahead, onPlan, behind)
+        ↓
+Read-Only Project Progress Snapshot ({ projectId, asOfDate, generatedAt, activities, summary })
+```
+
+> [!IMPORTANT]
+> **Pass 11 Core Architectural Invariants**:
+> 1. **Read-Only / Analytical Layer**: Pass 11 computes a view of existing project truth. It does not persist snapshots, does not create new tables or migrations, and never mutates `activity_progress`.
+> 2. **Snapshot Date is Fundamental**: All planned and actual calculations for a request reference a single canonical snapshot date (`asOfDate`).
+> 3. **As-Of Actual Selection**: Only historical observations where `as_of_date <= snapshotDate` are selected. Future-dated observations relative to the snapshot are strictly ignored.
+> 4. **No Fabricated Observations**: Activities without historical observations default to a derived `not_started` / `0%` state in the snapshot response without inserting synthetic rows into SQLite.
+> 5. **Deterministic Linear Planned Progress**: Uses calendar-day elapsed duration arithmetic on `YYYY-MM-DD` strings without timezone discrepancies.
+> 6. **Explicit Overdue Invariant**: An activity is overdue if and only if `snapshotDate > plannedFinish AND actualProgress < 100`. Being behind schedule before the planned finish date does not classify an activity as overdue.
+> 7. **Strict Project Isolation**: Every activity and progress observation included in the snapshot is strictly project-scoped.
+> 8. **Zero AI / No Pass 12+ Leakage**: Pass 11 relies strictly on deterministic mathematics and does not implement predictive forecasting, risk scoring, or delay root-cause analysis.
+
+
+---
+
 
 ## Persistence Architecture
 
@@ -376,7 +416,17 @@ frontend/
     - Match-status safety policy: only `confirmed` matches normalized by default; `rejected` blocked; `suggested` requires explicit `allowSuggested: true`.
     - Dedicated `SqliteActivityProgressRepository` with atomic `activity_progress` + `progress_updated` event insertion.
     - REST endpoints `POST /api/projects/:projectId/progress-updates/:updateId/progress`, `GET /api/projects/:projectId/activities/:activityId/progress`, `GET /api/projects/:projectId/activities/:activityId/progress/latest`.
-    - 44 Vitest test suites (355 tests passing).
+12. **Pass 11 — Planned vs Actual Engine**:
+    - Pure, deterministic Planned vs Actual progress snapshot calculator (`progress-snapshot.calculator.ts`) computing planned progress, progress variance, execution status, and overdue flags.
+    - Canonical `asOfDate` resolution: default to current local date if omitted; calendar-day arithmetic avoiding timezone and daylight-savings drift.
+    - Chronological as-of historical observation selection via `getLatestByActivityIdAsOfDate`, strictly ignoring observations dated after the snapshot date.
+    - Derived `not_started` (0% actual) default for activities without observations, with zero database fabrication.
+    - Variance computation (`actualProgress - plannedProgress`) with neutral state classification (`ahead`, `on_plan`, `behind`).
+    - Explicit date-based overdue classification (`snapshotDate > plannedFinish && actualProgress < 100`).
+    - Aggregated project summary counts across all activities.
+    - Read-only REST endpoint `GET /api/projects/:projectId/progress-snapshot` with Zod validation (`progressSnapshotParamsSchema`, `progressSnapshotQuerySchema`, `projectProgressSnapshotSchema`).
+    - Strict project isolation and zero persistence/mutations.
+
 
 
 

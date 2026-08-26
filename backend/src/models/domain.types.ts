@@ -317,3 +317,54 @@ export interface CreateProjectEventInput {
   summary: string;
   payloadJson?: string | null;
 }
+
+// ==========================================
+// 9. Planned vs Actual Progress Snapshot (Pass 11)
+// ==========================================
+export type VarianceState = 'ahead' | 'on_plan' | 'behind';
+
+export interface ActivityProgressSnapshotItem {
+  activityId: string;
+  externalId: string;
+  name: string;
+  wbsCode: string | null;
+  location: string | null;
+
+  plannedStart: string;
+  plannedFinish: string;
+  plannedDurationDays: number;
+
+  actualStart: string | null;
+  actualFinish: string | null;
+
+  plannedProgress: number;
+  actualProgress: number;
+  progressVariance: number;
+
+  varianceState: VarianceState;
+
+  status: ActivityExecutionStatus;
+  overdue: boolean;
+}
+
+export interface ProgressSnapshotSummary {
+  totalActivities: number;
+  notStarted: number;
+  started: number;
+  inProgress: number;
+  completed: number;
+  delayed: number;
+  overdue: number;
+  ahead: number;
+  onPlan: number;
+  behind: number;
+}
+
+export interface ProjectProgressSnapshot {
+  projectId: string;
+  asOfDate: string;
+  generatedAt: string;
+  activities: ActivityProgressSnapshotItem[];
+  summary: ProgressSnapshotSummary;
+}
+
