@@ -13,16 +13,18 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
-  Server,
-  Database,
-  ExternalLink,
   RefreshCw,
   FileSpreadsheet,
   Activity,
   FileText,
   TrendingUp,
   Info,
-  ChevronRight
+  ChevronRight,
+  UploadCloud,
+  FileCheck,
+  Check,
+  AlertCircle,
+  FileUp
 } from 'lucide-react';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
@@ -37,6 +39,45 @@ export interface Project {
   targetEndDate: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Schedule {
+  id: string;
+  projectId: string;
+  name: string;
+  version: string;
+  sourceType: 'csv' | 'xlsx' | 'p6' | 'manual';
+  sourceFilename: string | null;
+  isBaseline: boolean;
+  importedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduleActivity {
+  id: string;
+  projectId: string;
+  scheduleId: string;
+  externalId: string;
+  name: string;
+  description: string | null;
+  wbsCode: string | null;
+  location: string | null;
+  plannedStart: string;
+  plannedFinish: string;
+  plannedQuantity: number | null;
+  unit: string | null;
+  baselineProgress: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ImportSummary {
+  schedule: Schedule;
+  activitiesImported: number;
+  rowCount: number;
+  sourceType: string;
+  originalFilename: string;
 }
 
 interface HealthData {
@@ -62,6 +103,23 @@ export function App(): React.JSX.Element {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [loadingProjects, setLoadingProjects] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Workspace View State
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules'>('overview');
+
+  // Schedules & Activities State
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
+  const [activities, setActivities] = useState<ScheduleActivity[]>([]);
+  const [loadingSchedules, setLoadingSchedules] = useState<boolean>(false);
+  const [loadingActivities, setLoadingActivities] = useState<boolean>(false);
+
+  // File Upload State
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
   // Modals & UI State
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
@@ -115,6 +173,54 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
+  // Fetch Schedule Activities
+  const fetchActivities = useCallback(async (projectId: string, scheduleId: string) => {
+    setLoadingActivities(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schedules/${scheduleId}/activities`);
+      const data = await res.json();
+      if (res.ok) {
+        setActivities(data.activities || []);
+      } else {
+        setActivities([]);
+      }
+    } catch {
+      setActivities([]);
+    } finally {
+      setLoadingActivities(false);
+    }
+  }, []);
+
+  // Fetch Project Schedules
+  const fetchSchedules = useCallback(async (projectId: string, preferredScheduleId?: string) => {
+    setLoadingSchedules(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schedules`);
+      const data = await res.json();
+      if (res.ok) {
+        const scheduleList: Schedule[] = data.schedules || [];
+        setSchedules(scheduleList);
+
+        if (scheduleList.length > 0) {
+          const target = preferredScheduleId
+            ? scheduleList.find((s) => s.id === preferredScheduleId) || scheduleList[0]
+            : scheduleList[0];
+          setSelectedSchedule(target);
+          await fetchActivities(projectId, target.id);
+        } else {
+          setSelectedSchedule(null);
+          setActivities([]);
+        }
+      }
+    } catch {
+      setSchedules([]);
+      setSelectedSchedule(null);
+      setActivities([]);
+    } finally {
+      setLoadingSchedules(false);
+    }
+  }, [fetchActivities]);
+
   // Fetch Projects and restore saved selection
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
@@ -135,8 +241,8 @@ export function App(): React.JSX.Element {
         if (found) {
           setSelectedProject(found);
           localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, found.id);
+          fetchSchedules(found.id);
         } else {
-          // Stored project no longer exists in database
           localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
           setSelectedProject(null);
           if (targetId && !preferredSelectId) {
@@ -151,7 +257,7 @@ export function App(): React.JSX.Element {
     } finally {
       setLoadingProjects(false);
     }
-  }, [showNotification]);
+  }, [showNotification, fetchSchedules]);
 
   // Initial load
   useEffect(() => {
@@ -164,13 +270,24 @@ export function App(): React.JSX.Element {
   // Handle Opening a Project
   const handleOpenProject = (project: Project) => {
     setSelectedProject(project);
+    setActiveWorkspaceTab('overview');
+    setSelectedFile(null);
+    setUploadError(null);
+    setImportSummary(null);
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
+    fetchSchedules(project.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Handle Returning to Project Selector
   const handleBackToProjects = () => {
     setSelectedProject(null);
+    setSelectedSchedule(null);
+    setSchedules([]);
+    setActivities([]);
+    setSelectedFile(null);
+    setUploadError(null);
+    setImportSummary(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
   };
 
@@ -240,7 +357,6 @@ export function App(): React.JSX.Element {
       setIsCreateModalOpen(false);
       showNotification('success', `Project "${created.name}" created successfully.`);
 
-      // Update state and immediately open project workspace
       await fetchProjects(created.id);
     } catch (err: any) {
       setFormError(err.message || 'An error occurred while creating project.');
@@ -289,7 +405,6 @@ export function App(): React.JSX.Element {
       setIsEditModalOpen(false);
       showNotification('success', `Project "${updated.name}" updated successfully.`);
 
-      // Refresh list in background
       await fetchProjects(updated.id);
     } catch (err: any) {
       setFormError(err.message || 'An error occurred while updating project.');
@@ -326,6 +441,111 @@ export function App(): React.JSX.Element {
     } finally {
       setFormSubmitting(false);
     }
+  };
+
+  // Drag & Drop handlers
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === 'dragenter' || e.type === 'dragover') {
+      setDragActive(true);
+    } else if (e.type === 'dragleave') {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      validateAndSetFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      validateAndSetFile(e.target.files[0]);
+    }
+  };
+
+  const validateAndSetFile = (file: File) => {
+    setUploadError(null);
+    setImportSummary(null);
+
+    const name = file.name.toLowerCase();
+    if (!name.endsWith('.csv') && !name.endsWith('.xlsx')) {
+      setUploadError('Unsupported file type. Please select a .csv or .xlsx schedule file.');
+      setSelectedFile(null);
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('File size exceeds the 10MB limit.');
+      setSelectedFile(null);
+      return;
+    }
+
+    setSelectedFile(file);
+  };
+
+  // Schedule Import Upload Execution
+  const handleImportSchedule = async () => {
+    if (!selectedProject || !selectedFile) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+    setImportSummary(null);
+
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append('file', selectedFile);
+
+      const res = await fetch(`/api/projects/${selectedProject.id}/schedules/import`, {
+        method: 'POST',
+        body: formDataUpload
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Schedule import failed');
+      }
+
+      setImportSummary({
+        schedule: data.schedule,
+        activitiesImported: data.activitiesImported,
+        rowCount: data.rowCount,
+        sourceType: data.sourceType,
+        originalFilename: data.originalFilename
+      });
+
+      setSelectedFile(null);
+      showNotification('success', `Imported ${data.activitiesImported} activities from ${data.originalFilename}`);
+
+      // Refresh project schedules
+      await fetchSchedules(selectedProject.id, data.schedule.id);
+    } catch (err: any) {
+      setUploadError(err.message || 'An error occurred while importing schedule.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // Switch Selected Schedule
+  const handleSelectSchedule = (schedule: Schedule) => {
+    setSelectedSchedule(schedule);
+    if (selectedProject) {
+      fetchActivities(selectedProject.id, schedule.id);
+    }
+  };
+
+  // Format File Size
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   };
 
   // Filtered projects for search
@@ -372,7 +592,7 @@ export function App(): React.JSX.Element {
             SIH 2026 &bull; SIH26122
           </div>
           <div className="badge-pass">
-            Pass 3: Project Management
+            Pass 4: Schedule Importer
           </div>
         </div>
       </header>
@@ -464,14 +684,25 @@ export function App(): React.JSX.Element {
 
           {/* Navigation Sub-Tabs */}
           <div className="workspace-tabs">
-            <button className="workspace-tab active">
+            <button
+              className={`workspace-tab ${activeWorkspaceTab === 'overview' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('overview')}
+            >
               <FolderGit2 size={16} />
               <span>Project Overview</span>
             </button>
-            <button className="workspace-tab future" disabled title="Schedule importing will be enabled in Pass 4">
+            <button
+              id="tab-schedules"
+              className={`workspace-tab ${activeWorkspaceTab === 'schedules' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('schedules')}
+            >
               <FileSpreadsheet size={16} />
-              <span>Schedules</span>
-              <span className="tab-future-pill">Pass 4</span>
+              <span>Schedules & Activities</span>
+              {schedules.length > 0 && (
+                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                  {schedules.length}
+                </span>
+              )}
             </button>
             <button className="workspace-tab future" disabled title="Progress reporting will be enabled in Pass 6">
               <Activity size={16} />
@@ -490,82 +721,352 @@ export function App(): React.JSX.Element {
             </button>
           </div>
 
-          {/* Project Overview Content */}
-          <div className="workspace-content">
-            {/* Metadata Grid */}
-            <div className="meta-grid">
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <Activity size={14} color="var(--accent-blue)" />
-                  Lifecycle Status
-                </span>
-                <div style={{ marginTop: '0.2rem' }}>
-                  <span className={`status-badge ${selectedProject.status}`} style={{ fontSize: '0.85rem' }}>
-                    {selectedProject.status}
+          {/* Tab Content */}
+          {activeWorkspaceTab === 'overview' ? (
+            /* Tab 1: Project Overview Content */
+            <div className="workspace-content">
+              {/* Metadata Grid */}
+              <div className="meta-grid">
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <Activity size={14} color="var(--accent-blue)" />
+                    Lifecycle Status
+                  </span>
+                  <div style={{ marginTop: '0.2rem' }}>
+                    <span className={`status-badge ${selectedProject.status}`} style={{ fontSize: '0.85rem' }}>
+                      {selectedProject.status}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <FolderGit2 size={14} color="var(--accent-cyan)" />
+                    Unique Project Code
+                  </span>
+                  <span className="meta-card-value mono">{selectedProject.code}</span>
+                </div>
+
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <Calendar size={14} color="var(--accent-emerald)" />
+                    Planned Start Date
+                  </span>
+                  <span className="meta-card-value">
+                    {selectedProject.startDate ? selectedProject.startDate.slice(0, 10) : 'Not set'}
+                  </span>
+                </div>
+
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <Calendar size={14} color="var(--accent-amber)" />
+                    Target Completion Date
+                  </span>
+                  <span className="meta-card-value">
+                    {selectedProject.targetEndDate ? selectedProject.targetEndDate.slice(0, 10) : 'Not set'}
+                  </span>
+                </div>
+
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <Clock size={14} color="var(--accent-indigo)" />
+                    Created Timestamp
+                  </span>
+                  <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
+                    {new Date(selectedProject.createdAt).toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="meta-card">
+                  <span className="meta-card-label">
+                    <Clock size={14} color="var(--accent-purple)" />
+                    Last Updated
+                  </span>
+                  <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
+                    {new Date(selectedProject.updatedAt).toLocaleString()}
                   </span>
                 </div>
               </div>
 
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <FolderGit2 size={14} color="var(--accent-cyan)" />
-                  Unique Project Code
-                </span>
-                <span className="meta-card-value mono">{selectedProject.code}</span>
-              </div>
-
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <Calendar size={14} color="var(--accent-emerald)" />
-                  Planned Start Date
-                </span>
-                <span className="meta-card-value">
-                  {selectedProject.startDate ? selectedProject.startDate.slice(0, 10) : 'Not set'}
-                </span>
-              </div>
-
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <Calendar size={14} color="var(--accent-amber)" />
-                  Target Completion Date
-                </span>
-                <span className="meta-card-value">
-                  {selectedProject.targetEndDate ? selectedProject.targetEndDate.slice(0, 10) : 'Not set'}
-                </span>
-              </div>
-
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <Clock size={14} color="var(--accent-indigo)" />
-                  Created Timestamp
-                </span>
-                <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
-                  {new Date(selectedProject.createdAt).toLocaleString()}
-                </span>
-              </div>
-
-              <div className="meta-card">
-                <span className="meta-card-label">
-                  <Clock size={14} color="var(--accent-purple)" />
-                  Last Updated
-                </span>
-                <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
-                  {new Date(selectedProject.updatedAt).toLocaleString()}
-                </span>
+              {/* Scope Card */}
+              <div className="pass3-scope-card">
+                <div className="pass3-scope-header">
+                  <ShieldCheck size={18} />
+                  <span>FieldLine Pass 4 Active Project Workspace</span>
+                </div>
+                <p className="pass3-scope-text">
+                  This infrastructure project is fully registered in local SQLite persistence. Use the <strong>Schedules & Activities</strong> tab to import baseline schedules in <strong>.csv</strong> or <strong>.xlsx</strong> format. Imported activities will be persisted with transactional integrity and displayed in the activity verification table.
+                </p>
               </div>
             </div>
+          ) : (
+            /* Tab 2: Schedules & Importer Content (PASS 4) */
+            <div className="schedules-container">
+              {/* Importer Section */}
+              <div className="importer-card">
+                <div className="importer-header">
+                  <div className="importer-title-group">
+                    <FileUp size={18} color="var(--accent-blue)" />
+                    <h3 className="importer-title">Import Project Schedule</h3>
+                  </div>
+                  <div className="supported-formats-badge">
+                    <FileSpreadsheet size={13} />
+                    <span>CSV &bull; XLSX (Max 10MB)</span>
+                  </div>
+                </div>
 
-            {/* Scope / Pass 3 Card */}
-            <div className="pass3-scope-card">
-              <div className="pass3-scope-header">
-                <ShieldCheck size={18} />
-                <span>FieldLine Pass 3 Active Project Context</span>
+                {/* Drag and Drop Zone */}
+                <div
+                  id="schedule-dropzone"
+                  className={`dropzone ${dragActive ? 'drag-active' : ''}`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => document.getElementById('schedule-file-input')?.click()}
+                >
+                  <input
+                    id="schedule-file-input"
+                    type="file"
+                    className="file-input-hidden"
+                    accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                    onChange={handleFileInputChange}
+                  />
+                  <div className="dropzone-icon-wrapper">
+                    <UploadCloud size={24} />
+                  </div>
+                  <h4 className="dropzone-title">
+                    {selectedFile ? 'Change schedule file' : 'Click to select or drag and drop schedule file'}
+                  </h4>
+                  <p className="dropzone-desc">
+                    FieldLine automatically maps column headers (Activity ID, Name, WBS, Location, Planned Start/Finish, Quantity, Unit).
+                  </p>
+                </div>
+
+                {/* Selected File Bar */}
+                {selectedFile && (
+                  <div className="file-selected-bar">
+                    <div className="file-info-group">
+                      <div className="file-type-icon">
+                        <FileCheck size={18} />
+                      </div>
+                      <div>
+                        <div className="file-details-name">{selectedFile.name}</div>
+                        <div className="file-details-meta">
+                          {formatFileSize(selectedFile.size)} &bull; {selectedFile.name.endsWith('.csv') ? 'CSV File' : 'Excel Workbook'}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="file-actions">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setSelectedFile(null);
+                          setUploadError(null);
+                        }}
+                        disabled={isUploading}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        id="submit-import-btn"
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={handleImportSchedule}
+                        disabled={isUploading}
+                      >
+                        {isUploading ? (
+                          <>
+                            <RefreshCw size={14} className="pulse-dot" />
+                            <span>Importing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <FileUp size={14} />
+                            <span>Import Schedule</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error Callout */}
+                {uploadError && (
+                  <div className="notification-banner error" style={{ marginTop: '1rem', marginBottom: '0' }}>
+                    <div className="banner-content">
+                      <AlertCircle size={18} />
+                      <span>{uploadError}</span>
+                    </div>
+                    <button
+                      className="banner-close"
+                      onClick={() => setUploadError(null)}
+                      aria-label="Close error"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+
+                {/* Success Summary Banner */}
+                {importSummary && (
+                  <div className="import-summary-banner">
+                    <div className="summary-details">
+                      <div className="summary-icon">
+                        <CheckCircle2 size={22} />
+                      </div>
+                      <div>
+                        <div className="summary-text-main">
+                          Import Complete: {importSummary.activitiesImported} activities persisted
+                        </div>
+                        <div className="summary-text-sub">
+                          Schedule: <strong>{importSummary.schedule.name}</strong> &bull; Source: {importSummary.originalFilename} ({importSummary.sourceType.toUpperCase()}) &bull; Baseline: {importSummary.schedule.isBaseline ? 'Active' : 'No'}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      className="banner-close"
+                      onClick={() => setImportSummary(null)}
+                      aria-label="Dismiss summary"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <p className="pass3-scope-text">
-                This infrastructure project is fully registered in local SQLite persistence. The active project context is maintained across browser refreshes. Next passes will enable baseline schedule ingestion (Pass 4), multi-modal evidence linking (Pass 5), and progress matching (Pass 6).
-              </p>
+
+              {/* Schedules Selector and Activity Table */}
+              {loadingSchedules ? (
+                <div className="empty-state-card" style={{ padding: '2.5rem 1.5rem' }}>
+                  <RefreshCw size={24} className="pulse-dot" />
+                  <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading schedules...</p>
+                </div>
+              ) : schedules.length > 0 ? (
+                <div className="activities-card">
+                  {/* Selector Bar */}
+                  <div className="schedules-selector-bar">
+                    <div className="schedules-pills-list">
+                      <span style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Schedules:
+                      </span>
+                      {schedules.map((s) => (
+                        <button
+                          key={s.id}
+                          className={`schedule-pill-btn ${selectedSchedule?.id === s.id ? 'active' : ''}`}
+                          onClick={() => handleSelectSchedule(s)}
+                        >
+                          <FileSpreadsheet size={13} />
+                          <span>{s.name}</span>
+                          {s.isBaseline && <span className="baseline-tag">Baseline</span>}
+                          <span className="format-tag">{s.sourceType}</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      Imported: {selectedSchedule ? new Date(selectedSchedule.importedAt).toLocaleDateString() : ''}
+                    </div>
+                  </div>
+
+                  {/* Header with Activity Count */}
+                  <div className="activities-card-header">
+                    <div className="activities-header-left">
+                      <h4 className="schedule-title">{selectedSchedule?.name || 'Schedule Activities'}</h4>
+                      <span className="activity-count-badge">
+                        <Activity size={12} />
+                        {activities.length} {activities.length === 1 ? 'Activity' : 'Activities'}
+                      </span>
+                    </div>
+
+                    {selectedSchedule?.sourceFilename && (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        Source: <span className="mono">{selectedSchedule.sourceFilename}</span>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Activity Verification Table */}
+                  {loadingActivities ? (
+                    <div style={{ padding: '2rem', textAlign: 'center' }}>
+                      <RefreshCw size={20} className="pulse-dot" />
+                      <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activities...</p>
+                    </div>
+                  ) : activities.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="activities-table">
+                        <thead>
+                          <tr>
+                            <th>Activity ID</th>
+                            <th>Activity Name</th>
+                            <th>WBS</th>
+                            <th>Location</th>
+                            <th>Planned Start</th>
+                            <th>Planned Finish</th>
+                            <th style={{ textAlign: 'right' }}>Quantity</th>
+                            <th>Unit</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activities.map((act) => (
+                            <tr key={act.id}>
+                              <td>
+                                <span className="act-id-cell">{act.externalId}</span>
+                              </td>
+                              <td style={{ fontWeight: 500 }}>{act.name}</td>
+                              <td>
+                                {act.wbsCode ? (
+                                  <span className="wbs-badge">{act.wbsCode}</span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                )}
+                              </td>
+                              <td>
+                                {act.location || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                              </td>
+                              <td>
+                                <span className="date-cell">{act.plannedStart}</span>
+                              </td>
+                              <td>
+                                <span className="date-cell">{act.plannedFinish}</span>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                {act.plannedQuantity !== null ? (
+                                  <span className="qty-cell">
+                                    {act.plannedQuantity.toLocaleString()}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                )}
+                              </td>
+                              <td>
+                                {act.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
+                      <p className="empty-desc">No activities found for this schedule.</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="empty-state-card">
+                  <div className="empty-icon-wrapper">
+                    <FileSpreadsheet size={32} />
+                  </div>
+                  <h3 className="empty-title">No Schedules Imported Yet</h3>
+                  <p className="empty-desc">
+                    Import your master construction schedule using the uploader above. FieldLine will extract all activity work items into the SQLite database.
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       ) : projects.length === 0 ? (
         /* ========================================================================= */
@@ -698,20 +1199,27 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: CREATE PROJECT                                                     */}
-      {/* ========================================================================= */}
+      {/* Footer Banner */}
+      <footer className="footer-banner">
+        <div className="footer-text">
+          <strong>FieldLine Local Monolith</strong> &bull; Problem Statement SIH26122 &bull; Local SQLite WAL
+        </div>
+        <div className="footer-actions">
+          <span className="footer-link">Database: {envDatabaseDisplay(health)}</span>
+          <span className="footer-link">Port: 3001</span>
+        </div>
+      </footer>
+
+      {/* Modal: Create Project */}
       {isCreateModalOpen && (
-        <div className="modal-backdrop" onClick={() => setIsCreateModalOpen(false)}>
+        <div className="modal-overlay" onClick={() => !formSubmitting && setIsCreateModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">
-                <Plus size={18} color="var(--accent-blue)" />
-                Create Infrastructure Project
-              </h3>
+              <h3 className="modal-title">Create Infrastructure Project</h3>
               <button
                 className="modal-close-btn"
                 onClick={() => setIsCreateModalOpen(false)}
+                disabled={formSubmitting}
               >
                 <X size={18} />
               </button>
@@ -720,49 +1228,45 @@ export function App(): React.JSX.Element {
             <form onSubmit={handleCreateSubmit}>
               <div className="modal-body">
                 {formError && (
-                  <div className="danger-warning-box">
-                    <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                    <AlertTriangle size={16} />
                     <span>{formError}</span>
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="create-name">
-                    Project Name <span className="req">*</span>
+                  <label className="form-label">
+                    Project Name <span className="required-star">*</span>
                   </label>
                   <input
-                    id="create-name"
                     type="text"
-                    required
                     className="form-input"
-                    placeholder="e.g. Mumbai Coastal Road Tunnel Package 1"
+                    placeholder="e.g. Mumbai Coastal Road Package 1"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
+                    autoFocus
                   />
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="create-code">
-                      Project Code <span className="req">*</span>
+                    <label className="form-label">
+                      Project Code <span className="required-star">*</span>
                     </label>
                     <input
-                      id="create-code"
                       type="text"
-                      required
                       className="form-input"
                       placeholder="e.g. MCR-PKG1"
                       value={formData.code}
                       onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                      required
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" htmlFor="create-status">
-                      Initial Status
-                    </label>
+                    <label className="form-label">Lifecycle Status</label>
                     <select
-                      id="create-status"
                       className="form-select"
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as ProjectStatus })}
@@ -777,13 +1281,10 @@ export function App(): React.JSX.Element {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="create-desc">
-                    Description
-                  </label>
+                  <label className="form-label">Project Scope / Description</label>
                   <textarea
-                    id="create-desc"
                     className="form-textarea"
-                    placeholder="Provide overview of scope, contractor, or geographical boundaries..."
+                    placeholder="Provide a detailed scope summary of the infrastructure project..."
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
@@ -791,11 +1292,8 @@ export function App(): React.JSX.Element {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="create-start-date">
-                      Planned Start Date
-                    </label>
+                    <label className="form-label">Planned Start Date</label>
                     <input
-                      id="create-start-date"
                       type="date"
                       className="form-input"
                       value={formData.startDate}
@@ -804,11 +1302,8 @@ export function App(): React.JSX.Element {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" htmlFor="create-target-date">
-                      Target Completion Date
-                    </label>
+                    <label className="form-label">Target Completion Date</label>
                     <input
-                      id="create-target-date"
                       type="date"
                       className="form-input"
                       value={formData.targetEndDate}
@@ -828,12 +1323,12 @@ export function App(): React.JSX.Element {
                   Cancel
                 </button>
                 <button
+                  id="submit-create-project-btn"
                   type="submit"
-                  id="submit-create-project"
                   className="btn btn-primary"
                   disabled={formSubmitting}
                 >
-                  {formSubmitting ? 'Creating...' : 'Create Project'}
+                  {formSubmitting ? 'Creating Project...' : 'Create Project'}
                 </button>
               </div>
             </form>
@@ -841,20 +1336,16 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: EDIT PROJECT METADATA                                              */}
-      {/* ========================================================================= */}
+      {/* Modal: Edit Project */}
       {isEditModalOpen && selectedProject && (
-        <div className="modal-backdrop" onClick={() => setIsEditModalOpen(false)}>
+        <div className="modal-overlay" onClick={() => !formSubmitting && setIsEditModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">
-                <Edit3 size={18} color="var(--accent-blue)" />
-                Edit Project Metadata
-              </h3>
+              <h3 className="modal-title">Edit Project Metadata</h3>
               <button
                 className="modal-close-btn"
                 onClick={() => setIsEditModalOpen(false)}
+                disabled={formSubmitting}
               >
                 <X size={18} />
               </button>
@@ -863,47 +1354,42 @@ export function App(): React.JSX.Element {
             <form onSubmit={handleEditSubmit}>
               <div className="modal-body">
                 {formError && (
-                  <div className="danger-warning-box">
-                    <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                    <AlertTriangle size={16} />
                     <span>{formError}</span>
                   </div>
                 )}
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="edit-name">
-                    Project Name <span className="req">*</span>
+                  <label className="form-label">
+                    Project Name <span className="required-star">*</span>
                   </label>
                   <input
-                    id="edit-name"
                     type="text"
-                    required
                     className="form-input"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    required
                   />
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="edit-code">
-                      Project Code <span className="req">*</span>
+                    <label className="form-label">
+                      Project Code <span className="required-star">*</span>
                     </label>
                     <input
-                      id="edit-code"
                       type="text"
-                      required
                       className="form-input"
                       value={formData.code}
                       onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                      required
                     />
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" htmlFor="edit-status">
-                      Status
-                    </label>
+                    <label className="form-label">Lifecycle Status</label>
                     <select
-                      id="edit-status"
                       className="form-select"
                       value={formData.status}
                       onChange={(e) => setFormData({ ...formData, status: e.target.value as ProjectStatus })}
@@ -918,11 +1404,8 @@ export function App(): React.JSX.Element {
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label" htmlFor="edit-desc">
-                    Description
-                  </label>
+                  <label className="form-label">Project Scope / Description</label>
                   <textarea
-                    id="edit-desc"
                     className="form-textarea"
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
@@ -931,11 +1414,8 @@ export function App(): React.JSX.Element {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label className="form-label" htmlFor="edit-start-date">
-                      Planned Start Date
-                    </label>
+                    <label className="form-label">Planned Start Date</label>
                     <input
-                      id="edit-start-date"
                       type="date"
                       className="form-input"
                       value={formData.startDate}
@@ -944,11 +1424,8 @@ export function App(): React.JSX.Element {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label" htmlFor="edit-target-date">
-                      Target Completion Date
-                    </label>
+                    <label className="form-label">Target Completion Date</label>
                     <input
-                      id="edit-target-date"
                       type="date"
                       className="form-input"
                       value={formData.targetEndDate}
@@ -968,12 +1445,12 @@ export function App(): React.JSX.Element {
                   Cancel
                 </button>
                 <button
+                  id="submit-edit-project-btn"
                   type="submit"
-                  id="submit-edit-project"
                   className="btn btn-primary"
                   disabled={formSubmitting}
                 >
-                  {formSubmitting ? 'Saving...' : 'Save Changes'}
+                  {formSubmitting ? 'Saving Changes...' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -981,39 +1458,33 @@ export function App(): React.JSX.Element {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: DELETE CONFIRMATION                                                */}
-      {/* ========================================================================= */}
+      {/* Modal: Delete Project Confirmation */}
       {isDeleteModalOpen && selectedProject && (
-        <div className="modal-backdrop" onClick={() => setIsDeleteModalOpen(false)}>
+        <div className="modal-overlay" onClick={() => !formSubmitting && setIsDeleteModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header" style={{ borderBottomColor: 'rgba(244, 63, 94, 0.2)' }}>
-              <h3 className="modal-title" style={{ color: '#fb7185' }}>
-                <AlertTriangle size={18} color="#fb7185" />
-                Confirm Project Deletion
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: 'var(--accent-rose)' }}>
+                Delete Project
               </h3>
               <button
                 className="modal-close-btn"
                 onClick={() => setIsDeleteModalOpen(false)}
+                disabled={formSubmitting}
               >
                 <X size={18} />
               </button>
             </div>
 
             <div className="modal-body">
-              <div className="danger-warning-box">
-                <AlertTriangle size={20} style={{ flexShrink: 0 }} />
-                <div>
-                  <strong>Warning: Destructive Operation</strong>
-                  <p style={{ marginTop: '0.25rem' }}>
-                    Deleting <strong>{selectedProject.name}</strong> ({selectedProject.code}) will permanently remove this project and cascade delete all associated data (schedules, activities, progress records, and evidence) in SQLite.
-                  </p>
-                </div>
-              </div>
-
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                Are you sure you want to proceed with deleting this project?
+              <p style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
+                Are you sure you want to permanently delete <strong>{selectedProject.name}</strong> ({selectedProject.code})?
               </p>
+              <div className="notification-banner error" style={{ margin: 0 }}>
+                <AlertTriangle size={16} />
+                <span>
+                  All associated schedules, activities, and linked progress data in SQLite will be cascade deleted.
+                </span>
+              </div>
             </div>
 
             <div className="modal-footer">
@@ -1026,109 +1497,66 @@ export function App(): React.JSX.Element {
                 Cancel
               </button>
               <button
-                type="button"
                 id="confirm-delete-project-btn"
+                type="button"
                 className="btn btn-danger"
                 onClick={handleDeleteSubmit}
                 disabled={formSubmitting}
               >
-                {formSubmitting ? 'Deleting...' : 'Delete Project Permanently'}
+                {formSubmitting ? 'Deleting...' : 'Delete Project'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: SYSTEM DIAGNOSTICS & PERSISTENCE HEALTH                            */}
-      {/* ========================================================================= */}
+      {/* Diagnostics Drawer / Modal */}
       {isDiagnosticsOpen && (
-        <div className="modal-backdrop" onClick={() => setIsDiagnosticsOpen(false)}>
+        <div className="modal-overlay" onClick={() => setIsDiagnosticsOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">
-                <Server size={18} color="var(--accent-blue)" />
-                System & Database Diagnostics
-              </h3>
-              <button
-                className="modal-close-btn"
-                onClick={() => setIsDiagnosticsOpen(false)}
-              >
+              <h3 className="modal-title">System Diagnostics & Storage</h3>
+              <button className="modal-close-btn" onClick={() => setIsDiagnosticsOpen(false)}>
                 <X size={18} />
               </button>
             </div>
-
             <div className="modal-body">
-              <div className="info-list" style={{ marginBottom: 0 }}>
-                <div className="info-item">
-                  <span className="info-key">Service</span>
-                  <span className="info-val">{health?.service || 'FieldLine Backend'}</span>
+              <div className="meta-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div className="meta-card">
+                  <span className="meta-card-label">Server Status</span>
+                  <span className="meta-card-value">{health?.status.toUpperCase() || 'OFFLINE'}</span>
                 </div>
-                <div className="info-item">
-                  <span className="info-key">Version</span>
-                  <span className="info-val">{health?.version || '0.1.0'}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-key">Environment</span>
-                  <span className="info-val">{health?.environment || 'development'}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-key">Database Status</span>
-                  <span className="info-val" style={{ color: health?.database.status === 'connected' ? '#34d399' : '#fb7185' }}>
-                    {health?.database.status === 'connected' ? 'SQLite Connected (WAL)' : 'Disconnected'}
+                <div className="meta-card">
+                  <span className="meta-card-label">Database Path</span>
+                  <span className="meta-card-value mono" style={{ fontSize: '0.75rem' }}>
+                    {health?.database.path || 'Unknown'}
                   </span>
                 </div>
-                <div className="info-item">
-                  <span className="info-key">Database Path</span>
-                  <span className="info-val">{health?.database.path || './database/fieldline.db'}</span>
+                <div className="meta-card">
+                  <span className="meta-card-label">Latency</span>
+                  <span className="meta-card-value">{latency !== null ? `${latency} ms` : '—'}</span>
                 </div>
-                <div className="info-item">
-                  <span className="info-key">Schema Version</span>
-                  <span className="info-val">{health?.metadata?.schema_version || '0.1.0'}</span>
-                </div>
-                <div className="info-item">
-                  <span className="info-key">Latency</span>
-                  <span className="info-val">{latency !== null ? `${latency} ms` : '—'}</span>
+                <div className="meta-card">
+                  <span className="meta-card-label">Pass Version</span>
+                  <span className="meta-card-value">Pass 4 Importer</span>
                 </div>
               </div>
             </div>
-
             <div className="modal-footer">
-              <a
-                href="/api/health"
-                target="_blank"
-                rel="noreferrer"
-                className="btn btn-secondary btn-sm"
-                style={{ textDecoration: 'none', marginRight: 'auto' }}
-              >
-                <ExternalLink size={14} />
-                Raw /api/health
-              </a>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setIsDiagnosticsOpen(false)}
-              >
+              <button className="btn btn-secondary" onClick={() => setIsDiagnosticsOpen(false)}>
                 Close
               </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* Footer Banner */}
-      <footer className="footer-banner">
-        <div className="footer-text">
-          <strong>FieldLine Pass 3 Active</strong> &bull; End-to-end Project Management & Context persistence enabled.
-        </div>
-        <div className="footer-actions">
-          <span className="footer-link">npm run dev</span>
-          <span className="footer-link">npm test</span>
-          <span className="footer-link">npm run setup</span>
-        </div>
-      </footer>
     </div>
   );
+}
+
+function envDatabaseDisplay(health: HealthData | null): string {
+  if (!health) return 'SQLite';
+  return health.database.path;
 }
 
 export default App;

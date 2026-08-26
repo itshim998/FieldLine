@@ -76,6 +76,26 @@ export interface CreateScheduleInput {
   isBaseline?: boolean;
 }
 
+export interface CanonicalScheduleImportRow {
+  externalId: string;
+  name: string;
+  plannedStart: string;
+  plannedFinish: string;
+  description?: string | null;
+  wbsCode?: string | null;
+  location?: string | null;
+  plannedQuantity?: number | null;
+  unit?: string | null;
+}
+
+export interface ScheduleImportSummary {
+  schedule: Schedule;
+  activitiesImported: number;
+  rowCount: number;
+  sourceType: ScheduleSourceType;
+  originalFilename: string;
+}
+
 // ==========================================
 // 3. Activities
 // ==========================================

@@ -1,0 +1,4 @@
+Task ID,Task Name,Activity Description,WBS Code,Area,Planned Start,Planned Finish,Qty,UOM
+TASK-001,Grading & Compaction,Subgrade compaction for access road,ROAD-01,Access Zone 1,2026-04-01,2026-04-14,2500,sqm
+TASK-002,Culvert Installation,Precast box culverts across drainage line,ROAD-02,Crossing 1,2026-04-15,2026-04-28,40,m
+TASK-003,Asphalt Base Layer,Hot mix asphalt base course,ROAD-03,Access Zone 1,2026-04-29,2026-05-20,1800,ton

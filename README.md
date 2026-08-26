@@ -125,7 +125,7 @@ Example response:
 - [x] **PASS 1 — Application Architecture** *(Completed)*
 - [x] **PASS 2 — SQLite and Persistence Foundation** *(Completed)*
 - [x] **PASS 3 — Project Management** *(Completed)*
-- [ ] **PASS 4 — Schedule Importer**
+- [x] **PASS 4 — Schedule Importer** *(Completed)*
 - [ ] **PASS 5 — Schedule Normalization**
 - [ ] **PASS 6 — Schedule Validation**
 - [ ] **PASS 7 — Manual Progress Reporting**

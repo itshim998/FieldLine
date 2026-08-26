@@ -10,3 +10,9 @@ export {
 } from './project.service.js';
 export type { ProjectService } from './project.service.js';
 
+export {
+  DefaultScheduleImportService,
+  scheduleImportService
+} from './schedule-import.service.js';
+export type { ScheduleImportService } from './schedule-import.service.js';
+

@@ -1,592 +1,668 @@
-FieldLine — PASS 3: Project Management
-Context
+# FieldLine — PASS 4: Schedule Importer
 
-You are implementing PASS 3 — Project Management of FieldLine. 
+You are implementing PASS 4 — Schedule Importer.
 
-FieldLine is our Smart India Hackathon 2026 project:
+FieldLine repository:
 
-Product: FieldLine
-SIH PS ID: SIH26122
-Local directory:
-C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
-GitHub repository:
 itshim998/FieldLine
 
-PASS 0, PASS 1, and PASS 2 are complete.
+Local directory:
 
-Before coding, inspect the current repository and work with what is already implemented.
+C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
 
-Current state you must preserve
+PASS 0, PASS 1, PASS 2, and PASS 3 are complete.
 
-PASS 2 already provides:
+Before coding, inspect the current repository carefully. Do not assume the earlier architecture is still exactly as originally described.
 
-SQLite persistence;
-migrations 0001 → 0004;
-the projects table;
-typed Project, CreateProjectInput, and UpdateProjectInput;
-ProjectRepository with:
-create()
-getById()
-getByCode()
-listAll()
-update()
-delete()
-count()
+---
 
-Do not duplicate or replace this persistence functionality.
+# CURRENT REPOSITORY STATE
 
-Build the Pass 3 application layer on top of it.
+PASS 2 already provides the database foundation.
 
-Objective
+The existing SQLite schema already contains:
 
-Create the minimum usable FieldLine project lifecycle.
+- projects
+- schedules
+- activities
+- progress_updates
+- evidence
+- activity_matches
+- activity_progress
+- project_events
 
-Implement:
+The existing domain types already contain:
 
-create project;
-list projects;
-open/select project;
-display project metadata;
-project update where needed for the metadata flow;
-project deletion/reset where appropriate.
-Exit criterion
+- Schedule
+- CreateScheduleInput
+- Activity
+- CreateActivityInput
 
-A user can:
+The existing project lifecycle already allows a user to:
 
-Open FieldLine
+- create a project;
+- select/open a project;
+- remain in a current project context.
+
+Build the importer on top of those existing foundations.
+
+Do NOT recreate the schema.
+
+Do NOT duplicate the project architecture.
+
+---
+
+# OBJECTIVE
+
+Import real schedule data into the currently selected FieldLine project.
+
+Initial supported formats:
+
+- CSV
+- XLSX
+
+The core pipeline is:
+
+```text
+Uploaded file
     ↓
-See available projects
+file/type/size validation
     ↓
-Create a project if none exists
+parser
     ↓
-Select/open a project
+column/header mapping
     ↓
-See that project's metadata/workspace
+canonical import rows
+    ↓
+basic structural checks
+    ↓
+transaction
+    ↓
+schedule record
+    ↓
+activity records
+    ↓
+SQLite
+EXIT CRITERION
 
-The user should have a clear current-project context after opening a project.
+A real CSV or XLSX schedule file can be uploaded from an open project and produce usable persisted FieldLine activities that can be visibly inspected in the UI.
 
-Critical scope boundary
+CRITICAL PASS BOUNDARY
 
-This is PROJECT MANAGEMENT ONLY.
+Do NOT implement PASS 5 or PASS 6.
 
-Do not implement:
+PASS 4 is the importer.
 
-schedule importing;
-CSV/XLSX parsing;
-schedule normalization;
-schedule validation;
-activities UI;
-progress reporting;
-AI extraction;
-activity matching;
-variance;
-risk;
-evidence ingestion;
-assistant;
-dashboard analytics;
-voice;
-authentication;
-authorization.
+Do not build:
+
+deep date normalization;
+quantity normalization;
+unit normalization;
+aggressive text normalization;
+advanced duplicate-resolution logic;
+comprehensive schedule validation;
+activity semantic validation;
+schedule quality scoring;
+AI schedule interpretation.
 
 Those belong to later passes.
 
-Do not invent a project-management framework.
+The importer may perform only the minimum structural checks necessary to prevent obviously unusable data from reaching SQLite.
 
-Keep this a small vertical slice.
-
-First: inspect the current repository
+FIRST: INSPECT THE CURRENT REPOSITORY
 
 Before modifying anything, inspect:
 
-current backend/src/app.ts;
-route registration;
-validation middleware;
-service layer;
-ProjectRepository;
-project domain types;
+current project router/service;
+current project workspace UI;
+existing database layer;
+schedule/activity schema;
+domain types;
+repository conventions;
+validation conventions;
 error handling;
+setup/reset behavior;
 tests;
-current frontend/src/App.tsx;
-frontend styling;
-existing API proxy configuration;
-README / architecture documentation.
+package.json.
 
-Understand the actual current implementation before changing it.
+Determine exactly where the new importer should fit.
 
-Do not recreate Pass 2 persistence.
+Preserve existing conventions.
 
-Target architecture
+ARCHITECTURE
 
-The project lifecycle must follow:
-
-HTTP route
-    ↓
-request validation
-    ↓
-Project service
-    ↓
-ProjectRepository
-    ↓
-SQLite
-
-The frontend must use the HTTP API.
-
-The frontend must NOT:
-
-access SQLite;
-contain database logic;
-contain repository logic;
-hardcode project data as application state.
-Backend implementation
-1. Project service
-
-Create a ProjectService boundary over the existing repository.
-
-The service should provide the application-level operations needed by Pass 3, such as:
-
-createProject
-listProjects
-getProject
-updateProject
-deleteProject
-
-Use explicit typed inputs and outputs.
-
-The service must not depend on Express Request or Response.
-
-The service must not contain SQL.
-
-Use the existing repository abstraction.
-
-Do not add a generic service framework.
-
-2. Request validation
-
-Create Zod schemas for project API inputs.
-
-At minimum validate:
-
-Create project
-name
-code
-description
-status
-startDate
-targetEndDate
-Update project
-
-Only fields that are actually editable.
-
-Project ID
-
-Validate the route parameter.
-
-Use sensible constraints, for example:
-
-name required and non-empty;
-code required and non-empty;
-description optional;
-status constrained to existing ProjectStatus;
-dates represented consistently with the repository/database conventions.
-
-Do not introduce overly complex date/business validation yet.
-
-3. HTTP API
-
-Create a project router.
-
-Use a clean REST-style API.
-
-Suggested endpoints:
-
-GET    /api/projects
-POST   /api/projects
-GET    /api/projects/:projectId
-PATCH  /api/projects/:projectId
-DELETE /api/projects/:projectId
-
-Use the existing project service.
-
-Routes should be thin.
-
-Do not put SQL or business logic inside routes.
-
-4. Response contracts
-
-Define explicit Zod schemas/types for the API response shapes where appropriate.
-
-At minimum:
-
-Project
-ProjectList
-
-Keep the API responses predictable.
-
-For example:
-
-{
-  "project": { ... }
-}
-
-for a single project and:
-
-{
-  "projects": [ ... ]
-}
-
-for the collection.
-
-Use whatever exact response convention best matches the current repository, but remain consistent across endpoints.
-
-5. Error behavior
-
-Use the existing AppError architecture.
-
-Expected cases:
-
-Create
-
-Duplicate project code → conflict response.
-
-Get/open
-
-Unknown project ID → not-found response.
-
-Update
-
-Unknown project ID → not-found response.
-
-Duplicate replacement code → conflict response.
-
-Delete
-
-Unknown project ID should have a predictable behavior.
-
-Do not expose raw SQLite implementation details to the browser.
-
-Use the existing centralized error handler.
-
-6. Project event
-
-Consider whether creating/updating/deleting a project should create an appropriate project_events record.
-
-Because the project_events table already exists from Pass 2, an event such as:
-
-project_created
-project_updated
-project_deleted
-
-would fit the current data model.
-
-However, do not build a general event framework.
-
-A simple service-level implementation is enough if you use events.
-
-If deletion makes event persistence impossible because the project is cascaded away, do not invent complicated audit behavior. Keep the deletion semantics simple and document the choice.
-
-The goal is project lifecycle, not audit architecture.
-
-Frontend implementation
-
-The current frontend is still a Pass 0/1 infrastructure-status shell.
-
-Transform it into the first usable FieldLine application flow while preserving the useful health/status information where appropriate.
-
-Required user flow
-Case 1 — No projects
-
-When the application loads and there are no projects:
-
-FieldLine
-    ↓
-No projects yet
-    ↓
-Create Project
-
-Show a simple creation form.
-
-Minimum fields:
-
-Project name
-Project code
-Description
-Start date
-Target end date
-
-Do not ask for fields that are unnecessary.
-
-Case 2 — Existing projects
-
-Show a project selection screen/list.
-
-Each project card/item should communicate:
-
-name;
-code;
-status;
-relevant date metadata;
-an obvious Open action.
-
-Also provide:
-
-Create Project
-Case 3 — Opened project
-
-When the user opens a project, show a simple project workspace/header.
-
-It should clearly communicate:
-
-FieldLine
-Project: <project name>
-Code: <project code>
-Status: <status>
-
-and useful metadata:
-
-description;
-start date;
-target end date;
-created/updated timestamps if useful.
-
-Include navigation or a visible placeholder area for future passes.
-
-For example:
-
-Project Workspace
-
-Project Overview
-Schedules
-Progress
-Evidence
-Insights
-
-But only Project Overview should be functional in Pass 3.
-
-The other sections must be visibly marked as future functionality or remain non-interactive.
-
-Do not fake future data.
-
-Current project state
-
-The frontend needs a reliable current-project state.
-
-For this pass, use a lightweight local mechanism such as:
-
-React state
-+
-localStorage for selected project ID
-
-or an equally simple approach.
-
-Requirement:
-
-Refreshing the browser should not immediately lose the selected project context.
-
-Do not introduce Redux, Zustand, or another global-state framework.
-
-If the stored project no longer exists, gracefully return to project selection.
-
-Create flow
-
-After successful project creation:
-
-POST /api/projects
-        ↓
-project returned
-        ↓
-set as current project
-        ↓
-persist selected project ID
-        ↓
-open project workspace
-
-Do not force the user back to the project list unnecessarily.
-
-Delete flow
-
-Deletion is potentially destructive.
-
-Provide an explicit confirmation step.
-
-After successful deletion:
-
-delete project
-    ↓
-clear current project if necessary
-    ↓
-refresh project list
-    ↓
-open project selector
-
-Because project deletion cascades into schedules, activities, progress, evidence, matches, etc., clearly communicate that this is a destructive operation.
-
-Do not add a complex recycle-bin system.
-
-Project reset semantics
-
-Do not create a separate complicated "reset" architecture.
-
-The existing:
-
-npm run demo:reset
-
-remains the developer/demo database reset mechanism.
-
-For the UI, use ordinary project deletion.
-
-Do not confuse:
-
-application/demo reset
-
-with:
-
-delete one project
-UX requirements
-
-Keep the frontend presentation-grade but restrained.
-
-The current dark FieldLine aesthetic can be preserved.
-
-Do not spend this pass on final dashboard polish.
-
-Prioritize:
-
-clear hierarchy;
-obvious project selection;
-obvious Open/Create actions;
-clear current-project context;
-clean empty state;
-safe delete confirmation;
-useful error messages.
-
-Do not create fake charts or future analytics.
-
-Backend tests
-
-Add meaningful tests for:
-
-Service
-create project;
-list projects;
-get project;
-update project;
-delete project;
-not-found behavior;
-conflict behavior.
-Routes/API
-GET /api/projects;
-POST /api/projects;
-GET /api/projects/:projectId;
-PATCH /api/projects/:projectId;
-DELETE /api/projects/:projectId.
-
-Test validation failures.
-
-Test not-found responses.
-
-Test duplicate-code conflict.
-
-Frontend tests
-
-Use the existing frontend testing approach if one exists.
-
-At minimum, verify the main project lifecycle behavior if the repository's setup supports frontend component testing.
-
-If frontend component testing is not currently configured, do not introduce a large testing stack solely for this pass.
-
-Instead, ensure:
-
-production build passes;
-API integration is wired correctly;
-project selection/create/open/delete flow is manually verified.
-Regression tests
-
-Everything from Pass 0–2 must remain working.
-
-Verify:
-
-npm test
-npm run build
-npm run setup
-npm run demo:reset
-
-The health endpoint must continue to work.
-
-SQLite migration behavior must remain unchanged.
-
-Do not modify migration history.
-
-Do not alter the eight core tables except where absolutely necessary for a concrete Pass 3 requirement.
-
-Important architectural restriction
-
-Do NOT query the database directly from the frontend.
-
-Do NOT introduce a second project storage mechanism.
-
-The source of truth must remain:
+The importer must follow:
 
 React UI
     ↓
-Project API
+HTTP upload route
     ↓
-ProjectService
+file validation
     ↓
-ProjectRepository
+Import service
     ↓
-SQLite
-Documentation
-
-Update:
-
-docs/ARCHITECTURE.md
-
-to include the project lifecycle layer:
-
-Project UI
+parser adapter
     ↓
-Project API routes
+canonical import rows
     ↓
-ProjectService
-    ↓
-ProjectRepository
+Schedule/Activity repositories
     ↓
 SQLite
 
-Document the current-project selection mechanism.
+Do NOT put:
 
-Update the README only enough to mark Pass 3 complete and describe the now-functional project lifecycle.
+CSV parsing in routes;
+XLSX parsing in routes;
+SQL in services;
+SQL in parsers;
+database calls in the frontend.
+FILE UPLOAD
 
-Do not change the authoritative 26-pass roadmap.
+Add local multipart upload support.
 
-Self-review
+Use a minimal library such as:
 
-Before committing, inspect the final implementation specifically for:
+multer
 
-Boundaries
-routes remain thin;
-services contain no SQL;
-repositories remain the only project data-access layer;
-frontend contains no persistence/database logic.
-Lifecycle
-project can be created;
-project appears in list;
-project can be opened;
-project metadata is displayed;
-project can be updated where exposed;
-project can be deleted;
-selected-project state survives refresh.
-Safety
-duplicate codes handled;
-missing projects handled;
-delete confirmation exists;
-deleted current project clears cleanly.
+Do not introduce cloud storage.
+
+Uploaded files must remain local.
+
+Prefer a temporary upload location and clean up temporary files after the import completes or fails.
+
+Do not expose arbitrary filesystem paths to the browser.
+
+SUPPORTED FILES
+
+Support:
+
+.csv
+.xlsx
+
+Reject unsupported formats cleanly.
+
+Also enforce a reasonable local file-size limit so a malformed huge upload cannot accidentally consume excessive memory.
+
+Do not invent a complicated document-management system.
+
+PARSERS
+
+Create separate parser boundaries.
+
+Conceptually:
+
+ScheduleParser
+├── CsvScheduleParser
+└── XlsxScheduleParser
+
+Each parser should produce the same canonical import representation.
+
+Do not let downstream services care whether the source was CSV or XLSX.
+
+For example, conceptually:
+
+CanonicalScheduleImportRow
+
+externalId
+name
+description
+wbsCode
+location
+start
+finish
+quantity
+unit
+
+Adapt naming to the existing repository conventions.
+
+HEADER MAPPING
+
+Real schedule files will not necessarily use exactly one canonical header spelling.
+
+Support reasonable aliases for the core columns.
+
+At minimum recognize variants of:
+
+Activity ID
+Activity Name
+Description
+WBS
+Location
+Start
+Finish
+Quantity
+Unit
+
+Examples of reasonable aliases include:
+
+Activity ID
+ActivityID
+ID
+Task ID
+Activity
+
+Activity Name
+ActivityName
+Task Name
+Name
+
+WBS
+WBS Code
+WBSCode
+
+Start
+Start Date
+Planned Start
+PlannedStart
+
+Finish
+Finish Date
+Planned Finish
+PlannedFinish
+
+Quantity
+Qty
+Planned Quantity
+
+Unit
+UOM
+Units
+
+Do not build a massive synonym engine.
+
+Keep aliases explicit and maintainable.
+
+Header matching can be case-insensitive and whitespace-tolerant.
+
+REQUIRED VS OPTIONAL COLUMNS
+
+At minimum, the importer needs enough data to create an activity safely.
+
+Required source concepts:
+
+Activity ID
+Activity Name
+Start
+Finish
+
+Optional:
+
+Description
+WBS
+Location
+Quantity
+Unit
+
+If required columns are absent, reject the file with a useful error explaining which required columns are missing.
+
+Do not silently import a file that cannot produce meaningful activities.
+
+BASIC ROW HANDLING
+
+For each parsed row:
+
+trim obvious surrounding whitespace;
+convert empty strings to null where the database permits null;
+preserve source values otherwise;
+map them into the canonical import representation.
+
+Do NOT perform deep normalization.
+
+Do NOT change arbitrary date formats into a universal format in this pass unless the parser already gives a reliable date value.
+
+Do not infer missing activity IDs or names.
+
+Rows missing required activity identity fields should be rejected or reported clearly.
+
+Prefer a deterministic import result rather than silently dropping bad rows.
+
+SCHEDULE RECORD
+
+When importing a file, create one schedules record representing that import.
+
+Populate sensible fields:
+
+generated schedule ID;
+current project ID;
+schedule name;
+version;
+source type (csv or xlsx);
+original filename;
+baseline flag using the existing schema conventions.
+
+Do not invent sophisticated schedule-versioning logic yet.
+
+A simple imported schedule record is sufficient for this pass.
+
+ACTIVITY PERSISTENCE
+
+Each canonical import row becomes an activities record linked to:
+
+current project
++
+new schedule
+
+Map:
+
+externalId    → external_id
+name          → name
+description   → description
+wbsCode       → wbs_code
+location      → location
+start         → planned_start
+finish        → planned_finish
+quantity      → planned_quantity
+unit          → unit
+
+Use the existing database constraints.
+
+Do not bypass the repository layer.
+
+REPOSITORIES
+
+Introduce repository boundaries for the persistence operations actually required by this pass.
+
+At minimum provide the ability to:
+
+create schedule
+retrieve schedule
+list schedules for project
+
+create activities for schedule
+retrieve/list activities for schedule
+
+Use typed repository interfaces.
+
+The exact names should match the existing project repository style.
+
+Do not implement the full future schedule/activity CRUD surface unless genuinely necessary.
+
+TRANSACTIONAL IMPORT
+
+The import must be atomic.
+
+Use the existing transaction boundary.
+
+The desired behavior is:
+
+create schedule
+    ↓
+insert activities
+    ↓
+all succeed
+    ↓
+commit
+
+If any required row or database operation fails:
+
+rollback
+
+The database must not be left with:
+
+schedule created
+but only half of its activities imported
+
+Test this explicitly.
+
+DUPLICATES
+
+The existing database already protects:
+
+(schedule_id, external_id)
+
+Do not invent a new duplicate policy.
+
+For a duplicate activity ID within the same imported schedule, fail the import clearly rather than silently overwriting data.
+
+Do not attempt merge/upsert behavior in Pass 4.
+
+IMPORT SERVICE
+
+Create an application service responsible for orchestration.
+
+Conceptually:
+
+ScheduleImportService
+
+It should:
+
+identify the parser;
+parse the file;
+map headers;
+perform basic structural checks;
+create the schedule;
+create activities;
+commit atomically;
+return an import summary.
+
+The service must not depend on Express request/response objects.
+
+IMPORT RESULT
+
+Return a useful structured result such as:
+
+schedule
+activitiesImported
+sourceType
+originalFilename
+
+Optionally include:
+
+rowCount
+
+Do not build a giant import-reporting framework.
+
+HTTP API
+
+Add a project-scoped schedule import endpoint.
+
+Suggested shape:
+
+POST /api/projects/:projectId/schedules/import
+
+Use multipart form-data with a single file field, for example:
+
+file
+
+Validate:
+
+project ID;
+file presence;
+supported file type;
+file size.
+
+The route should remain thin and delegate to the import service.
+
+Also expose a small read endpoint so the frontend can verify the result, for example:
+
+GET /api/projects/:projectId/schedules
+GET /api/projects/:projectId/schedules/:scheduleId/activities
+
+Keep these read endpoints minimal.
+
+They exist to support the importer workflow and demo verification.
+
+FRONTEND
+
+Add an Import Schedule capability to the currently open project workspace.
+
+Do not replace the entire Pass 3 UI.
+
+Add only what is needed.
+
+The user flow should be:
+
+Open project
+    ↓
+Import Schedule
+    ↓
+Choose CSV/XLSX file
+    ↓
+Upload
+    ↓
+Import progress/state
+    ↓
+Success summary
+    ↓
+View imported activities
+
+The UI should show:
+
+selected filename;
+supported formats;
+upload state;
+success/failure;
+activities imported.
+
+After successful import, show a basic activity table containing at least:
+
+Activity ID
+Activity Name
+WBS
+Location
+Start
+Finish
+Quantity
+Unit
+
+This table is a verification surface, not the final Activity Detail UI.
+
+Do NOT implement sorting, filtering, editing, progress, variance, risk, or AI matching yet.
+
+ERROR HANDLING
+
+Use the existing AppError model.
+
+Expected importer errors include:
+
+unsupported file type;
+missing file;
+file too large;
+missing required headers;
+malformed CSV;
+malformed XLSX;
+invalid row structure;
+duplicate activity within import;
+unknown project;
+database failure.
+
+Return clear human-readable errors.
+
+Do not expose raw parser stack traces.
+
+CLEANUP
+
+Temporary uploaded files should be cleaned up after:
+
+successful import;
+failed import.
+
+Do not leave uploaded junk inside the repository.
+
+Permanent evidence/document storage belongs to later passes.
+
+TESTING
+
+Add tests for:
+
+Parser tests
+
+CSV:
+
+valid file;
+common headers;
+optional columns;
+missing required header;
+malformed input.
+
+XLSX:
+
+valid workbook;
+expected worksheet parsing;
+missing required header.
+Header mapping
+
+Verify supported aliases map to the same canonical fields.
+
+Import service
+creates schedule;
+creates activities;
+links everything to the current project;
+returns import summary.
+Transaction behavior
+
+Verify:
+
+successful import commits;
+failed import rolls back schedule and activities.
+Duplicate behavior
+
+Duplicate activity IDs within one schedule must fail predictably.
+
+API tests
+
+Test:
+
+POST /api/projects/:projectId/schedules/import
+GET /api/projects/:projectId/schedules
+GET /api/projects/:projectId/schedules/:scheduleId/activities
+
+including validation/error cases.
+
 Regression
-health endpoint works;
-SQLite remains healthy;
-migration chain untouched;
-existing Pass 0–2 tests remain green.
-Required validation
+
+All Pass 0–3 tests must remain green.
+
+TEST DATA
+
+Create small deterministic test fixtures for both CSV and XLSX.
+
+Keep them under a suitable test-fixture location.
+
+Do not add large proprietary sample files.
+
+The fixtures should cover:
+
+Activity ID
+Activity Name
+Description
+WBS
+Location
+Start
+Finish
+Quantity
+Unit
+
+and at least one reasonable alias variation.
+
+DATABASE SAFETY
+
+Do not modify the migration history.
+
+Do not create a new migration unless a concrete schema change is actually required.
+
+The existing schedules and activities schema should already be sufficient for this pass.
+
+If you believe a schema change is genuinely necessary, STOP and explain why in the final report rather than silently expanding the scope.
+
+PASS BOUNDARY CHECK
+
+Before committing, explicitly verify that you did NOT implement:
+
+schedule normalization;
+schedule validation engine;
+AI extraction;
+activity matching;
+progress reporting;
+variance;
+risk;
+evidence/document ingestion;
+assistant;
+dashboard analytics.
+
+Those are later passes.
+
+VALIDATION
 
 Run:
 
@@ -596,156 +672,140 @@ npm run setup
 npm run setup
 npm run demo:reset
 
-Then:
-
-npm run dev
-
-Manually verify the complete flow:
+Then manually verify:
 
 1. Open FieldLine.
-2. Confirm empty-state behavior when no projects exist.
-3. Create a project.
-4. Confirm it appears in the project list.
-5. Open it.
-6. Refresh the browser.
-7. Confirm the same project remains selected.
-8. Update project metadata.
-9. Return to project selection.
-10. Create a second project.
-11. Open the second project.
-12. Delete the second project with confirmation.
-13. Confirm it disappears.
-14. Confirm the first project remains intact.
-15. Verify /api/health remains healthy.
+2. Open an existing project.
+3. Import a real CSV schedule.
+4. Confirm successful import.
+5. Confirm activities appear.
+6. Import a real XLSX schedule.
+7. Confirm successful import.
+8. Confirm activities appear.
+9. Try an unsupported file.
+10. Confirm a clear error.
+11. Try a file missing a required header.
+12. Confirm a clear error.
+13. Confirm /api/health remains healthy.
 
-Also verify the frontend production build.
+Use real local fixture files during verification.
 
-Git
+SELF-REVIEW
+
+Inspect the final diff and ask:
+
+Architecture
+
+Does the importer follow:
+
+route
+→ validation
+→ import service
+→ parser
+→ repository
+→ SQLite
+Persistence
+
+Is the entire import atomic?
+
+Parsing
+
+Do CSV and XLSX produce the same canonical representation?
+
+Scope
+
+Did anything from Pass 5 or Pass 6 accidentally get implemented?
+
+Regression
+
+Does the complete existing project lifecycle still work?
+
+Local-only architecture
+
+Did we introduce any external storage/deployment service?
+
+The answer must be no.
+
+GIT
 
 Inspect:
 
 git status
 git diff
 
-Confirm that changes are limited to PASS 3.
+Confirm only PASS 4 work is included.
 
-Do not commit:
+Create:
 
-.env;
-SQLite runtime files;
-WAL/journal files;
-dist;
-uploads;
-secrets.
-
-Create a focused commit:
-
-feat: implement FieldLine project management
+feat: implement FieldLine schedule importer
 
 Push to:
 
 itshim998/FieldLine
 main
-Completion criteria
+COMPLETION CRITERIA
 
-PASS 3 is complete only when:
+PASS 4 is complete only when:
 
- Project service exists.
- Project request validation exists.
- Project API exists.
- Project creation works.
- Project listing works.
- Project retrieval/opening works.
- Project metadata is displayed.
- Project update works where exposed.
- Project deletion works with confirmation.
- Current-project state persists across refresh.
- Unknown project behavior is handled.
- Duplicate project codes are handled.
- No database access exists in frontend/routes/services.
- Pass 0–2 functionality remains intact.
+ CSV upload works.
+ XLSX upload works.
+ required headers are detected.
+ common header aliases work.
+ parser output is format-independent.
+ schedule record is created.
+ activity records are created.
+ activities belong to the selected project.
+ imports are transactional.
+ failed imports leave no partial schedule/activity state.
+ duplicate activity IDs are handled deterministically.
+ import API works.
+ imported schedules can be listed.
+ imported activities can be viewed.
+ frontend import flow works.
+ unsupported files fail clearly.
+ missing required headers fail clearly.
+ temporary files are cleaned up.
+ Pass 0–3 behavior remains intact.
  npm test passes.
  npm run build passes.
- npm run setup passes.
- repeated setup passes.
- npm run demo:reset passes.
- /api/health remains healthy.
- Full manual project lifecycle has been verified.
- No Pass 4+ functionality is implemented.
- Final diff has been reviewed.
- Commit has been created.
- Commit has been pushed.
-Final report
-
-After implementation, report:
-
-Architecture
-
-Explain:
-
-Project UI
-→ Project API
-→ validation
-→ ProjectService
-→ ProjectRepository
-→ SQLite
-API
-
-List the project endpoints implemented.
-
-Frontend
-
-Describe:
-
-project selector;
-create flow;
-opened project workspace;
-current-project persistence;
-delete flow.
-Tests
+ setup passes.
+ demo reset passes.
+ health endpoint remains healthy.
+ no Pass 5+ functionality was implemented.
+ final diff reviewed.
+ commit created.
+ commit pushed.
+FINAL REPORT
 
 Report:
 
-service tests;
-API tests;
-frontend verification;
-total test count.
-Validation
-
-Report results for:
-
-npm test
-npm run build
-npm run setup
-npm run setup
-npm run demo:reset
-npm run dev/api/health
-project creation
-project listing
-project opening
-project refresh persistence
-project update
-project deletion
-Git
-
-Report:
-
-commit hash;
-commit message;
-branch;
-push result.
-Boundary confirmation
+Files added/changed.
+Parser architecture.
+Header aliases supported.
+Schedule/activity repository changes.
+Import service flow.
+API endpoints.
+Frontend import flow.
+Transaction/rollback behavior.
+Tests added and total passing tests.
+Results of all validation commands.
+Manual CSV/XLSX verification.
+Any schema changes and why.
+Self-review findings.
+Commit hash/message/branch/push status.
 
 Explicitly confirm:
 
-PASS 4 and all later feature functionality were not implemented.
+PASS 5 and later functionality were NOT implemented.
 
-Final instruction
+FINAL INSTRUCTION
 
-Implement PASS 3 — Project Management only.
+Implement PASS 4 — Schedule Importer only.
 
-Build the smallest complete vertical slice that allows a user to launch FieldLine, select a project, create one when necessary, open it, and see its metadata.
+The goal is simple:
 
-Do not jump ahead into schedules, activities, progress, AI, or analytics.
+A real CSV or XLSX schedule file should enter an open FieldLine project and become usable persisted activities.
 
-Stop after PASS 3.
+Do not jump ahead into normalization, validation engines, AI, progress, or analytics.
+
+Stop after PASS 4.

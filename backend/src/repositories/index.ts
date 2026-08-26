@@ -9,3 +9,15 @@ export {
   projectRepository
 } from './project.repository.js';
 export type { ProjectRepository } from './project.repository.js';
+
+export {
+  SqliteScheduleRepository,
+  scheduleRepository
+} from './schedule.repository.js';
+export type { ScheduleRepository } from './schedule.repository.js';
+
+export {
+  SqliteActivityRepository,
+  activityRepository
+} from './activity.repository.js';
+export type { ActivityRepository } from './activity.repository.js';

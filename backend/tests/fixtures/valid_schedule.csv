@@ -1,0 +1,6 @@
+Activity ID,Activity Name,Description,WBS,Location,Start,Finish,Quantity,Unit
+ACT-101,Site Mobilization & Clearing,Initial site preparation and clearing,1.1,Sector A,2026-03-01,2026-03-15,500,m2
+ACT-102,Foundation Excavation,Deep foundation trench excavation,1.2,Sector A,2026-03-16,2026-04-10,1200,m3
+ACT-103,Piling Works,Pre-cast concrete piling,1.3,Sector B,2026-04-11,2026-05-01,85,nos
+ACT-104,Reinforced Concrete Pouring,Grade 40 concrete casting for slab,2.1,Sector A,2026-05-02,2026-05-30,450,m3
+ACT-105,Structural Steel Erection,Primary frame structural steel assembly,2.2,Sector B,2026-06-01,2026-07-15,120,tonnes

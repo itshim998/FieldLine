@@ -224,4 +224,12 @@ frontend/
    - Project lifecycle UI: Empty state, project list/card selector with search filter, active project workspace, metadata overview, and sub-navigation with future pass indicators.
    - Active project context persistence in `localStorage` across page reloads with graceful missing project fallback.
    - Edit metadata modal and safe destructive delete confirmation modal.
-   - 15 Vitest test suites (90 tests passing).
+5. **Pass 4 — Schedule Importer**:
+   - Multi-format schedule import pipeline supporting `.csv` and `.xlsx` files.
+   - Format-agnostic parser architecture (`ScheduleParser`, `CsvScheduleParser`, `XlsxScheduleParser`, `getScheduleParser`).
+   - Header aliasing engine recognizing standard industry variants (Activity ID, Task Name, Start/Finish Dates, WBS, Location, Planned Quantity, Unit).
+   - Atomic persistence via `ScheduleRepository.createWithActivities`: creates schedule, batch inserts activities, logs `schedule_imported` project event, and executes in single SQLite transaction with complete rollback on error.
+   - Intra-file duplicate activity ID detection and structural integrity checks.
+   - Schedule REST API (`POST /api/projects/:projectId/schedules/import`, `GET /api/projects/:projectId/schedules`, `GET /api/projects/:projectId/schedules/:scheduleId`, `GET /api/projects/:projectId/schedules/:scheduleId/activities`).
+   - Frontend Schedule Importer and Activity Verification Table with drag-and-drop file upload, upload state indicators, import summary metrics, schedule selector pills, and responsive data grid.
+   - 21 Vitest test suites (131 tests passing).
