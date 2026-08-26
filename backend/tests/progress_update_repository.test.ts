@@ -3,7 +3,7 @@ import Database, { Database as DatabaseType } from 'better-sqlite3';
 import { runMigrations } from '../src/database/migrator.js';
 import { SqliteProjectRepository } from '../src/repositories/project.repository.js';
 import { SqliteProgressUpdateRepository } from '../src/repositories/progress-update.repository.js';
-import { ConflictError, NotFoundError } from '../src/errors/AppError.js';
+import { ConflictError, DatabaseError, NotFoundError } from '../src/errors/AppError.js';
 
 describe('SqliteProgressUpdateRepository', () => {
   let db: DatabaseType;
@@ -234,4 +234,36 @@ describe('SqliteProgressUpdateRepository', () => {
     expect(deleted).toBe(true);
     expect(updateRepo.getById(u1.id)).toBeNull();
   });
+
+  it('should genuinely rollback progress_updates when project_events insertion fails', () => {
+    // Install a trigger simulating a failure during project_events insertion
+    db.exec(`
+      CREATE TRIGGER trg_test_fail_project_events
+      BEFORE INSERT ON project_events
+      FOR EACH ROW
+      BEGIN
+        SELECT RAISE(ABORT, 'Simulated project_events constraint failure');
+      END;
+    `);
+
+    // Verify create() throws DatabaseError when project_events insertion fails
+    expect(() => {
+      updateRepo.create({
+        projectId: testProjectId,
+        reportDate: '2026-08-26',
+        reporterName: 'Supervisor',
+        sourceType: 'manual',
+        rawText: 'This update must rollback completely'
+      });
+    }).toThrow(DatabaseError);
+
+    // Verify progress_updates table contains NO newly-created row
+    const progressRows = db.prepare('SELECT * FROM progress_updates WHERE project_id = ?').all(testProjectId);
+    expect(progressRows).toHaveLength(0);
+
+    // Verify project_events table contains NO partially-created event
+    const eventRows = db.prepare('SELECT * FROM project_events WHERE project_id = ?').all(testProjectId);
+    expect(eventRows).toHaveLength(0);
+  });
 });
+

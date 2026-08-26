@@ -2,7 +2,7 @@ import { Database as DatabaseType } from 'better-sqlite3';
 import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
 import { ProgressUpdate, CreateProgressUpdateInput } from '../models/domain.types.js';
-import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
+import { AppError, ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
 
 export interface ProgressUpdateRepository {
   create(input: CreateProgressUpdateInput): ProgressUpdate;
@@ -72,54 +72,52 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
     `);
 
     const runTransaction = db.transaction(() => {
-      try {
-        insertUpdateStmt.run(
-          id,
-          input.projectId,
-          input.reportDate,
-          input.reporterName ?? null,
-          input.reporterRole ?? null,
-          sourceType,
-          input.rawText,
-          status
-        );
-      } catch (err: unknown) {
-        if (err instanceof Error && 'code' in err) {
-          const code = (err as { code: string }).code;
-          if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
-            throw new NotFoundError(`Project with ID '${input.projectId}' not found`);
-          }
-          if (code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || code === 'SQLITE_CONSTRAINT_UNIQUE') {
-            throw new ConflictError(`Progress update with ID '${id}' already exists`);
-          }
-        }
-        throw new DatabaseError(`Failed to create progress update: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      insertUpdateStmt.run(
+        id,
+        input.projectId,
+        input.reportDate,
+        input.reporterName ?? null,
+        input.reporterRole ?? null,
+        sourceType,
+        input.rawText,
+        status
+      );
 
-      // Record project event for audit within the atomic transaction
-      try {
-        const eventId = crypto.randomUUID();
-        insertEventStmt.run(
-          eventId,
-          input.projectId,
-          'progress_reported',
-          'progress_updates',
-          id,
-          'Manual progress report received',
-          JSON.stringify({
-            updateId: id,
-            reportDate: input.reportDate,
-            reporterName: input.reporterName ?? null,
-            reporterRole: input.reporterRole ?? null,
-            sourceType
-          })
-        );
-      } catch {
-        // Event recording failure should not break transaction unless strict audit is mandated
-      }
+      const eventId = crypto.randomUUID();
+      insertEventStmt.run(
+        eventId,
+        input.projectId,
+        'progress_reported',
+        'progress_updates',
+        id,
+        'Manual progress report received',
+        JSON.stringify({
+          updateId: id,
+          reportDate: input.reportDate,
+          reporterName: input.reporterName ?? null,
+          reporterRole: input.reporterRole ?? null,
+          sourceType
+        })
+      );
     });
 
-    runTransaction();
+    try {
+      runTransaction();
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+          throw new NotFoundError(`Project with ID '${input.projectId}' not found`);
+        }
+        if (code === 'SQLITE_CONSTRAINT_PRIMARYKEY' || code === 'SQLITE_CONSTRAINT_UNIQUE') {
+          throw new ConflictError(`Progress update with ID '${id}' already exists`);
+        }
+      }
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new DatabaseError(`Failed to create progress update: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     const created = this.getById(id);
     if (!created) {
