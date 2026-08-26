@@ -120,14 +120,51 @@ Validated structured facts ({ items: [{ reference, location, progress_percent, s
 
 ---
 
+### 4. Activity Matching Engine Pipeline (Pass 9)
+
+```text
+Validated Field Facts ({ items: [{ reference, location, progress_percent, status }] })
+      ↓
+POST /api/projects/:projectId/progress-updates/:updateId/matches
+      ↓
+ActivityMatchingService (Project verification & ProgressUpdate scoping)
+      ↓
+ActivityRepository (Fetch all activities for project)
+      ↓
+Deterministic Matching Engine
+  ├── Layer 1: Exact ID Normalization & Matching (externalId -> exact_id, score ~1.0)
+  ├── Layer 2: Deterministic Text Similarity (Tokenization, Jaccard, Containment, Phrase -> text_similarity)
+  ├── Layer 3: Location & WBS Metadata Alignment (Location boost +0.18 / contradiction penalty -0.25 -> wbs_location)
+  ├── Layer 4: Semantic Matcher Interface & Seam (SemanticActivityMatcher decoupled abstraction)
+  └── Layer 5: Optional LLM-Assisted Disambiguator Seam (LLMActivityDisambiguator for close candidate subsets)
+      ↓
+Candidate Ranking & Classification
+  ├── Best Candidate (confidence >= minConfidenceThreshold 0.40)
+  ├── Alternative Candidates (top runners-up within ranking margin)
+  └── Low Confidence (null bestMatch when score < 0.40, no phantom activities invented)
+      ↓
+ActivityMatchRepository (Persistence of suggested matches with status='suggested')
+      ↓
+SQLite (activity_matches table with status='suggested')
+      ↓
+Transparent API Response ({ matches: [{ fact, bestMatch, alternatives }] })
+```
+
+> [!IMPORTANT]
+> **Pass 9 Scope Boundary & Invariant**:
+> Pass 9 resolves identity candidates and persists suggestions with `status = 'suggested'`.
+> It **never** marks matches as `'confirmed'` automatically, and **never** mutates `activity_progress` or calculates actual progress, variance, delay, or risk (which belong strictly to **Pass 10+**).
+
+---
+
 ## Persistence Architecture
 
 ```text
 Service Layer (Domain Orchestration)
     ↓
-Repository Interfaces (ProjectRepository, SystemRepository)
+Repository Interfaces (ProjectRepository, SystemRepository, ActivityMatchRepository)
     ↓
-SQLite Repositories (SqliteProjectRepository, SqliteSystemRepository)
+SQLite Repositories (SqliteProjectRepository, SqliteSystemRepository, SqliteActivityMatchRepository)
     ↓
 Database Module (initDatabase, runInTransaction, pragmas)
     ↓
@@ -183,7 +220,7 @@ projects (1) ──────────< (N) schedules ───────
 
 ---
 
-### 4. Manual Progress Reporting Pipeline (Pass 7)
+### 5. Manual Progress Reporting Pipeline (Pass 7)
 
 ```text
 Manual Progress UI (Field Report Form & Chronological Timeline)
@@ -210,13 +247,14 @@ SQLite (database/fieldline.db: progress_updates table)
 backend/
   src/
     config/           # Validated environment configuration (env.ts) and structured logger (logger.ts)
-    routes/           # Thin Express route handlers (health, project, schedule, progress-update)
+    routes/           # Thin Express route handlers (health, project, schedule, progress-update, ai, activity-matching)
     validation/       # Runtime Zod schemas for request/response contracts
     middleware/       # Centralized error handling, request logging, and Zod validation middleware
     services/         # Pure application domain logic (health, project, schedule-import, progress-update)
+      matching/       # Activity matching engine (activity-matching.service, activity-match-scoring, text-similarity, semantic-matcher, llm-disambiguator)
       normalization/  # Date, number, unit, text, and schedule activity normalizers
       validation/     # Multi-rule schedule validator engine
-    repositories/     # Direct SQLite persistence (Project, System, Schedule, Activity, ProgressUpdate)
+    repositories/     # Direct SQLite persistence (Project, System, Schedule, Activity, ProgressUpdate, ActivityMatch)
     models/           # Strongly typed domain entity definitions and DTO contracts
     database/         # SQLite connection lifecycle, WAL pragmas, migrator, and migrations/
       migrations/     # Ordered migrations (0001, 0002, 0003, 0004)
@@ -226,7 +264,7 @@ backend/
     errors/           # Application error hierarchy (AppError, NotFoundError, ConflictError, DatabaseError, NormalizationError, ScheduleValidationError)
     ai/               # Decoupled AI provider interfaces, mock adapters, contracts (FieldProgressExtraction), and services
     jobs/             # Local background/batch task workers
-  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (36 suites, 280 tests)
+  tests/              # Vitest test suite enforcing contracts, persistence, and isolation (40 suites, 313 tests)
 frontend/
   src/
     App.tsx           # FieldLine Project Management, Schedule Viewer & Manual Progress UI
@@ -276,6 +314,13 @@ frontend/
    - Dedicated REST endpoint `POST /api/ai/field-progress/extract` with input and output Zod validation.
    - Deterministic test fixtures for Cases A–D (explicit percentage, no percentage, ambiguous progress, completed work).
    - Pure interpretation pipeline: zero database mutations, no activity matching (reserved for Pass 9), no project truth calculation.
-   - 36 Vitest test suites (280 tests passing).
+10. **Pass 9 — Activity Matching Engine**:
+    - Multi-layer deterministic scoring pipeline (`exact_id`, `text_similarity`, `wbs_location`, `llm_assisted`) resolving extracted field facts to candidate activities.
+    - Preserves candidate ranking with `bestMatch` and runner-up `alternatives`.
+    - Dedicated `SqliteActivityMatchRepository` enforcing strict project scoping and composite foreign keys.
+    - Idempotent re-matching and persistence of match candidates strictly with `status = 'suggested'`.
+    - Strict boundary preservation: zero mutations to `activity_progress` or actual progress calculations (reserved for Pass 10).
+    - REST endpoints `POST /api/projects/:projectId/progress-updates/:updateId/matches` and `GET /api/projects/:projectId/progress-updates/:updateId/matches`.
+    - 40 Vitest test suites (313 tests passing).
 
 

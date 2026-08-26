@@ -1,138 +1,28 @@
-# PASS 8 — AI Extraction Layer
+## PASS 9 — Activity Matching Engine
 
-You are implementing **FieldLine PASS 8 — AI Extraction Layer**.
+You are implementing **FieldLine PASS 9 — Activity Matching Engine**.
 
-Before changing anything, inspect the actual repository on `main` and understand the existing architecture. Do not assume the earlier planning description exactly matches the current code.
+Pass 8 is complete and approved.
 
-## Current architectural context
+Your first task is to inspect the current repository carefully and implement Pass 9 around the architecture that actually exists today.
 
-Pass 7 is complete.
-
-Current progress pipeline:
-
-```text
-Manual field report
-        ↓
-progress_updates.raw_text
-```
-
-Pass 7 intentionally stores raw field reports without interpreting them.
-
-The repository already contains an AI foundation from the earlier architecture work:
-
-```text
-backend/src/ai/contracts/
-backend/src/ai/providers/
-backend/src/ai/services/
-```
-
-The existing architecture includes:
-
-```text
-AIProvider
-    ↓
-AIService
-    ↓
-Zod validation
-```
-
-The existing `AIProvider` interface already provides:
-
-```ts
-generateText(...)
-generateStructured(...)
-```
-
-and explicitly states that providers must not know about databases, repositories, or application business rules.
-
-The existing `AIService.extractStructured()` already performs provider invocation and strict Zod validation.
-
-### IMPORTANT
-
-Do **not** create a second AI service/provider abstraction.
-
-Do **not** bypass the existing `AIService`.
-
-Do **not** let the AI provider access SQLite, repositories, projects, activities, or progress tables.
-
-Build Pass 8 on top of the current architecture.
+Do not assume the earlier roadmap maps 1:1 onto the current code.
 
 ---
 
-# Pass 8 objective
+# 1. Current architectural state
 
-Convert messy field-report language into **structured field facts**.
-
-Example input:
+FieldLine now has this pipeline:
 
 ```text
-Foundation work at Block B is 60% complete.
-Concrete pouring started today.
+Raw field report
+      ↓
+Pass 8 AI extraction
+      ↓
+validated structured field facts
 ```
 
-Conceptual output:
-
-```json
-{
-  "items": [
-    {
-      "reference": "foundation work",
-      "location": "Block B",
-      "progress_percent": 60,
-      "status": "in_progress"
-    }
-  ]
-}
-```
-
-The important architectural distinction is:
-
-> AI extracts facts from the report. It does NOT decide which scheduled activity the report belongs to.
-
-Activity identity belongs to **Pass 9 — Activity Matching Engine**.
-
----
-
-# 1. Inspect the current repository first
-
-Before implementation:
-
-Inspect:
-
-```text
-backend/src/ai/
-backend/src/errors/
-backend/src/models/
-backend/src/services/
-backend/src/routes/
-backend/tests/
-docs/ARCHITECTURE.md
-README.md
-```
-
-Also inspect the existing Pass 7 implementation so the new extraction workflow consumes the correct raw field-report representation.
-
-Confirm the current AI abstraction before modifying anything.
-
-Do not duplicate existing functionality.
-
----
-
-# 2. Define a FieldLine-specific extraction contract
-
-The current generic AI extraction contract is not the Pass 8 domain contract.
-
-Create a dedicated contract for field-progress extraction.
-
-Recommended location:
-
-```text
-backend/src/ai/contracts/field-progress-extraction.contract.ts
-```
-
-Use Zod.
-
-The contract should represent:
+Pass 8 produces:
 
 ```ts
 {
@@ -141,325 +31,657 @@ The contract should represent:
       reference: string,
       location: string | null,
       progress_percent: number | null,
-      status: ...
+      status: 'unknown' | 'not_started' | 'in_progress' | 'completed' | 'delayed'
     }
   ]
 }
 ```
 
-Use a strict status enum.
+The extracted `reference` is explicitly a **textual work reference**, NOT a schedule activity identity.
 
-Recommended values:
+Pass 9 now has one responsibility:
+
+> Take those structured field facts and identify the most likely scheduled activity or activities they refer to.
+
+The central architectural principle remains:
 
 ```text
-unknown
-not_started
-in_progress
-completed
-delayed
+AI interprets messy evidence
+        ↓
+structured facts
+        ↓
+matching engine resolves activity identity
+        ↓
+later deterministic progress logic
 ```
 
-Use:
+Do not allow the AI layer to define project truth.
+
+---
+
+# 2. Important repository findings
+
+The repository already contains a complete domain model for activity matching.
+
+`ActivityMatch` already exists with:
 
 ```text
-progress_percent: number | null
+id
+projectId
+progressUpdateId
+evidenceId
+activityId
+confidenceScore
+matchMethod
+matchedText
+rationale
+status
+reviewedBy
+reviewedAt
+createdAt
+updatedAt
+```
+
+The existing enum values are:
+
+```text
+MatchMethod =
+  'exact_id'
+  | 'text_similarity'
+  | 'wbs_location'
+  | 'llm_assisted'
+  | 'manual'
+
+MatchStatus =
+  'suggested'
+  | 'confirmed'
+  | 'rejected'
+```
+
+Do not redefine these unless there is an actual deficiency.
+
+The existing `Activity` model contains:
+
+```text
+projectId
+scheduleId
+externalId
+name
+description
+wbsCode
+location
+plannedStart
+plannedFinish
+plannedQuantity
+unit
+baselineProgress
+```
+
+The existing activity repository already supports:
+
+```text
+getById()
+listByScheduleId()
+listByProjectId()
+countByProjectId()
+```
+
+The SQLite schema already contains the `activity_matches` table with project-scoped foreign-key integrity and:
+
+```text
+confidence_score 0..1
+match_method constrained to known enum
+status constrained to suggested/confirmed/rejected
+```
+
+Therefore:
+
+> Do NOT create a new migration merely to implement Pass 9.
+
+Use the existing schema unless you discover a genuine schema deficiency.
+
+---
+
+# 3. Pass 9 objective
+
+Given:
+
+```text
+Project
++
+validated field extraction
+```
+
+produce:
+
+```text
+candidate activity matches
 ```
 
 with:
 
 ```text
-0 <= progress_percent <= 100
+matched activity
+confidence
+matching method
+matching rationale
+candidate alternatives
 ```
 
-### Bounded output
+Example:
 
-Do not allow unbounded AI output.
-
-Use a bounded maximum number of extracted items.
-
-Recommended:
+### Schedule
 
 ```text
-maximum 20 items
+ACT-101 | Foundation excavation | Block B | WBS 3.1
+ACT-102 | Foundation concrete     | Block B | WBS 3.2
+ACT-103 | Column rebar             | Block C | WBS 4.1
 ```
 
-Also enforce reasonable maximum lengths for:
+### Extracted field fact
+
+```json
+{
+  "reference": "foundation work",
+  "location": "Block B",
+  "progress_percent": 60,
+  "status": "in_progress"
+}
+```
+
+Potential output:
 
 ```text
-reference
-location
+best match:
+ACT-101
+confidence: 0.87
+method: text_similarity
+rationale: "foundation" + "Block B" strongly align with activity name and location
+
+alternatives:
+ACT-102
+confidence: 0.78
 ```
 
-Recommended limits:
-
-```text
-reference <= 200 characters
-location <= 200 characters
-```
-
-Do not accept arbitrary nested structures.
-
-Do not use `.passthrough()` for the extraction contract.
-
-The final parsed object should contain only the expected fields.
+The matcher must not silently commit a low-confidence result as confirmed.
 
 ---
 
-# 3. Be conservative about missing information
+# 4. Match strategy
 
-The AI must NOT invent facts.
+Implement a deterministic layered strategy.
 
-Rules:
+Use this order:
 
-### `reference`
+```text
+1. Exact activity/external ID
+2. Strong text match
+3. WBS/location metadata
+4. Semantic similarity seam
+5. LLM-assisted disambiguation seam
+```
 
-Extract the human-readable work reference mentioned in the report.
+However, do NOT implement unnecessary advanced AI infrastructure merely because the roadmap mentions it.
+
+The important Pass 9 result is the **matching contract and deterministic engine**.
+
+Build the system so semantic/LLM methods can be added cleanly later.
+
+---
+
+# 5. Layer 1 — exact activity ID
+
+First detect whether the extracted textual `reference` is actually an explicit activity identifier.
 
 Example:
 
 ```text
-"foundation work"
-"concrete pouring"
-"Pier P12 excavation"
-```
-
-Do NOT turn it into an activity ID.
-
-Do NOT generate identifiers such as:
-
-```text
 ACT-001
-WBS-3.2.4
-activity_123
+ACT-001/A
+A10023
 ```
 
-unless the report explicitly contains such a value as ordinary text.
+Compare against `Activity.externalId`.
 
-### `location`
+Rules:
 
-Extract only if explicitly present.
+* exact normalized match → strongest possible result
+* confidence should be near 1.0
+* `matchMethod = 'exact_id'`
+* rationale should state that the external activity ID matched exactly
 
-Otherwise:
+Use the existing normalization helpers where appropriate rather than inventing another identifier normalization implementation. The existing text normalizer preserves punctuation/case in identifiers.
 
-```json
-null
-```
-
-### `progress_percent`
-
-Extract only when explicitly stated or unambiguously represented in the field report.
-
-Do NOT calculate progress from language such as:
+Do not turn ordinary text like:
 
 ```text
-"work has started"
-"nearly finished"
-"making good progress"
+"foundation work"
 ```
 
-Those phrases may support a status, but they do not justify inventing a numeric percentage.
+into a fabricated activity ID.
 
-If no defensible percentage exists:
+---
 
-```json
-null
+# 6. Layer 2 — strong text matching
+
+Compare the extracted `reference` against:
+
+```text
+Activity.name
+Activity.description
 ```
 
-### `status`
+Do not use database-side fuzzy matching.
 
-Infer only from the report language.
+Keep the matching logic in a pure domain/application service.
 
-Do not fabricate a status when the report is genuinely ambiguous.
+Create a deterministic text similarity implementation.
+
+It may use simple techniques such as:
+
+```text
+- normalized token comparison
+- token overlap
+- Jaccard similarity
+- containment
+- exact normalized phrase match
+```
+
+Do NOT introduce a heavyweight ML/embedding package in Pass 9 unless the existing project already contains one.
+
+The goal is:
+
+> deterministic, understandable matching first.
+
+Example:
+
+```text
+reference:
+"foundation excavation"
+
+activity:
+"Foundation Excavation at Block B"
+```
+
+should score strongly.
+
+---
+
+# 7. Layer 3 — WBS and location metadata
+
+Use the extracted fact:
+
+```text
+location
+```
+
+and any schedule metadata available from activities:
+
+```text
+location
+wbsCode
+```
+
+to strengthen or weaken candidate scores.
+
+Examples:
+
+```text
+reference = foundation excavation
+location = Block B
+```
+
+Candidate:
+
+```text
+Foundation Excavation
+Block B
+WBS 3.1
+```
+
+should score significantly higher than:
+
+```text
+Foundation Excavation
+Block C
+```
+
+The matching engine should make the rationale explainable.
+
+Example:
+
+```text
+"Reference strongly matches activity name; location also matches."
+```
+
+Do not make location mandatory because some field reports legitimately omit it.
+
+---
+
+# 8. Layer 4 — semantic similarity
+
+Do NOT immediately introduce external embedding infrastructure.
+
+Instead, design a clean interface/seam for semantic matching.
+
+For example:
+
+```ts
+interface SemanticActivityMatcher {
+  score(reference: string, activity: Activity): Promise<number>;
+}
+```
+
+A deterministic/local implementation may return:
+
+```text
+0
+```
+
+or a text-based semantic proxy if useful.
+
+The key requirement is architectural isolation:
+
+```text
+matching engine
+      ↓
+semantic matcher interface
+```
+
+rather than embedding provider logic directly into the core matcher.
+
+If the current repo does not have a genuine semantic similarity dependency, do not add one merely for this pass.
+
+---
+
+# 9. Layer 5 — LLM-assisted disambiguation
+
+Do not make the entire matcher dependent on an LLM.
+
+Use the existing AI abstraction from Pass 8 only as an optional disambiguation layer.
+
+The LLM must only be asked to choose among a **small set of already-qualified candidates**.
+
+For example:
+
+```text
+Field fact:
+"foundation work at Block B"
+
+Candidates:
+ACT-101 Foundation Excavation — Block B
+ACT-102 Foundation Concrete — Block B
+ACT-103 Column Rebar — Block C
+```
+
+The LLM may choose between the first two if deterministic scoring cannot safely distinguish them.
+
+It must not:
+
+* search the database
+* invent candidate activities
+* create activity IDs
+* mutate activity matches
+* decide project progress
+* calculate variance
+* calculate risk
+
+Use the existing `AIProvider`/`AIService` abstraction.
+
+If a clean LLM disambiguation implementation would materially expand the pass, create the abstraction and deterministic mock seam now, but keep production use optional.
+
+---
+
+# 10. Candidate ranking
+
+The output of matching should preserve:
+
+```text
+best candidate
++
+alternative candidates
+```
+
+Do not throw away runner-up information.
+
+Recommended result structure:
+
+```ts
+{
+  fact: FieldProgressItem,
+  bestMatch: CandidateMatch | null,
+  alternatives: CandidateMatch[]
+}
+```
+
+Where:
+
+```ts
+CandidateMatch = {
+  activityId: string,
+  activityExternalId: string,
+  activityName: string,
+  confidenceScore: number,
+  matchMethod: MatchMethod,
+  matchedText: string | null,
+  rationale: string
+}
+```
+
+Confidence must always satisfy:
+
+```text
+0 <= confidenceScore <= 1
+```
+
+Use deterministic score calculations.
+
+Document how the score is produced.
+
+Do not pretend the score is mathematically calibrated probability.
+
+It is a matching confidence score.
+
+---
+
+# 11. Low-confidence behavior
+
+This is important.
+
+Do not automatically mark weak matches as confirmed.
+
+Recommended policy:
+
+```text
+high confidence
+    → suggested
+
+medium/ambiguous confidence
+    → suggested + alternatives
+
+low confidence / no useful candidate
+    → no automatic match
+```
 
 Use:
 
 ```text
-unknown
+status = 'suggested'
 ```
 
-where appropriate.
-
----
-
-# 4. Prompt design
-
-Create a dedicated extraction prompt builder.
-
-Recommended location:
-
-```text
-backend/src/ai/services/field-progress-extraction.service.ts
-```
-
-or an equivalent clearly separated FieldLine AI service module.
-
-Keep the prompt explicit and deterministic.
-
-The prompt should instruct the model:
-
-```text
-You are extracting structured facts from a construction/infrastructure field progress report.
-
-Extract only information explicitly supported by the report.
-
-Do not invent activity IDs.
-Do not perform schedule matching.
-Do not select an existing project activity.
-Do not calculate project truth.
-Do not calculate progress from unsupported language.
-Do not infer quantities that are not present.
-
-Return only the requested JSON structure.
-```
-
-The prompt must make the distinction explicit:
-
-```text
-reference ≠ activity identity
-```
-
-For example:
-
-> "foundation work" is a textual work reference, not an activity ID.
-
-The model must return the structured contract only.
-
-Do not ask the model for explanations outside the JSON contract.
-
----
-
-# 5. FieldProgressExtractionService
-
-Create a dedicated application-facing service responsible for the FieldLine extraction operation.
-
-Recommended:
-
-```text
-backend/src/ai/services/field-progress-extraction.service.ts
-```
-
-Conceptually:
-
-```ts
-extractFromReport(rawText: string): Promise<FieldProgressExtraction>
-```
-
-Responsibilities:
-
-1. Validate the input is a non-empty string.
-2. Enforce a reasonable maximum raw input length.
-3. Build the explicit extraction prompt.
-4. Call the existing `AIService.extractStructured(...)`.
-5. Return the validated structured extraction result.
-6. Translate provider/extraction failures into the existing application error model where appropriate.
-
-It must NOT:
-
-* query SQLite
-* import repositories
-* access activities
-* access schedules
-* mutate `progress_updates`
-* mutate `activities`
-* mutate `activity_progress`
-* create `activity_matches`
-* calculate variance
-* calculate risk
-* call Pass 9 logic
-
----
-
-# 6. Provider handling
-
-Do NOT create a new provider interface.
-
-Use the existing:
-
-```text
-AIProvider
-```
-
-and:
-
-```text
-AIService
-```
-
-architecture.
-
-### Important design decision
-
-For Pass 8, the extraction workflow must be fully testable without requiring a live external API key.
-
-Therefore:
-
-* keep the existing `MockAIProvider`
-* use dependency injection in tests
-* do not make the test suite depend on network access
-
-The existing mock provider may need to be extended so that it can return a valid FieldProgressExtraction response for this new contract.
-
-Do not make the mock's generic response accidentally masquerade as the new domain contract.
-
-Use explicit test fixtures for FieldLine extraction.
-
----
-
-# 7. Do not persist extracted facts yet
-
-This is extremely important.
-
-Pass 8 is an **interpretation layer**, not a persistence/domain-truth layer.
+for newly generated match candidates.
 
 Do NOT create:
 
 ```text
-extracted_progress
-field_facts
-ai_results
-activity_progress rows
-activity_matches rows
+status = 'confirmed'
 ```
 
-Do NOT add a migration unless an actual existing schema deficiency makes one unavoidable.
+automatically.
 
-At the end of Pass 8:
+Do not automatically mutate `activity_progress`.
 
-```text
-raw report
-    ↓
-AI extraction
-    ↓
-validated structured facts
-```
-
-and then the result stops there.
-
-Pass 9 will consume the structured facts for activity matching.
+That belongs to Pass 10.
 
 ---
 
-# 8. API exposure
+# 12. Persistence boundary
 
-The extraction capability must be callable so that the workflow can be tested and demonstrated, but keep the endpoint narrowly scoped.
+The existing `activity_matches` table exists specifically for this pass.
 
-Add a dedicated endpoint only if the existing application architecture has no better existing entry point.
+Create an `ActivityMatchRepository` only if one does not already exist.
+
+Current repository inspection shows there is no dedicated activity-match repository yet.
 
 Recommended:
 
 ```text
-POST /api/ai/field-progress/extract
+backend/src/repositories/activity-match.repository.ts
 ```
 
-Request:
+Keep it narrow.
 
-```json
-{
-  "rawText": "Foundation work at Block B is 60% complete."
-}
+At minimum:
+
+```text
+create()
+getById()
+getByIdAndProjectId()
+listByProgressUpdateId()
+listByProjectId()
 ```
 
-Response:
+Use the existing `ActivityMatch` / `CreateActivityMatchInput` domain types.
+
+Maintain strict project isolation.
+
+Never allow:
+
+```text
+project A progress update
++
+project B activity
+```
+
+to create an activity match.
+
+The existing database schema already has composite project-scoped FKs; the repository/service must respect the same boundary.
+
+---
+
+# 13. Should Pass 9 persist matches?
+
+Yes, but only as **suggestions**.
+
+The purpose of Pass 9 is to turn:
+
+```text
+structured fact
+```
+
+into:
+
+```text
+candidate activity match
+```
+
+and persist that candidate as:
+
+```text
+status = 'suggested'
+```
+
+Do not confirm it automatically.
+
+Do not mutate:
+
+```text
+activity_progress
+```
+
+Do not mutate:
+
+```text
+activities
+```
+
+Do not calculate actual progress.
+
+Pass 10 owns that.
+
+---
+
+# 14. Recommended service architecture
+
+Use:
+
+```text
+FieldProgressExtraction
+        ↓
+ActivityMatchingService
+        ↓
+ActivityRepository
+        ↓
+matching algorithm
+        ↓
+candidate matches
+        ↓
+ActivityMatchRepository
+        ↓
+SQLite activity_matches
+```
+
+More explicitly:
+
+```text
+Route
+ ↓
+validation
+ ↓
+ActivityMatchingService
+ ↓
+ActivityRepository
+ ↓
+deterministic matcher
+ ↓
+optional semantic matcher
+ ↓
+optional LLM disambiguator
+ ↓
+ActivityMatchRepository
+ ↓
+SQLite
+```
+
+The AI service remains a dependency of the optional disambiguation component, not the core matching engine.
+
+---
+
+# 15. API
+
+Expose a narrowly-scoped endpoint for testing/demo.
+
+Recommended:
+
+```text
+POST /api/projects/:projectId/progress-updates/:updateId/matches
+```
+
+The endpoint should:
+
+1. verify the project
+2. verify the progress update belongs to the project
+3. obtain the structured Pass 8 extraction associated with the report
+
+IMPORTANT:
+
+Pass 8 currently does not persist its extraction.
+
+Therefore, before implementation, inspect the current repository and decide the smallest clean interface for passing the validated extraction into Pass 9.
+
+Do NOT duplicate extraction persistence just to make the endpoint work.
+
+A sensible initial contract is to accept the validated structured extraction as request input for matching:
 
 ```json
 {
@@ -476,221 +698,254 @@ Response:
 }
 ```
 
-### API rules
+This keeps Pass 8 stateless and Pass 9 independently testable.
 
-Validate the request with Zod.
+Do not silently call the AI extraction endpoint from the matching service.
 
-Reject:
-
-* missing `rawText`
-* empty `rawText`
-* whitespace-only `rawText`
-* excessively large `rawText`
-
-Return an appropriate application error when AI extraction fails.
-
-Do not persist the extraction.
-
-Do not require a project ID for this endpoint unless the existing architecture demonstrates a concrete reason to do so.
-
-Do not attach the extraction to a scheduled activity.
+The matching engine should consume structured facts, not raw text.
 
 ---
 
-# 9. Tests
+# 16. API response
 
-This pass must have strong tests.
+Return a transparent result.
 
-At minimum:
+Example:
 
-### Contract tests
+```json
+{
+  "matches": [
+    {
+      "fact": {
+        "reference": "foundation work",
+        "location": "Block B",
+        "progress_percent": 60,
+        "status": "in_progress"
+      },
+      "bestMatch": {
+        "activityId": "...",
+        "activityExternalId": "ACT-101",
+        "activityName": "Foundation Excavation",
+        "confidenceScore": 0.87,
+        "matchMethod": "text_similarity",
+        "matchedText": "foundation excavation",
+        "rationale": "Reference matches activity name and location matches Block B."
+      },
+      "alternatives": [
+        {
+          "activityId": "...",
+          "activityExternalId": "ACT-102",
+          "activityName": "Foundation Concrete",
+          "confidenceScore": 0.74,
+          "matchMethod": "wbs_location",
+          "matchedText": "foundation",
+          "rationale": "Same location and related foundation terminology."
+        }
+      ]
+    }
+  ]
+}
+```
+
+The actual exact field names may follow existing DTO conventions if the repo has a consistent pattern.
+
+---
+
+# 17. Avoid a giant monolithic matcher
+
+Keep responsibilities separated.
+
+Suggested components:
+
+```text
+backend/src/services/matching/
+    activity-matching.service.ts
+    activity-match-scoring.ts
+    activity-match.types.ts
+    text-similarity.ts
+    semantic-matcher.ts
+    llm-disambiguator.ts
+```
+
+Use fewer files if the current project conventions make that cleaner.
+
+Do not create abstractions that have no immediate purpose.
+
+The essential conceptual split is:
+
+```text
+candidate generation
+        ↓
+candidate scoring
+        ↓
+candidate ranking
+        ↓
+optional disambiguation
+        ↓
+persistence
+```
+
+---
+
+# 18. Tests
+
+Pass 9 requires comprehensive tests.
+
+### Exact ID
 
 Test:
 
 ```text
-valid extraction
-empty items
-maximum 20 items
-more than 20 items rejected
-progress_percent < 0 rejected
-progress_percent > 100 rejected
-invalid status rejected
-missing required reference rejected
-overlong reference rejected
-overlong location rejected
-unexpected extra fields rejected
+reference = exact externalId
+→ exact_id
+→ highest confidence
 ```
 
-### Service tests
+Also test that arbitrary human-language references do not get falsely classified as IDs.
+
+### Strong text match
 
 Test:
 
 ```text
-valid raw text → valid structured extraction
-blank input rejected
-oversized input rejected
-provider failure converted to application error
-schema-invalid AI response rejected
+"Foundation excavation"
+→ "Foundation Excavation at Block B"
 ```
 
-Test the important semantic boundaries:
+produces a high deterministic score.
 
-```text
-reference is preserved as text
-location may be null
-progress_percent may be null
-status may be unknown
-```
-
-### Provider isolation tests
-
-Use the existing mock provider.
-
-Prove that:
-
-```text
-AI service
-    ↓
-provider
-```
-
-works without SQLite.
-
-The AI layer must not import:
-
-```text
-repositories
-database
-projectRepository
-activityRepository
-```
-
-Add/update architecture tests if necessary to enforce this boundary.
-
-### Route tests
+### Location
 
 Test:
 
 ```text
-POST valid request → 200
-invalid request → 4xx
-provider failure → appropriate error response
-schema-invalid AI response → appropriate error response
+same reference + same location
+>
+same reference + different location
 ```
 
-Do not test only the happy path.
+### WBS
+
+Test that WBS metadata can strengthen the score when relevant.
+
+### Alternatives
+
+Use intentionally ambiguous activities:
+
+```text
+Foundation Excavation
+Foundation Concrete
+Foundation Waterproofing
+```
+
+and verify:
+
+```text
+bestMatch
++
+alternatives
+```
+
+are returned.
+
+### Low confidence
+
+Use a report like:
+
+```text
+"Some work continued near the site."
+```
+
+and verify no high-confidence activity is invented.
+
+### Cross-project protection
+
+Verify:
+
+```text
+Project A progress update
++
+Project B activity
+```
+
+cannot produce a persisted match.
+
+### Persistence
+
+Test:
+
+* create suggestion
+* retrieve suggestion
+* project-scoped lookup
+* list by progress update
+* list by project
+* cascade behavior where appropriate
+
+### Duplicate behavior
+
+Decide and test how repeated matching of the same fact behaves.
+
+Do not blindly create unlimited duplicate `activity_matches` rows for the exact same suggestion if the existing domain semantics do not support that.
+
+Prefer deterministic behavior.
+
+### AI disambiguation
+
+Test with the existing MockAIProvider.
+
+Do not require a network API.
+
+### Architecture
+
+Ensure:
+
+```text
+matching service
+```
+
+does not directly use SQLite.
+
+The repository must own SQL.
+
+AI components still must not import repositories/database.
 
 ---
 
-# 10. Example golden extraction fixtures
+# 19. No Pass 10 leakage
 
-Add deterministic test fixtures for at least these cases.
-
-### Case A — explicit percentage
-
-Input:
+Absolutely do NOT implement:
 
 ```text
-Foundation work at Block B is 60% complete.
-Concrete pouring started today.
+activity_progress updates
+actualPercent
+actualQuantity
+planned-vs-actual calculations
+variance
+delay
+risk
 ```
 
-Expected facts should include an item corresponding to foundation work with:
+Even though the match contains a progress percentage.
 
-```text
-location = Block B
-progress_percent = 60
-```
+Pass 9 only says:
 
-Do not require the model to create a second item for "Concrete pouring" unless the report provides enough explicit information to justify it.
+> "This field fact most likely refers to this scheduled activity."
 
-### Case B — no percentage
-
-Input:
-
-```text
-Excavation work started at Pier P12 today.
-```
-
-Expected:
-
-```text
-reference = excavation work
-location = Pier P12
-progress_percent = null
-status = in_progress
-```
-
-### Case C — ambiguous progress
-
-Input:
-
-```text
-Work is moving well at Block C.
-```
-
-Do not fabricate a percentage.
-
-A valid result may contain:
-
-```text
-progress_percent = null
-```
-
-and should use an appropriately conservative status.
-
-### Case D — completed work
-
-Input:
-
-```text
-Rebar installation at Column C14 has been completed.
-```
-
-Expected:
-
-```text
-status = completed
-```
-
-without inventing a percentage unless explicitly present.
+Pass 10 will decide how structured facts become actual activity progress.
 
 ---
 
-# 11. Preserve the fundamental FieldLine principle
+# 20. No UI requirement
 
-Pass 8 must reinforce:
+Do not build a full dashboard for Pass 9.
 
-```text
-Messy field evidence
-        ↓
-AI interpretation
-        ↓
-structured facts
-        ↓
-human review where needed
-        ↓
-deterministic domain logic
-```
+A backend API plus strong deterministic tests is enough.
 
-The AI is an interpreter.
-
-It is NOT the source of project truth.
-
-The following belong to later passes:
-
-```text
-Pass 9  → Activity Matching
-Pass 10 → Progress Normalization
-Pass 11 → Planned vs Actual
-Pass 12 → Delay / Risk
-```
-
-Do not implement any of them now.
+A minimal manual endpoint test is useful, but Pass 20 owns the dashboard.
 
 ---
 
-# 12. Documentation
+# 21. Documentation
 
 Update:
 
@@ -701,51 +956,30 @@ docs/ARCHITECTURE.md
 to document:
 
 ```text
-Raw field report
-      ↓
-FieldProgressExtractionService
-      ↓
-AIService
-      ↓
-AIProvider
-      ↓
-Zod FieldProgressExtraction contract
-      ↓
-Validated structured facts
+Pass 8 structured facts
+        ↓
+ActivityMatchingService
+        ↓
+candidate generation
+        ↓
+deterministic scoring
+        ↓
+optional semantic/LLM disambiguation
+        ↓
+suggested ActivityMatch
 ```
 
 Explicitly document:
 
-> Pass 8 extracts textual field facts only. It does not identify scheduled activities, mutate activity progress, or define project truth.
+> Pass 9 resolves identity candidates but does not modify activity progress or project truth.
 
-Update the README only enough to mark Pass 8 appropriately after successful implementation.
-
-Do NOT alter the authoritative 26-pass roadmap.
+Do not change the authoritative 26-pass roadmap except to mark Pass 9 complete after implementation.
 
 ---
 
-# 13. No unnecessary infrastructure
+# 22. Regression verification
 
-Do NOT introduce:
-
-* Docker
-* PostgreSQL
-* Redis
-* queues
-* workers
-* cloud storage
-* microservices
-* deployment infrastructure
-* a new database
-* a new AI framework
-
-Keep the implementation inside the existing local modular monolith.
-
----
-
-# 14. Regression verification
-
-Before considering Pass 8 complete, run:
+Run:
 
 ```text
 npm test
@@ -757,54 +991,62 @@ npm run demo:reset
 Also verify:
 
 ```text
-/api/health
+GET /api/health
 ```
 
-No Pass 0–7 regression is acceptable.
+No regression in Passes 0–8 is acceptable.
 
-Do not use test count alone as proof of completion. Inspect the actual implementation and verify the architecture boundaries.
+Do not rely on test count alone.
+
+Inspect the actual implementation and final diff before declaring the pass finished.
 
 ---
 
-# 15. Final review before commit
+# 23. Final diff review
 
-Inspect your own diff carefully.
-
-Confirm:
+Before committing, explicitly verify:
 
 ```text
-[ ] Existing AIProvider abstraction reused
-[ ] Existing AIService reused
-[ ] FieldLine-specific extraction contract added
-[ ] Explicit extraction prompt added
-[ ] Strict Zod validation enforced
-[ ] Output bounded
-[ ] Missing facts represented conservatively
-[ ] AI never performs activity matching
-[ ] AI never mutates project truth
-[ ] No extraction persistence added
-[ ] No migration added unless genuinely necessary
-[ ] Mock provider remains usable for deterministic tests
-[ ] Route is narrow and testable
-[ ] Tests cover provider failure and invalid AI output
+[ ] Existing Activity model reused
+[ ] Existing ActivityRepository reused
+[ ] Existing ActivityMatch domain types reused
+[ ] Existing activity_matches table reused
+[ ] No unnecessary migration added
+[ ] ActivityMatchRepository added cleanly
+[ ] Matching algorithm is deterministic and explainable
+[ ] exact_id supported
+[ ] text_similarity supported
+[ ] wbs/location signals supported
+[ ] semantic matcher is isolated
+[ ] LLM disambiguation is optional and isolated
+[ ] low-confidence matches are not automatically confirmed
+[ ] alternatives preserved
+[ ] project isolation enforced
+[ ] match suggestions persisted as suggested
+[ ] activity_progress is untouched
+[ ] no Pass 10+ logic introduced
+[ ] no giant matcher service created
+[ ] no direct SQL in service layer
+[ ] AI layer still cannot access DB/repositories
+[ ] tests cover ambiguity and cross-project isolation
 [ ] npm test passes
 [ ] npm run build passes
 [ ] npm run setup passes
 [ ] npm run demo:reset passes
-[ ] /api/health returns healthy
-[ ] No Pass 9+ functionality introduced
+[ ] /api/health healthy
 [ ] docs/ARCHITECTURE.md updated
-[ ] README updated without changing the 26-pass roadmap
+[ ] README updated only as needed
+[ ] 26-pass roadmap preserved
 ```
 
 ---
 
-# 16. Commit
+# 24. Commit
 
 Use:
 
 ```text
-feat: implement FieldLine AI extraction layer
+feat: implement FieldLine activity matching engine
 ```
 
 Push to:
@@ -816,12 +1058,16 @@ main
 
 After implementation, report:
 
-1. concise summary of the actual implementation
-2. files changed
-3. extraction contract
-4. API endpoint added
-5. tests and results
-6. build/setup verification
-7. commit SHA
+1. actual matching architecture implemented
+2. scoring method and thresholds
+3. repository/API changes
+4. how ambiguity is handled
+5. whether semantic/LLM matching is implemented or only isolated as an extension seam
+6. test results
+7. build/setup verification
+8. commit SHA
+9. files changed
 
-Do not claim Pass 8 is approved. It must be independently reviewed after you finish.
+Do not claim Pass 9 is approved.
+
+Pass 9 will be independently reviewed after completion.

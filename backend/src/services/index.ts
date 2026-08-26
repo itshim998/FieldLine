@@ -22,6 +22,19 @@ export {
 } from './progress-update.service.js';
 export type { ProgressUpdateService, CreateManualUpdateInput } from './progress-update.service.js';
 
+export {
+  ActivityMatchingService,
+  activityMatchingService
+} from './matching/activity-matching.service.js';
+export type {
+  CandidateMatch,
+  FieldFactMatchResult,
+  MatchReportResult,
+  MatchingOptions
+} from './matching/activity-matching.types.js';
+export { scoreActivityCandidate } from './matching/activity-match-scoring.js';
+export { computeTextSimilarity } from './matching/text-similarity.js';
+
 export * from './normalization/index.js';
 export * from './validation/index.js';
 

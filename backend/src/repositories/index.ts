@@ -28,3 +28,8 @@ export {
 } from './progress-update.repository.js';
 export type { ProgressUpdateRepository } from './progress-update.repository.js';
 
+export {
+  SqliteActivityMatchRepository,
+  activityMatchRepository
+} from './activity-match.repository.js';
+export type { ActivityMatchRepository } from './activity-match.repository.js';
