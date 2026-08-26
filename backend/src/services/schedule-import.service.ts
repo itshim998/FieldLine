@@ -5,13 +5,14 @@ import { ScheduleRepository, scheduleRepository as defaultScheduleRepo } from '.
 import { ActivityRepository, activityRepository as defaultActivityRepo } from '../repositories/activity.repository.js';
 import { getScheduleParser } from './importer/parserFactory.js';
 import { ScheduleNormalizer, scheduleNormalizer as defaultNormalizer } from './normalization/index.js';
+import { ScheduleValidator, scheduleValidator as defaultValidator } from './validation/index.js';
 import {
   Schedule,
   Activity,
   ScheduleImportSummary,
   CreateActivityInput
 } from '../models/domain.types.js';
-import { NotFoundError, ValidationError, ConflictError } from '../errors/AppError.js';
+import { NotFoundError, ValidationError, ScheduleValidationError } from '../errors/AppError.js';
 
 export interface ScheduleImportFileInput {
   path: string;
@@ -32,17 +33,20 @@ export class DefaultScheduleImportService implements ScheduleImportService {
   private scheduleRepo: ScheduleRepository;
   private activityRepo: ActivityRepository;
   private normalizer: ScheduleNormalizer;
+  private validator: ScheduleValidator;
 
   constructor(
     projectRepo: ProjectRepository = defaultProjectRepo,
     scheduleRepo: ScheduleRepository = defaultScheduleRepo,
     activityRepo: ActivityRepository = defaultActivityRepo,
-    normalizer: ScheduleNormalizer = defaultNormalizer
+    normalizer: ScheduleNormalizer = defaultNormalizer,
+    validator: ScheduleValidator = defaultValidator
   ) {
     this.projectRepo = projectRepo;
     this.scheduleRepo = scheduleRepo;
     this.activityRepo = activityRepo;
     this.normalizer = normalizer;
+    this.validator = validator;
   }
 
 
@@ -71,16 +75,10 @@ export class DefaultScheduleImportService implements ScheduleImportService {
       // 4. Deterministically normalize canonical rows (PASS 5)
       const normalizedRows = this.normalizer.normalizeScheduleRows(canonicalRows);
 
-      // 5. Validate intra-file duplicate activity IDs
-      const seenExternalIds = new Set<string>();
-      for (const row of normalizedRows) {
-        const idLower = row.externalId.toLowerCase();
-        if (seenExternalIds.has(idLower)) {
-          throw new ConflictError(
-            `Duplicate activity ID '${row.externalId}' found in import file`
-          );
-        }
-        seenExternalIds.add(idLower);
+      // 5. Deterministically validate normalized schedule activities (PASS 6)
+      const validationResult = this.validator.validateSchedule(normalizedRows);
+      if (!validationResult.isValid) {
+        throw new ScheduleValidationError(validationResult.issues);
       }
 
       // 6. Derive sensible schedule name

@@ -4,5 +4,9 @@ export {
   ValidationError,
   ConflictError,
   AIProviderError,
-  DatabaseError
+  DatabaseError,
+  NormalizationError,
+  ScheduleValidationError,
+  type ScheduleValidationIssuePayload
 } from './AppError.js';
+

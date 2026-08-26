@@ -16,6 +16,7 @@ export interface NormalizedScheduleActivity {
   plannedQuantity: number | null;
   unit: string | null;
   baselineProgress: number; // 0.0 to 100.0 (default 0.0)
+  rowNumber?: number;
 }
 
 export interface ScheduleNormalizer {

@@ -17,4 +17,6 @@ export {
 export type { ScheduleImportService } from './schedule-import.service.js';
 
 export * from './normalization/index.js';
+export * from './validation/index.js';
+
 

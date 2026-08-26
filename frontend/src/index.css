@@ -1330,6 +1330,99 @@ body {
   color: var(--accent-emerald);
 }
 
+/* Schedule Validation Error Box (PASS 6) */
+.validation-error-card {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-md);
+  padding: 1.15rem;
+  margin-top: 1rem;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.validation-error-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.validation-error-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: #fca5a5;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.validation-issues-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.validation-issue-item {
+  background: rgba(17, 24, 39, 0.65);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-left: 3px solid var(--accent-red);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.validation-issue-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.validation-row-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  font-family: var(--font-mono);
+  font-size: 0.725rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+}
+
+.validation-field-badge {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.725rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+}
+
+.validation-code-badge {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fcd34d;
+  font-family: var(--font-mono);
+  font-size: 0.675rem;
+  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.validation-issue-msg {
+  font-size: 0.825rem;
+  color: #f3f4f6;
+  line-height: 1.4;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
   .app-header {
@@ -1352,3 +1445,4 @@ body {
     align-items: flex-start;
   }
 }
+

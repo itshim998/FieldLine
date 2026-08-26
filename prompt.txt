@@ -1,6 +1,6 @@
-# FieldLine — PASS 5: Schedule Normalization
+# FieldLine — PASS 6: Schedule Validation
 
-You are implementing PASS 5 — Schedule Normalization.
+You are implementing PASS 6 — Schedule Validation.
 
 FieldLine repository:
 
@@ -10,640 +10,692 @@ Local directory:
 
 C:\Users\Sounak\Desktop\Flagship AI projects\FieldLine
 
-PASS 0 through PASS 4 are complete.
+PASS 0 through PASS 5 are complete.
 
-Before coding, inspect the current repository carefully and implement Pass 5 on top of the existing importer architecture.
+Before coding, inspect the current repository and implement this pass on top of the existing importer + normalization architecture.
 
 ---
 
-# CURRENT STATE
+# CURRENT PIPELINE
 
-PASS 4 already implements:
+The repository currently follows:
 
 ```text
 CSV / XLSX
-    ↓
-file validation
-    ↓
-parser
-    ↓
-header mapping
-    ↓
-CanonicalScheduleImportRow
-    ↓
-schedule/activity persistence
-
-The current canonical importer row contains:
-
-externalId
-name
-plannedStart
-plannedFinish
-description
-wbsCode
-location
-plannedQuantity
-unit
-
-The current parsers intentionally preserve much of the source representation.
-
-PASS 5 must introduce a deterministic normalization layer before persistence.
-
-OBJECTIVE
-
-Create the canonical internal activity representation.
-
-The core pipeline becomes:
-
-Uploaded CSV/XLSX
-    ↓
-parser
-    ↓
-source-canonical rows
-    ↓
-NORMALIZATION
-    ↓
-normalized FieldLine activity representation
-    ↓
-repository
-    ↓
-SQLite
-EXIT CRITERION
-
-Equivalent schedule information from different CSV/XLSX source representations produces the same normalized internal activity format.
-
-For example, reasonable equivalent representations of:
-
-Activity ID
-Activity name
-Start date
-Finish date
-Quantity
-Unit
-whitespace
-missing values
-
-must converge to the same deterministic representation.
-
-CRITICAL PASS BOUNDARY
-
-Do NOT implement PASS 6.
-
-PASS 5 is normalization, NOT schedule validation.
-
-Do not implement:
-
-schedule quality scoring;
-impossible-date detection such as finish < start;
-dependency validation;
-duplicate-resolution policies;
-WBS hierarchy validation;
-semantic activity validation;
-AI-assisted normalization;
-schedule anomaly detection;
-business-rule validation.
-
-Normalization may reject a value only when it is impossible to transform it into the canonical representation required by the application.
-
-Do not turn this into a validation engine.
-
-FIRST: INSPECT THE CURRENT REPOSITORY
-
-Inspect:
-
-CanonicalScheduleImportRow;
-CSV parser;
-XLSX parser;
-header mapper;
-schedule import service;
-schedule repository;
-activity repository;
-importer tests;
-existing domain models;
-existing frontend importer;
-existing error handling;
-package dependencies.
-
-Do not duplicate functionality already present in Pass 4.
-
-NORMALIZATION ARCHITECTURE
-
-Create an explicit normalization boundary.
-
-Prefer something conceptually like:
-
-backend/src/services/normalization/
-    schedule-normalizer.ts
-    date-normalizer.ts
-    number-normalizer.ts
-    text-normalizer.ts
-    unit-normalizer.ts
-
-Adapt the structure to current repository conventions.
-
-Do not create empty abstractions.
-
-The architecture should be:
-
-ScheduleImportService
     ↓
 Parser
     ↓
 CanonicalScheduleImportRow
     ↓
 ScheduleNormalizer
-    ├── text normalization
-    ├── date normalization
-    ├── number normalization
-    ├── percentage normalization where applicable
-    ├── unit normalization
-    └── missing-value normalization
     ↓
-Normalized activity inputs
+NormalizedScheduleActivity
     ↓
-Repository
-CANONICAL INTERNAL REPRESENTATION
+ScheduleRepository.createWithActivities()
+    ↓
+SQLite
 
-Define a clear normalized representation.
+PASS 6 must introduce validation between normalization and persistence:
 
-At minimum it should have:
+CSV / XLSX
+    ↓
+Parser
+    ↓
+Normalization
+    ↓
+PASS 6 VALIDATION
+    ↓
+atomic persistence
+    ↓
+SQLite
 
-externalId: string
-name: string
-description: string | null
-wbsCode: string | null
-location: string | null
-plannedStart: string
-plannedFinish: string
-plannedQuantity: number | null
-unit: string | null
+The database transaction already exists. Do not weaken it.
 
-Use the project's existing date/TypeScript conventions.
+OBJECTIVE
 
-The key requirement is that downstream persistence receives one consistent representation regardless of CSV/XLSX source formatting.
+Prevent invalid schedule data from entering the FieldLine project model.
 
-Do not keep source-specific representations in the persistence layer.
+Validate:
 
-1. TEXT NORMALIZATION
+unique activity identifiers within the imported schedule;
+required/critical fields;
+valid normalized dates;
+start <= finish;
+valid percentages;
+valid quantities;
+duplicate activities;
+schedule is not empty.
 
-Normalize textual fields deterministically.
+Produce useful import validation errors.
 
-For:
+EXIT CRITERION
 
-externalId
-name
-description
-wbsCode
-location
-unit
+Invalid schedule data is rejected cleanly before any schedule/activity records are persisted.
 
-apply appropriate minimal normalization:
+A valid normalized schedule continues through the existing atomic persistence path unchanged.
 
-Whitespace
-trim leading/trailing whitespace;
-collapse repeated internal whitespace where safe;
-convert empty strings to null for nullable fields.
+CRITICAL PASS BOUNDARY
 
-Example:
+Do NOT implement later functionality.
 
-"  Excavation   Work  "
-→
-"Excavation Work"
+Do not add:
 
-Do not aggressively rewrite meaningful content.
+AI validation;
+schedule quality scoring;
+anomaly detection;
+WBS hierarchy validation;
+dependency/network validation;
+resource validation;
+calendar validation;
+advanced duplicate reconciliation;
+schedule optimization;
+progress logic;
+matching logic.
 
-IDs
+PASS 6 is deterministic schedule validation only.
 
-For externalId:
+FIRST: INSPECT CURRENT IMPLEMENTATION
 
-trim whitespace;
-preserve the actual identifier semantics;
-do NOT arbitrarily remove punctuation;
-do NOT invent IDs;
-do NOT lowercase identifiers unless the existing application explicitly defines IDs as case-insensitive.
+Inspect:
 
-The goal is canonical formatting, not changing identifiers.
+schedule-import.service.ts;
+normalization layer;
+NormalizedScheduleActivity;
+parser/header validation;
+existing AppError hierarchy;
+ScheduleRepository.createWithActivities;
+schedule/activity tests;
+import route;
+frontend importer;
+existing import error UI.
 
-Names
+Do not duplicate existing normalization.
 
-Trim and collapse unnecessary whitespace.
+Do not move normalization responsibilities into validation.
 
-Do not change capitalization purely for aesthetics unless there is a documented canonical rule.
+VALIDATION ARCHITECTURE
 
-2. DATE NORMALIZATION
+Create an explicit validation boundary.
 
-Create a dedicated deterministic date normalizer.
+Prefer something conceptually like:
 
-All normalized schedule dates should use one representation.
+backend/src/services/validation/
+    schedule-validator.ts
+    validation-types.ts
 
-Prefer:
+or another structure consistent with the repository.
 
-YYYY-MM-DD
+The validator should operate on:
 
-unless the existing application has a stronger established convention.
+NormalizedScheduleActivity[]
 
-Support common unambiguous source forms, including where safely possible:
+and return either:
 
-YYYY-MM-DD
-YYYY/MM/DD
-YYYY-MM-DDTHH:mm:ss...
-Excel date values
-JavaScript Date values
+valid
 
-Also support common day-first date representations where the interpretation is deterministic.
+or a structured collection of validation issues.
 
-Important:
+Keep the validator deterministic and testable.
 
-Do not silently guess between ambiguous formats such as:
+Prefer pure validation functions where practical.
 
-01/02/2026
+IMPORTANT: AGGREGATE ERRORS
 
-unless the repository establishes an explicit rule.
+Do not stop at the first invalid row.
 
-Choose a deterministic policy and document it.
+A file containing:
 
-A good approach is:
+2 missing names;
+1 invalid quantity;
+3 date-order errors;
+1 duplicate ID;
 
-ISO formats are unambiguous;
-Excel date values are interpreted using Excel semantics;
-unambiguous slash-form dates can be normalized;
-genuinely ambiguous dates should produce a clear normalization error rather than silently changing the date.
+should return all of those issues together.
 
-Do NOT yet enforce semantic rules such as:
+A useful structure is conceptually:
 
-finish >= start
+ScheduleValidationResult
 
-That belongs to PASS 6.
+isValid
+issues[]
 
-EXCEL DATE HANDLING
+ScheduleValidationIssue:
+    code
+    message
+    rowNumber?
+    field?
+    value?
 
-This is important.
+Adapt names to existing conventions.
 
-CSV may provide:
+Do not create an unnecessarily large validation framework.
 
-2026-04-01
-01/04/2026
-Apr 1, 2026
+VALIDATION ERROR
 
-while XLSX may provide an actual Excel date value.
+Create a focused application error for schedule validation if appropriate, for example:
 
-The normalization layer must ensure that equivalent date values from CSV/XLSX ultimately become the same canonical string.
+ScheduleValidationError
 
-Do not leak SheetJS-specific date representations downstream.
+It should contain the structured issues.
 
-3. NUMBER NORMALIZATION
+Use the existing AppError architecture.
 
-Create a deterministic number normalizer.
+Return an HTTP status appropriate for semantically invalid client-provided import data, such as:
 
-At minimum support reasonable numeric representations such as:
+422 Unprocessable Entity
 
-1250
-"1250"
-"1,250"
-"1.25E3"
-" 1250 "
+unless the existing error conventions strongly indicate another status.
 
-where the representation is unambiguous.
+Do not expose stack traces or raw SQLite errors.
 
-Normalize them to a JavaScript number.
+1. REQUIRED / CRITICAL FIELDS
 
-Examples:
-
-"1,250" → 1250
-"1250.00" → 1250
-"1.25E3" → 1250
-
-Do not silently reinterpret ambiguous locale-specific decimal formats such as:
-
-1.234,56
-
-unless there is a deterministic rule.
-
-Do NOT validate whether a quantity is sensible for the project. That belongs to later validation/domain logic.
-
-4. PERCENTAGE NORMALIZATION
-
-The current schedule activity representation should remain compatible with:
-
-baselineProgress
-
-even if Pass 4 currently defaults it to zero.
-
-Where a source percentage is actually present and the importer supports it, normalize equivalent forms such as:
-
-0.5
-50
-"50%"
-" 50 % "
-
-according to one explicit semantic rule.
-
-The important distinction is:
-
-50%
-= 50 percent
-
-whereas:
-
-0.5
-
-must NOT be automatically assumed to mean 50% unless the source field semantics establish that convention.
-
-Do not invent percentage data when the schedule does not provide it.
-
-Do not implement progress/actual-progress logic.
-
-5. UNIT NORMALIZATION
-
-Normalize common equivalent unit representations to a deterministic canonical form.
-
-Examples where justified:
-
-"kg" → "kg"
-"KGS" → "kg"
-"meter" → "m"
-"metre" → "m"
-"meters" → "m"
-"MT" → "t"         only if the semantic meaning is unambiguous
-
-Keep the unit normalization dictionary small and explicit.
-
-Do not build a general-purpose units/conversion engine.
-
-Most importantly:
-
-Normalize unit labels, but do NOT convert quantities between units.
-
-For example:
-
-1000 kg
-
-must not automatically become:
-
-1 t
-
-in Pass 5.
-
-Unit conversion is outside this pass.
-
-Unknown units should be preserved in a normalized textual form rather than invented or silently discarded.
-
-6. MISSING VALUE NORMALIZATION
-
-Establish one representation for missing nullable values.
-
-For example, normalize:
-
-""
-" "
-null
-undefined
-
-to:
-
-null
-
-for nullable fields.
-
-Do not turn missing required fields into fabricated values.
-
-Do not use:
-
-"N/A"
-"unknown"
-"-"
-
-as fake data.
-
-For required fields such as:
+After normalization, require:
 
 externalId
 name
 plannedStart
 plannedFinish
 
-the normalizer should clearly report when no canonical value can be produced.
+These should normally already be enforced by the parser/normalizer, but Pass 6 must treat them as final domain validation.
 
-7. NORMALIZER MUST BE DETERMINISTIC
+Reject:
 
-The same input must always produce the same normalized output.
+empty external ID;
+empty name;
+missing plannedStart;
+missing plannedFinish.
 
-Do NOT:
+Do not invent missing values.
 
-use an LLM;
-use current time;
-depend on locale;
-use random IDs;
-use browser state;
-inspect external services.
+2. UNIQUE ACTIVITY IDENTIFIERS
 
-Normalization must be pure/repeatable.
-
-Prefer pure functions where possible.
-
-8. IMPORTER INTEGRATION
-
-Modify ScheduleImportService so the flow becomes:
-
-parse
- ↓
-canonical rows
- ↓
-normalize
- ↓
-normalized rows
- ↓
-duplicate checks where already defined
- ↓
-repository
-
-The repository should receive the normalized representation.
-
-Do not put normalization inside:
-
-SQLite;
-repository SQL;
-React;
-HTTP routes.
-9. IMPORTANT DATA-PRESERVATION RULE
-
-Normalization must never silently destroy meaningful source information.
-
-Examples:
-
-Do NOT:
-
-"ACT-001/A"
-→
-"ACT001A"
-
-Do NOT:
-
-"Pump Station 01"
-→
-"pump station 1"
-
-Do NOT invent WBS codes.
-
-Do NOT invent quantities.
-
-Do NOT invent units.
-
-Do NOT invent dates.
-
-Normalization should canonicalize representation, not reinterpret project information.
-
-10. ERROR MODEL
-
-Use the existing AppError architecture.
-
-Introduce a focused normalization error if useful, but do not create a new elaborate error hierarchy.
-
-A normalization failure should clearly identify:
-
-field;
-source value;
-reason;
-row where appropriate.
+Activity IDs must be unique within the imported schedule.
 
 Example:
 
-Row 17: Could not normalize Start Date '31/31/2026'
+ACT-001
+ACT-002
+ACT-001
 
-Do not expose parser stack traces.
+must fail.
 
-11. TESTS
+Comparison should use the same deterministic identity policy already used by the importer.
 
-Create dedicated normalization tests.
-
-At minimum test:
-
-Text
-"  Activity   A  " → "Activity A"
-" " → null
-IDs
-
-Verify whitespace normalization without destructive rewriting.
-
-Dates
-
-Test equivalent forms:
-
-2026-04-01
-2026/04/01
-Excel date equivalent
-
-where supported.
-
-Test ambiguous dates according to the documented policy.
-
-Test invalid/unparseable values.
-
-Numbers
-
-Test:
-
-1250
-"1250"
-"1,250"
-"1250.00"
-"1.25E3"
-Percentages
-
-Test supported representations explicitly.
-
-Units
-
-Test supported aliases.
-
-Missing values
-
-Test empty/whitespace/null behavior.
-
-Canonical equivalence
-
-Most importantly, provide cases where different source representations produce exactly the same normalized object.
+Because normalization preserves identifier case/punctuation, use a clearly documented comparison policy. The current importer treats IDs case-insensitively, so preserve that behavior unless there is a concrete reason to change it.
 
 For example:
 
-CSV representation
-        ↓
-Normalizer
-        ↓
-Canonical Activity A
+ACT-001
+act-001
 
-XLSX representation
-        ↓
-Normalizer
-        ↓
-Canonical Activity A
+should be treated as a duplicate within the same imported schedule.
 
-The outputs should compare equal.
+VERY IMPORTANT
 
-12. IMPORTER REGRESSION TESTS
+Do NOT enforce project-global uniqueness.
 
-Extend existing importer tests so that:
+The same external activity ID may legitimately appear in different schedule versions of the same project.
 
-CSV import receives normalized values;
-XLSX import receives normalized values;
-CSV and XLSX fixtures containing equivalent data produce equivalent activity representations;
-persistence stores the normalized values.
+The uniqueness scope is:
 
-Do not remove existing parser tests.
+one imported schedule
 
-13. FRONTEND
+not:
 
-Pass 5 does NOT need a major UI redesign.
+entire project
+3. DUPLICATE ACTIVITIES
 
-The existing activity table can continue to display the normalized values.
+Detect duplicate activity records within the same import.
 
-Optionally show a small import summary such as:
+At minimum duplicate identity is based on:
 
-Normalized successfully
+externalId
 
-but do not build a normalization review UI yet.
+Do not invent fuzzy duplicate detection.
 
-Pass 6 will eventually deal with validation and richer feedback.
+Do not compare activity names/descriptions to guess duplicates.
 
-14. DATABASE
+If the same external ID occurs twice, report both relevant row locations where practical.
 
-Do NOT modify the existing migration chain unless absolutely necessary.
+4. DATE VALIDATION
 
-The existing:
+The normalization layer already converts supported inputs into:
 
-schedules
-activities
+YYYY-MM-DD
 
-schema should be sufficient for normalization.
+and rejects impossible calendar dates.
 
-If a schema change appears necessary, do not silently add one just to accommodate the implementation.
+PASS 6 must now validate schedule semantics.
 
-Explain why it is needed in the final report.
+For every activity:
 
-15. PASS 6 BOUNDARY CHECK
+plannedStart <= plannedFinish
 
-Before committing, explicitly verify that you did NOT implement:
-
-finish-before-start validation;
-date-range validation;
-WBS hierarchy validation;
-semantic schedule validation;
-advanced duplicate resolution;
-schedule quality scoring;
-anomaly detection.
-
-A value becoming canonical does NOT mean it is semantically valid.
+must be true.
 
 Example:
 
-plannedStart = 2026-05-10
-plannedFinish = 2026-05-01
+start  = 2026-05-10
+finish = 2026-05-01
 
-Pass 5 may represent both as canonical dates.
+must fail.
 
-PASS 6 decides that the relationship is invalid.
+Do not silently swap the dates.
 
-VALIDATION
+Do not repair invalid dates.
+
+Report:
+
+row;
+field(s);
+values;
+clear reason.
+
+Example:
+
+Row 17: Start date 2026-05-10 is after finish date 2026-05-01.
+
+Do NOT validate schedule dependencies or predecessor relationships in this pass.
+
+5. PERCENTAGE VALIDATION
+
+Validate:
+
+baselineProgress
+
+as a percentage in:
+
+0 <= value <= 100
+
+The normalizer may already convert percentage strings to numbers.
+
+PASS 6 must enforce the domain range.
+
+Examples:
+
+0      → valid
+50     → valid
+100    → valid
+-1     → invalid
+101    → invalid
+
+Do not reinterpret:
+
+0.5
+
+as 50.
+
+Whatever semantic normalization produced must simply be validated against the final normalized value.
+
+6. QUANTITY VALIDATION
+
+If:
+
+plannedQuantity
+
+is not null, it must be:
+
+finite;
+numeric;
+non-negative.
+
+Examples:
+
+100      → valid
+0        → valid
+1250.5   → valid
+-10      → invalid
+Infinity → invalid
+NaN      → invalid
+
+Do not perform unit conversion.
+
+Do not decide whether the quantity is realistic for the activity.
+
+That is outside this pass.
+
+7. UNIT / QUANTITY CONSISTENCY
+
+Do NOT introduce broad unit semantics.
+
+At most, verify a simple structural rule:
+
+If plannedQuantity is present, the unit may be null unless the existing domain explicitly requires one.
+
+Do not reject:
+
+quantity = 100
+unit = null
+
+unless the current repository/domain model already establishes that as mandatory.
+
+Do not create unit-conversion rules.
+
+8. EMPTY SCHEDULE
+
+An import containing zero normalized activities must be rejected.
+
+The existing importer already detects empty parser results, but retain this as a final schedule-level invariant.
+
+Example error:
+
+Schedule import contains no activities.
+9. VALIDATION ORDER
+
+The intended processing order should be:
+
+parse
+  ↓
+normalize
+  ↓
+validate
+  ↓
+persist
+
+Specifically:
+
+parser reads source;
+normalizer produces NormalizedScheduleActivity[];
+validator evaluates the complete normalized schedule;
+if invalid → throw validation error;
+if valid → proceed to repository transaction.
+
+No database writes should occur before validation completes.
+
+10. REMOVE DUPLICATED VALIDATION
+
+The current ScheduleImportService performs an explicit normalized activity-ID duplicate check.
+
+Move that responsibility into the new schedule validator rather than keeping two competing duplicate checks.
+
+After this pass, the architecture should be:
+
+ScheduleImportService
+    ↓
+parser
+    ↓
+normalizer
+    ↓
+schedule validator
+    ↓
+repository
+
+The service should orchestrate these steps, not contain the validation rules itself.
+
+Do not duplicate rules in:
+
+route;
+repository;
+database;
+service.
+11. VALIDATION RESULT SHOULD BE PURE
+
+The validator must NOT:
+
+access SQLite;
+mutate database state;
+call repositories;
+depend on Express;
+read files;
+use external APIs.
+
+It validates in-memory normalized data.
+
+This makes validation deterministic and easy to test.
+
+12. PERSISTENCE SAFETY
+
+The most important requirement:
+
+An invalid schedule must leave zero new schedule/activity persistence artifacts.
+
+For an invalid import:
+
+parse
+→ normalize
+→ validate fails
+→ no repository transaction
+
+Therefore there should be:
+
+0 new schedules
+0 new activities
+
+The temporary upload file should still be cleaned up by the existing importer finally/cleanup path.
+
+13. IMPORTER ERROR RESPONSE
+
+When validation fails through the HTTP API, return a structured response that the frontend can understand.
+
+For example:
+
+{
+  "error": "SCHEDULE_VALIDATION_ERROR",
+  "message": "Schedule contains validation errors",
+  "issues": [
+    {
+      "row": 4,
+      "field": "plannedFinish",
+      "code": "START_AFTER_FINISH",
+      "message": "Start date 2026-05-10 is after finish date 2026-05-01"
+    }
+  ]
+}
+
+Adapt this to the existing AppError response format.
+
+Do not hardcode the exact JSON shape if the existing architecture already has a standard error envelope; extend that instead.
+
+14. FRONTEND ERROR DISPLAY
+
+Do not redesign the importer UI.
+
+Modify the existing import error display so validation failures show useful information.
+
+For example:
+
+Schedule contains 4 validation errors
+
+Row 4 — Finish Date
+Start date is after finish date.
+
+Row 9 — Activity ID
+Duplicate activity ID: ACT-004.
+
+Row 17 — Quantity
+Quantity must be non-negative.
+
+The exact visual design is up to the existing UI conventions.
+
+The goal is human-readable import feedback.
+
+Do not create a full validation-review workflow yet.
+
+15. TESTS
+
+Create a dedicated validator test suite.
+
+At minimum test:
+
+Required fields
+missing external ID;
+missing name;
+missing start;
+missing finish.
+Dates
+equal dates → valid;
+start before finish → valid;
+start after finish → invalid.
+Percentages
+0 → valid;
+50 → valid;
+100 → valid;
+negative → invalid;
+
+100 → invalid.
+
+Quantities
+positive → valid;
+zero → valid;
+negative → invalid;
+NaN/Infinity → invalid.
+Duplicate IDs
+unique IDs → valid;
+same ID twice → invalid;
+same ID with different case → invalid according to current identity policy;
+same ID in separate hypothetical schedule inputs should not be treated as a global project violation.
+Empty schedule
+zero rows → invalid.
+Aggregation
+
+Create one fixture containing multiple independent errors and verify all issues are returned.
+
+16. IMPORT SERVICE TESTS
+
+Extend the importer service tests.
+
+At minimum verify:
+
+Valid import
+parse
+→ normalize
+→ validate
+→ persist
+
+still succeeds.
+
+Invalid import
+
+For a schedule containing multiple validation errors:
+
+importSchedule()
+→ throws ScheduleValidationError
+
+and:
+
+schedule count remains unchanged
+activity count remains unchanged
+Duplicate IDs
+
+Ensure the moved validation rule still behaves exactly as intended.
+
+Existing valid CSV/XLSX
+
+All existing valid imports must continue to work.
+
+17. API TESTS
+
+Extend schedule-router tests for:
+
+POST /api/projects/:projectId/schedules/import
+
+Test:
+
+valid import;
+invalid date ordering;
+duplicate IDs;
+invalid quantity;
+invalid percentage;
+multiple validation errors;
+no database artifacts after rejected import;
+useful error response.
+18. CSV/XLSX CONSISTENCY
+
+Pass 5 already proves equivalent CSV/XLSX representations normalize to equivalent objects.
+
+Pass 6 should validate the normalized objects identically.
+
+For equivalent valid source data:
+
+CSV
+ ↓
+normalize
+ ↓
+validate
+ ↓
+valid
+
+XLSX
+ ↓
+normalize
+ ↓
+validate
+ ↓
+valid
+
+For equivalent invalid data, both should report equivalent validation outcomes.
+
+19. DATABASE
+
+Do NOT modify the migration chain for this pass.
+
+Validation should happen before persistence.
+
+No new database columns are required.
+
+Do not move validation into SQLite constraints unless there is a concrete existing constraint that naturally supports it.
+
+This pass is primarily an application-level schedule validator.
+
+20. PASS 7 BOUNDARY
+
+Do NOT implement manual progress reporting.
+
+Do not add:
+
+progress entry UI;
+actual progress records;
+activity progress updates;
+planned-vs-actual calculations;
+variance;
+delay.
+
+Those belong to later passes.
+
+21. SELF-REVIEW
+
+Before committing, inspect the architecture and ask:
+
+Ordering
+
+Is it truly:
+
+parse
+→ normalize
+→ validate
+→ persist
+Purity
+
+Does validation avoid SQLite/files/HTTP?
+
+Completeness
+
+Are all required validation rules covered?
+
+Error quality
+
+Can a user understand what is wrong and where?
+
+Atomicity
+
+Can an invalid import leave any schedule/activity records behind?
+
+Scope
+
+Did any Pass 7+ functionality leak in?
+
+Regression
+
+Do Pass 0–5 tests still pass?
+
+Local-only architecture
+
+Did anything external or deployment-related get introduced?
+
+The answer must be no.
+
+VALIDATION COMMANDS
 
 Run:
 
@@ -653,60 +705,28 @@ npm run setup
 npm run setup
 npm run demo:reset
 
-Then run:
+Then:
 
 npm run dev
 
 Manually verify:
 
-Create/open a project.
-Import a CSV containing mixed formatting.
-Verify normalized values in the activity table.
-Import an equivalent XLSX file.
-Verify equivalent normalized values.
-Verify missing optional values become cleanly null/empty in the UI.
-Verify an invalid/unparseable normalization input produces a clear error.
-Verify /api/health remains healthy.
-SELF-REVIEW
-
-Before committing, inspect the final diff.
-
-Ask:
-
-Architecture
-
-Does the pipeline now remain:
-
-parser
-→ canonical source row
-→ normalizer
-→ persistence
-Determinism
-
-Would the same source data always produce the same normalized object?
-
-Data preservation
-
-Did normalization avoid destructive rewriting?
-
-Cross-format consistency
-
-Do CSV and XLSX converge to the same internal structure?
-
-Scope
-
-Did anything from PASS 6 or later leak in?
-
-Regression
-
-Does the complete Pass 3 project lifecycle and Pass 4 importer still work?
-
-Local-only constraint
-
-Did you introduce any external deployment/storage/service dependency?
-
-The answer must be no.
-
+Open FieldLine.
+Open a project.
+Import a valid CSV.
+Confirm it succeeds.
+Import a valid XLSX.
+Confirm it succeeds.
+Import a schedule with:
+duplicate activity ID;
+start > finish;
+negative quantity;
+baseline progress > 100;
+multiple errors in different rows.
+Confirm the import is rejected.
+Confirm the UI shows all relevant issues.
+Confirm no schedule or activity records were created by the invalid import.
+Confirm /api/health remains healthy.
 GIT
 
 Inspect:
@@ -714,11 +734,11 @@ Inspect:
 git status
 git diff
 
-Confirm only PASS 5 work is included.
+Confirm the changes are limited to PASS 6.
 
 Create:
 
-feat: implement FieldLine schedule normalization
+feat: implement FieldLine schedule validation
 
 Push to:
 
@@ -726,31 +746,32 @@ itshim998/FieldLine
 main
 COMPLETION CRITERIA
 
-PASS 5 is complete only when:
+PASS 6 is complete only when:
 
- A dedicated normalization layer exists.
- Text is normalized deterministically.
- whitespace is normalized.
- missing nullable values become null consistently.
- dates converge to one canonical representation.
- Excel/CSV equivalent dates converge.
- numbers converge to numeric values.
- percentages are normalized where explicitly supported.
- units are normalized through an explicit dictionary.
- no unit conversion is performed.
- IDs are normalized without destructive rewriting.
- CSV and XLSX produce equivalent normalized activities.
- normalized values are what reach SQLite.
- normalization is deterministic and testable.
- normalization failures are clear.
- existing importer functionality remains intact.
- Pass 6 validation logic was NOT implemented.
+ Dedicated schedule validation layer exists.
+ Validation occurs after normalization.
+ Validation occurs before persistence.
+ Required fields are enforced.
+ Activity IDs are unique within each imported schedule.
+ Duplicate activities are rejected.
+ Dates are semantically ordered.
+ Percentages are within 0–100.
+ Quantities are finite and non-negative.
+ Empty schedules are rejected.
+ Multiple validation errors can be reported together.
+ Invalid imports create zero schedule/activity database artifacts.
+ Temporary files are still cleaned up.
+ HTTP validation errors are structured.
+ Frontend displays useful validation errors.
+ CSV/XLSX validation behavior is equivalent.
+ Existing valid imports still work.
+ Pass 7+ functionality was NOT implemented.
  npm test passes.
  npm run build passes.
- npm run setup passes.
+ setup passes.
  repeated setup passes.
- npm run demo:reset passes.
- /api/health remains healthy.
+ demo reset passes.
+ health endpoint remains healthy.
  final diff reviewed.
  commit created.
  commit pushed.
@@ -758,33 +779,31 @@ FINAL REPORT
 
 Report:
 
-Normalization architecture.
-Canonical internal representation.
-Date normalization rules.
-Number/percentage normalization rules.
-Unit normalization dictionary.
-Missing-value behavior.
-Files changed.
+Validation architecture.
+Validation rules implemented.
+Validation error structure.
+Duplicate-ID policy.
+Importer integration.
+Frontend validation-error behavior.
 Tests added.
-CSV/XLSX equivalence tests.
-Validation command results.
-Manual verification result.
+Invalid-import rollback/no-artifact verification.
+CSV/XLSX consistency verification.
+Results of all validation commands.
+Manual verification results.
 Any schema changes and justification.
 Self-review findings.
 Commit hash/message/branch/push result.
 
 Explicitly confirm:
 
-PASS 6 and later functionality were NOT implemented.
+PASS 7 and later functionality were NOT implemented.
 
 FINAL INSTRUCTION
 
-Implement PASS 5 — Schedule Normalization only.
+Implement PASS 6 — Schedule Validation only.
 
 The objective is:
 
-Different schedule-source representations should converge into one deterministic FieldLine activity representation before persistence.
+No semantically invalid schedule should enter the FieldLine project model, and the user should receive clear actionable errors without leaving partial database state.
 
-Do not move into schedule validation, anomaly detection, AI, progress, or matching.
-
-Stop after PASS 5.
+Stop after PASS 6.

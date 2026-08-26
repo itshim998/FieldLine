@@ -201,4 +201,62 @@ describe('Cross-Format Equivalence (CSV vs XLSX Normalization)', () => {
       expect(csvActivities[i].baselineProgress).toBe(xlsxActivities[i].baselineProgress);
     }
   });
+
+  it('should produce equivalent validation errors for equivalent invalid CSV and XLSX datasets', async () => {
+    const csvBadPath = path.join(fixturesDir, 'temp_bad_equiv.csv');
+    const xlsxBadPath = path.join(fixturesDir, 'temp_bad_equiv.xlsx');
+
+    const badCsvContent = [
+      'Activity ID,Activity Name,Start Date,Finish Date,Quantity,Baseline Progress',
+      'ACT-001,Paving,2026-06-10,2026-06-01,-20,120',
+      'ACT-001,Excavation,2026-07-01,2026-07-15,100,50'
+    ].join('\n');
+    fs.writeFileSync(csvBadPath, badCsvContent, 'utf-8');
+
+    const badXlsxData = [
+      {
+        'Activity ID': 'ACT-001',
+        'Activity Name': 'Paving',
+        'Start Date': '2026-06-10',
+        'Finish Date': '2026-06-01',
+        'Quantity': -20,
+        'Baseline Progress': 120
+      },
+      {
+        'Activity ID': 'ACT-001',
+        'Activity Name': 'Excavation',
+        'Start Date': '2026-07-01',
+        'Finish Date': '2026-07-15',
+        'Quantity': 100,
+        'Baseline Progress': 50
+      }
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(badXlsxData);
+    XLSX.utils.book_append_sheet(wb, ws, 'Schedule');
+    XLSX.writeFile(wb, xlsxBadPath);
+
+    try {
+      const csvParser = new CsvScheduleParser();
+      const xlsxParser = new XlsxScheduleParser();
+
+      const csvRows = await csvParser.parse(csvBadPath, 'bad.csv');
+      const xlsxRows = await xlsxParser.parse(xlsxBadPath, 'bad.xlsx');
+
+      const csvNorm = scheduleNormalizer.normalizeScheduleRows(csvRows);
+      const xlsxNorm = scheduleNormalizer.normalizeScheduleRows(xlsxRows);
+
+      const { scheduleValidator } = await import('../src/services/validation/index.js');
+      const csvValidation = scheduleValidator.validateSchedule(csvNorm);
+      const xlsxValidation = scheduleValidator.validateSchedule(xlsxNorm);
+
+      expect(csvValidation.isValid).toBe(false);
+      expect(xlsxValidation.isValid).toBe(false);
+      expect(csvValidation.issues).toEqual(xlsxValidation.issues);
+    } finally {
+      if (fs.existsSync(csvBadPath)) fs.unlinkSync(csvBadPath);
+      if (fs.existsSync(xlsxBadPath)) fs.unlinkSync(xlsxBadPath);
+    }
+  });
 });
+

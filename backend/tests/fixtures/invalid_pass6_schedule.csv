@@ -1,0 +1,4 @@
+Activity ID,Activity Name,WBS,Location,Start Date,Finish Date,Quantity,Unit,Baseline Progress
+ACT-001,Site Preparation & Grading,1.1,Sector A,2026-04-01,2026-04-15,500,m2,0%
+ACT-002,Foundation Excavation,1.2,Sector A,2026-06-15,2026-06-01,250,m3,25%
+act-001,Piling Installation,1.3,Sector A,2026-05-01,2026-05-20,-50,m,150%

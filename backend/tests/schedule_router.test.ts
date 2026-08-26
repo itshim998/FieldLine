@@ -89,6 +89,60 @@ describe('Schedule Router Endpoints', () => {
       expect(res.body.error).toMatch(/Missing required schedule column/);
     });
 
+    it('should reject file with duplicate activity IDs with 422 Unprocessable Entity and structured issues', async () => {
+      const dupCsvPath = path.join(fixturesDir, 'duplicate_activities.csv');
+
+      const res = await request(app)
+        .post(`/api/projects/${projectId}/schedules/import`)
+        .attach('file', dupCsvPath);
+
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe('SCHEDULE_VALIDATION_ERROR');
+      expect(res.body.details).toBeDefined();
+      expect(res.body.details.issues).toBeInstanceOf(Array);
+      expect(res.body.details.issues.length).toBeGreaterThanOrEqual(1);
+      expect(res.body.details.issues[0].code).toBe('DUPLICATE_ACTIVITY_ID');
+
+      // Verify no schedule was created
+      const listRes = await request(app).get(`/api/projects/${projectId}/schedules`);
+      expect(listRes.body.schedules).toHaveLength(0);
+    });
+
+    it('should reject schedule with multiple validation errors returning all issues with 422', async () => {
+      const tempCsv = path.join(fixturesDir, 'temp_router_multi_err.csv');
+      const badContent = [
+        'Activity ID,Activity Name,Start Date,Finish Date,Quantity,Progress',
+        'ACT-10,Site Mobilization,2026-05-01,2026-05-15,100,0',
+        'ACT-10,Grading,2026-06-15,2026-06-01,-25,120'
+      ].join('\n');
+      const fs = await import('node:fs');
+      fs.writeFileSync(tempCsv, badContent, 'utf-8');
+
+      try {
+        const res = await request(app)
+          .post(`/api/projects/${projectId}/schedules/import`)
+          .attach('file', tempCsv);
+
+        expect(res.status).toBe(422);
+        expect(res.body.code).toBe('SCHEDULE_VALIDATION_ERROR');
+        expect(res.body.details.issues.length).toBeGreaterThanOrEqual(4);
+
+        const codes = res.body.details.issues.map((i: any) => i.code);
+        expect(codes).toContain('DUPLICATE_ACTIVITY_ID');
+        expect(codes).toContain('START_AFTER_FINISH');
+        expect(codes).toContain('INVALID_QUANTITY');
+        expect(codes).toContain('INVALID_PERCENTAGE');
+
+        // Confirm zero DB artifacts
+        const listRes = await request(app).get(`/api/projects/${projectId}/schedules`);
+        expect(listRes.body.schedules).toHaveLength(0);
+      } finally {
+        if (fs.existsSync(tempCsv)) {
+          fs.unlinkSync(tempCsv);
+        }
+      }
+    });
+
     it('should return 404 for non-existent project ID', async () => {
       const csvPath = path.join(fixturesDir, 'valid_schedule.csv');
 

@@ -8,7 +8,8 @@ import {
   ValidationError, 
   ConflictError, 
   AIProviderError, 
-  DatabaseError 
+  DatabaseError,
+  ScheduleValidationError
 } from '../src/errors/AppError.js';
 import { errorHandler } from '../src/middleware/errorHandler.js';
 import { validateBody, validateQuery } from '../src/middleware/validate.js';
@@ -33,6 +34,18 @@ describe('Error Handling and Validation Middleware', () => {
 
     app.get('/test/database-error', () => {
       throw new DatabaseError('Failed to execute query');
+    });
+
+    app.get('/test/schedule-validation-error', () => {
+      throw new ScheduleValidationError([
+        {
+          code: 'START_AFTER_FINISH',
+          message: 'Row 4: Start date 2026-05-10 is after finish date 2026-05-01',
+          rowNumber: 4,
+          field: 'plannedFinish',
+          value: '2026-05-01'
+        }
+      ]);
     });
 
     // Route triggering Zod validation through middleware
@@ -84,6 +97,17 @@ describe('Error Handling and Validation Middleware', () => {
     expect(res.status).toBe(500);
     expect(res.body.code).toBe('DATABASE_ERROR');
     expect(res.body.statusCode).toBe(500);
+  });
+
+  it('should format ScheduleValidationError with 422 status and structured issues', async () => {
+    const res = await request(app).get('/test/schedule-validation-error');
+    expect(res.status).toBe(422);
+    expect(res.body.code).toBe('SCHEDULE_VALIDATION_ERROR');
+    expect(res.body.statusCode).toBe(422);
+    expect(res.body.details).toBeDefined();
+    expect(res.body.details.issues).toHaveLength(1);
+    expect(res.body.details.issues[0].code).toBe('START_AFTER_FINISH');
+    expect(res.body.details.issues[0].rowNumber).toBe(4);
   });
 
   it('should catch Zod validation errors in middleware and return 400 with details', async () => {

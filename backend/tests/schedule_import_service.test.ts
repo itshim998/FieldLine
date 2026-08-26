@@ -7,7 +7,7 @@ import { SqliteProjectRepository } from '../src/repositories/project.repository.
 import { SqliteScheduleRepository } from '../src/repositories/schedule.repository.js';
 import { SqliteActivityRepository } from '../src/repositories/activity.repository.js';
 import { DefaultScheduleImportService } from '../src/services/schedule-import.service.js';
-import { NotFoundError, ConflictError } from '../src/errors/AppError.js';
+import { NotFoundError, ScheduleValidationError } from '../src/errors/AppError.js';
 
 const fixturesDir = path.resolve(process.cwd(), 'backend', 'tests', 'fixtures');
 
@@ -112,9 +112,69 @@ describe('ScheduleImportService', () => {
         path: tempPath,
         originalname: 'duplicate_activities.csv'
       })
-    ).rejects.toThrow(ConflictError);
+    ).rejects.toThrow(ScheduleValidationError);
 
     // Verify atomic rollback: no schedules or activities created
+    expect(scheduleRepo.listByProjectId(testProjectId)).toHaveLength(0);
+    expect(activityRepo.countByProjectId(testProjectId)).toBe(0);
+    expect(fs.existsSync(tempPath)).toBe(false);
+  });
+
+  it('should reject file with invalid date ordering (start > finish) and leave zero database artifacts', async () => {
+    const tempPath = path.join(fixturesDir, 'temp_test_bad_dates.csv');
+    const badContent = [
+      'Activity ID,Activity Name,Start Date,Finish Date,Quantity,Unit',
+      'ACT-ERR-01,Earthwork Prep,2026-06-15,2026-06-01,100,m3'
+    ].join('\n');
+    fs.writeFileSync(tempPath, badContent, 'utf-8');
+
+    try {
+      await service.importSchedule(testProjectId, {
+        path: tempPath,
+        originalname: 'bad_dates.csv',
+        mimetype: 'text/csv'
+      });
+      expect.unreachable('Should have thrown ScheduleValidationError');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(ScheduleValidationError);
+      expect(err.statusCode).toBe(422);
+      expect(err.issues).toHaveLength(1);
+      expect(err.issues[0].code).toBe('START_AFTER_FINISH');
+    }
+
+    // Verify persistence safety: no database artifacts left behind
+    expect(scheduleRepo.listByProjectId(testProjectId)).toHaveLength(0);
+    expect(activityRepo.countByProjectId(testProjectId)).toBe(0);
+    expect(fs.existsSync(tempPath)).toBe(false);
+  });
+
+  it('should aggregate multiple validation errors across rows and reject cleanly', async () => {
+    const tempPath = path.join(fixturesDir, 'temp_test_multi_err.csv');
+    const multiErrContent = [
+      'Activity ID,Activity Name,Start Date,Finish Date,Quantity,Progress',
+      'ACT-001,Site Clearing,2026-04-01,2026-04-10,100,0',
+      'ACT-001,Grading,2026-05-15,2026-05-01,-50,150'
+    ].join('\n');
+    fs.writeFileSync(tempPath, multiErrContent, 'utf-8');
+
+    try {
+      await service.importSchedule(testProjectId, {
+        path: tempPath,
+        originalname: 'multi_err.csv',
+        mimetype: 'text/csv'
+      });
+      expect.unreachable('Should have thrown ScheduleValidationError');
+    } catch (err: any) {
+      expect(err).toBeInstanceOf(ScheduleValidationError);
+      expect(err.statusCode).toBe(422);
+      expect(err.issues.length).toBeGreaterThanOrEqual(4);
+      const codes = err.issues.map((i: any) => i.code);
+      expect(codes).toContain('DUPLICATE_ACTIVITY_ID'); // row 3 duplicate ACT-001
+      expect(codes).toContain('START_AFTER_FINISH'); // row 3 start > finish
+      expect(codes).toContain('INVALID_QUANTITY'); // row 3 quantity -50
+      expect(codes).toContain('INVALID_PERCENTAGE'); // row 3 progress 150
+    }
+
     expect(scheduleRepo.listByProjectId(testProjectId)).toHaveLength(0);
     expect(activityRepo.countByProjectId(testProjectId)).toBe(0);
     expect(fs.existsSync(tempPath)).toBe(false);

@@ -81,3 +81,30 @@ export class NormalizationError extends AppError {
   }
 }
 
+export interface ScheduleValidationIssuePayload {
+  code: string;
+  message: string;
+  rowNumber?: number;
+  field?: string;
+  value?: unknown;
+}
+
+export class ScheduleValidationError extends AppError {
+  public readonly issues: ScheduleValidationIssuePayload[];
+
+  constructor(issues: ScheduleValidationIssuePayload[], message?: string) {
+    const issueCount = issues.length;
+    const defaultMsg =
+      issueCount === 1
+        ? `Schedule validation error: ${issues[0].message}`
+        : `Schedule contains ${issueCount} validation error${issueCount > 1 ? 's' : ''}`;
+
+    super(message || defaultMsg, 422, 'SCHEDULE_VALIDATION_ERROR', {
+      issues
+    });
+
+    this.issues = issues;
+  }
+}
+
+

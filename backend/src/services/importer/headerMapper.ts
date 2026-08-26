@@ -321,13 +321,7 @@ export function transformRowToCanonical(
   if (rowData.plannedQuantity !== undefined && rowData.plannedQuantity !== null) {
     const qtyStr = String(rowData.plannedQuantity).trim();
     if (qtyStr !== '') {
-      const parsedNum = normalizeNumber(qtyStr, 'planned quantity', rowNumber);
-      if (parsedNum !== null && parsedNum < 0) {
-        throw new ValidationError(
-          `Row ${rowNumber}: Invalid planned quantity '${qtyStr}'. Must be a non-negative number.`
-        );
-      }
-      plannedQuantity = parsedNum;
+      plannedQuantity = normalizeNumber(qtyStr, 'planned quantity', rowNumber);
     }
   }
 

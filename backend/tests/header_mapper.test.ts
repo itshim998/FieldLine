@@ -119,9 +119,9 @@ describe('HeaderMapper and Aliases', () => {
     expect(() => transformRowToCanonical(badRow, headerToField, 5)).toThrow(/Row 5: Missing required field/);
   });
 
-  it('should throw ValidationError on negative or invalid numeric quantities', () => {
+  it('should transform numeric quantities or throw on unparseable format', () => {
     const headerToField = validateHeaders(['Activity ID', 'Activity Name', 'Start', 'Finish', 'Quantity']);
-    const badQtyRow = {
+    const negQtyRow = {
       'Activity ID': 'A1',
       'Activity Name': 'Task 1',
       'Start': '2026-01-01',
@@ -129,7 +129,16 @@ describe('HeaderMapper and Aliases', () => {
       'Quantity': '-50'
     };
 
-    expect(() => transformRowToCanonical(badQtyRow, headerToField, 3)).toThrow(ValidationError);
-    expect(() => transformRowToCanonical(badQtyRow, headerToField, 3)).toThrow(/Invalid planned quantity/);
+    const res = transformRowToCanonical(negQtyRow, headerToField, 3);
+    expect(res?.plannedQuantity).toBe(-50);
+
+    const malformedRow = {
+      'Activity ID': 'A1',
+      'Activity Name': 'Task 1',
+      'Start': '2026-01-01',
+      'Finish': '2026-01-10',
+      'Quantity': 'invalid_num'
+    };
+    expect(() => transformRowToCanonical(malformedRow, headerToField, 3)).toThrow();
   });
 });

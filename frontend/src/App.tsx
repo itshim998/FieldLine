@@ -80,6 +80,14 @@ export interface ImportSummary {
   originalFilename: string;
 }
 
+export interface ScheduleValidationIssue {
+  code: string;
+  message: string;
+  rowNumber?: number;
+  field?: string;
+  value?: unknown;
+}
+
 interface HealthData {
   status: 'ok' | 'degraded' | 'error';
   service: string;
@@ -119,6 +127,7 @@ export function App(): React.JSX.Element {
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [validationIssues, setValidationIssues] = useState<ScheduleValidationIssue[]>([]);
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
 
   // Modals & UI State
@@ -472,6 +481,7 @@ export function App(): React.JSX.Element {
 
   const validateAndSetFile = (file: File) => {
     setUploadError(null);
+    setValidationIssues([]);
     setImportSummary(null);
 
     const name = file.name.toLowerCase();
@@ -496,6 +506,7 @@ export function App(): React.JSX.Element {
 
     setIsUploading(true);
     setUploadError(null);
+    setValidationIssues([]);
     setImportSummary(null);
 
     try {
@@ -510,6 +521,9 @@ export function App(): React.JSX.Element {
       const data = await res.json();
 
       if (!res.ok) {
+        if (data.details?.issues && Array.isArray(data.details.issues)) {
+          setValidationIssues(data.details.issues);
+        }
         throw new Error(data.error || 'Schedule import failed');
       }
 
@@ -865,6 +879,7 @@ export function App(): React.JSX.Element {
                         onClick={() => {
                           setSelectedFile(null);
                           setUploadError(null);
+                          setValidationIssues([]);
                         }}
                         disabled={isUploading}
                       >
@@ -893,8 +908,43 @@ export function App(): React.JSX.Element {
                   </div>
                 )}
 
-                {/* Error Callout */}
-                {uploadError && (
+                {/* Validation Errors Box (PASS 6) */}
+                {validationIssues.length > 0 ? (
+                  <div className="validation-error-card">
+                    <div className="validation-error-header">
+                      <div className="validation-error-title-group">
+                        <AlertCircle size={18} color="var(--accent-red)" />
+                        <span>Schedule contains {validationIssues.length} validation error{validationIssues.length > 1 ? 's' : ''}</span>
+                      </div>
+                      <button
+                        className="banner-close"
+                        onClick={() => {
+                          setValidationIssues([]);
+                          setUploadError(null);
+                        }}
+                        aria-label="Close error"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                    <div className="validation-issues-list">
+                      {validationIssues.map((issue, idx) => (
+                        <div key={idx} className="validation-issue-item">
+                          <div className="validation-issue-meta">
+                            {issue.rowNumber !== undefined && (
+                              <span className="validation-row-badge">Row {issue.rowNumber}</span>
+                            )}
+                            {issue.field && (
+                              <span className="validation-field-badge">{issue.field}</span>
+                            )}
+                            <span className="validation-code-badge">{issue.code}</span>
+                          </div>
+                          <div className="validation-issue-msg">{issue.message}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : uploadError && (
                   <div className="notification-banner error" style={{ marginTop: '1rem', marginBottom: '0' }}>
                     <div className="banner-content">
                       <AlertCircle size={18} />
