@@ -131,9 +131,9 @@ Example response:
 - [x] **PASS 7 — Manual Progress Reporting** *(Completed)*
 - [x] **PASS 8 — AI Extraction Layer** *(Completed)*
 - [x] **PASS 9 — Activity Matching Engine** *(Completed)*
-- [ ] **PASS 10 — Progress Normalization**
-- [ ] **PASS 11 — Planned vs Actual Engine**
-- [ ] **PASS 12 — Delay and Risk Engine**
+- [x] **PASS 10 — Progress Normalization** *(Completed)*
+- [x] **PASS 11 — Planned vs Actual Engine** *(Completed)*
+- [x] **PASS 12 — Delay and Risk Engine** *(Completed)*
 - [ ] **PASS 13 — Evidence System**
 - [ ] **PASS 14 — Document Ingestion**
 - [ ] **PASS 15 — In-process Processing Jobs**

@@ -81,6 +81,30 @@ export type {
   ProgressSnapshotInput
 } from './snapshot/progress-snapshot.types.js';
 
+export {
+  DefaultRiskClassificationService,
+  riskClassificationService
+} from './risk/risk-classification.service.js';
+export type { RiskClassificationService } from './risk/risk-classification.types.js';
+
+export {
+  classifyActivityRisk,
+  calculateProjectRiskSummary,
+  calculateProjectRiskStatus,
+  STRONG_NEGATIVE_VARIANCE_THRESHOLD,
+  NEAR_FINISH_WINDOW_DAYS
+} from './risk/risk-classification.calculator.js';
+export type {
+  ActivityRiskClassification,
+  RiskReasonCode,
+  RiskReason,
+  DependencyRiskSignal,
+  ActivityRiskStatusItem,
+  ProjectRiskSummary,
+  ProjectRiskStatus,
+  RiskStatusInput
+} from './risk/risk-classification.types.js';
+
 
 
 

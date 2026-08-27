@@ -368,3 +368,72 @@ export interface ProjectProgressSnapshot {
   summary: ProgressSnapshotSummary;
 }
 
+// ==========================================
+// 10. Delay and Risk Classification (Pass 12)
+// ==========================================
+export type ActivityRiskClassification =
+  | 'ON_TRACK'
+  | 'AHEAD'
+  | 'AT_RISK'
+  | 'DELAYED'
+  | 'COMPLETED';
+
+export type RiskReasonCode =
+  | 'completed'
+  | 'overdue'
+  | 'strong_negative_variance'
+  | 'near_finish_and_behind'
+  | 'delayed_status'
+  | 'positive_variance'
+  | 'within_plan';
+
+export interface RiskReason {
+  code: RiskReasonCode;
+  message: string;
+}
+
+/**
+ * Optional future seam for activity dependencies without persisting or mocking dependency models.
+ */
+export interface DependencyRiskSignal {
+  predecessorActivityId: string;
+  predecessorClassification?: ActivityRiskClassification;
+  lagDays?: number;
+}
+
+export interface ActivityRiskStatusItem {
+  activityId: string;
+  externalId: string;
+  name: string;
+  wbsCode?: string | null;
+  location?: string | null;
+  plannedStart?: string;
+  plannedFinish?: string;
+  plannedProgress?: number;
+  actualProgress?: number;
+  progressVariance?: number;
+  varianceState?: VarianceState;
+  status?: ActivityExecutionStatus;
+  overdue?: boolean;
+  classification: ActivityRiskClassification;
+  reasons: RiskReason[];
+}
+
+export interface ProjectRiskSummary {
+  totalActivities: number;
+  completed: number;
+  delayed: number;
+  atRisk: number;
+  ahead: number;
+  onTrack: number;
+  overdueCount: number;
+}
+
+export interface ProjectRiskStatus {
+  projectId: string;
+  asOfDate: string;
+  generatedAt?: string;
+  activities: ActivityRiskStatusItem[];
+  summary: ProjectRiskSummary;
+}
+

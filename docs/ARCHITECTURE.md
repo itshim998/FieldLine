@@ -237,8 +237,47 @@ Read-Only Project Progress Snapshot ({ projectId, asOfDate, generatedAt, activit
 > 7. **Strict Project Isolation**: Every activity and progress observation included in the snapshot is strictly project-scoped.
 > 8. **Zero AI / No Pass 12+ Leakage**: Pass 11 relies strictly on deterministic mathematics and does not implement predictive forecasting, risk scoring, or delay root-cause analysis.
 
-
 ---
+
+### 7. Delay and Risk Engine Pipeline (Pass 12)
+
+```text
+Pass 11 ProjectProgressSnapshot (plannedProgress, actualProgress, progressVariance, varianceState, status, overdue)
+        ↓
+GET /api/projects/:projectId/risk-status?asOfDate=YYYY-MM-DD
+        ↓
+RiskClassificationService (Fetch validated Pass 11 snapshot)
+        ↓
+Pure Risk & Delay Calculator (risk-classification.calculator.ts)
+  ├── 1. Rule Precedence Evaluation (COMPLETED > DELAYED > AT_RISK > AHEAD > ON_TRACK)
+  ├── 2. COMPLETED Classification (status === 'completed' OR actualProgress >= 100)
+  ├── 3. DELAYED Classification (snapshotDate > plannedFinish AND actualProgress < 100 / overdue = true)
+  ├── 4. AT_RISK Classification
+  │      - Signal A: Strong negative variance (progressVariance <= -10.0)
+  │      - Signal B+C: Approaching finish (0 <= daysUntilPlannedFinish <= 3) AND behind plan (varianceState === 'behind')
+  │      - Signal D: Delayed execution status (status === 'delayed' before finish date)
+  ├── 5. AHEAD Classification (progressVariance > 0.01 / varianceState === 'ahead')
+  ├── 6. ON_TRACK Classification (Default exhaustive within-plan state)
+  ├── 7. Machine-Readable Rationale Generation (completed, overdue, strong_negative_variance, near_finish_and_behind, delayed_status, positive_variance, within_plan)
+  └── 8. Project-Level Risk Summary Aggregation (totalActivities, completed, delayed, atRisk, ahead, onTrack, overdueCount)
+        ↓
+Read-Only Project Risk Status ({ projectId, asOfDate, generatedAt, activities, summary })
+```
+
+> [!IMPORTANT]
+> **Pass 12 Core Architectural Invariants**:
+> 1. **Read-Only / Pure Analytical Layer**: Pass 12 consumes Pass 11 snapshots directly. It performs no database mutations, creates no migrations/tables (`risk_records`, `delay_records`, `risk_snapshots`, `alerts`, `notifications` are strictly NOT persisted).
+> 2. **Explicit Deterministic Precedence Hierarchy**:
+>    - `COMPLETED` (#1): `status === 'completed' || actualProgress >= 100`. Completed status strictly overrides overdue, positive variance, or behind states.
+>    - `DELAYED` (#2): `snapshotDate > plannedFinish && actualProgress < 100` (`overdue === true`). Overdue strictly overrides `AT_RISK` and `AHEAD`.
+>    - `AT_RISK` (#3): `strongNegativeVariance (<= -10.0)` OR `nearFinish (0 <= days <= 3) && behindPlan` OR `status === 'delayed'`.
+>    - `AHEAD` (#4): `progressVariance > 0.01`.
+>    - `ON_TRACK` (#5): Default when no higher-precedence state applies. Never returns undefined.
+> 3. **Semantic Distinction between Behind and Delayed**: An activity with negative variance is NOT automatically delayed. Delay is strictly defined by the objective overdue condition (past planned finish while incomplete). An activity behind plan within its schedule window is evaluated as `AT_RISK` or `ON_TRACK`.
+> 4. **Milestone Proximity & Finish Windows**: Zero-duration milestones (`plannedStart === plannedFinish`) inherit Pass 11 baseline progress (0% before milestone, 100% on/after). Near-finish proximity (3 calendar days) requires `behind` variance to trigger risk; proximity alone never causes risk.
+> 5. **Explainable Machine-Readable Reasons**: Every activity classification includes deterministic machine-readable reasons (`RiskReason[]`) explaining the exact mathematical and operational rationale.
+> 6. **Dependency Boundary**: The repository currently has no dependency model. Pass 12 defines an optional, unused interface seam (`DependencyRiskSignal`) without persisting tables or faking mock dependency graphs.
+> 7. **Zero AI / No Pass 13+ Leakage**: Pass 12 contains no LLM calls, no risk severity tiers (`LOW`/`HIGH`), no root-cause analysis, no forecasting, and no mitigation suggestions.
 
 
 ## Persistence Architecture
@@ -426,6 +465,19 @@ frontend/
     - Aggregated project summary counts across all activities.
     - Read-only REST endpoint `GET /api/projects/:projectId/progress-snapshot` with Zod validation (`progressSnapshotParamsSchema`, `progressSnapshotQuerySchema`, `projectProgressSnapshotSchema`).
     - Strict project isolation and zero persistence/mutations.
+13. **Pass 12 — Delay and Risk Engine**:
+    - Pure, deterministic Delay and Risk analytical classification engine (`risk-classification.calculator.ts`) transforming Pass 11 progress snapshots into standard schedule risk classifications.
+    - Unambiguous classification taxonomy: `ON_TRACK`, `AHEAD`, `AT_RISK`, `DELAYED`, `COMPLETED`.
+    - Explicit precedence hierarchy: `COMPLETED` (#1) > `DELAYED` (#2) > `AT_RISK` (#3) > `AHEAD` (#4) > `ON_TRACK` (#5).
+    - Objective delay invariant: `DELAYED` requires past planned finish while incomplete (`asOfDate > plannedFinish && actualProgress < 100`).
+    - Multi-signal risk detection: strong negative variance (`progressVariance <= -10.0%`), finish-window proximity (`daysUntilPlannedFinish <= 3`) combined with behind-plan state, or `delayed` execution status.
+    - Pure proximity safety: finish proximity alone on/ahead of plan never triggers risk.
+    - Milestone semantics: zero-duration activities (`plannedStart === plannedFinish`) inherit Pass 11 baseline progress without synthetic schema models.
+    - Transparent machine-readable explainability: `reasons` array with standard reason codes (`completed`, `overdue`, `strong_negative_variance`, `near_finish_and_behind`, `delayed_status`, `positive_variance`, `within_plan`).
+    - Project-level risk summary: simple counts (`totalActivities`, `completed`, `delayed`, `atRisk`, `ahead`, `onTrack`, `overdueCount`) without synthetic weighted risk scores.
+    - Clean dependency boundary: defines optional `DependencyRiskSignal[]` input seam without persisting unused dependency models.
+    - Read-only REST endpoint `GET /api/projects/:projectId/risk-status` with Zod schema validation.
+    - Zero AI / zero database persistence.
 
 
 
