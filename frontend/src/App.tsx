@@ -25,7 +25,9 @@ import {
   Check,
   AlertCircle,
   FileUp,
-  User
+  User,
+  Paperclip,
+  ExternalLink
 } from 'lucide-react';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
@@ -102,6 +104,19 @@ export interface ProgressUpdate {
   updatedAt: string;
 }
 
+export interface Evidence {
+  id: string;
+  projectId: string;
+  progressUpdateId: string | null;
+  fileName: string;
+  filePath: string;
+  fileType: 'text' | 'xlsx' | 'pdf' | 'image' | 'transcript' | 'other';
+  fileSizeBytes: number | null;
+  mimeType: string | null;
+  metadataJson: string | null;
+  uploadedAt: string;
+  createdAt: string;
+}
 
 interface HealthData {
   status: 'ok' | 'degraded' | 'error';
@@ -128,7 +143,8 @@ export function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Workspace View State
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules' | 'progress'>('overview');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules' | 'progress' | 'evidence'>('overview');
+
 
   // Schedules & Activities State
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -149,6 +165,20 @@ export function App(): React.JSX.Element {
   const [submittingReport, setSubmittingReport] = useState<boolean>(false);
   const [reportFormError, setReportFormError] = useState<string | null>(null);
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
+
+  // Evidence State (PASS 13)
+  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
+  const [loadingEvidence, setLoadingEvidence] = useState<boolean>(false);
+  const [evidenceUploadFile, setEvidenceUploadFile] = useState<File | null>(null);
+  const [evidenceSelectedUpdateId, setEvidenceSelectedUpdateId] = useState<string>('');
+  const [uploadingEvidence, setUploadingEvidence] = useState<boolean>(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const [evidenceSuccess, setEvidenceSuccess] = useState<string | null>(null);
+
+  // Activity Evidence Traceability Modal State
+  const [traceActivity, setTraceActivity] = useState<ScheduleActivity | null>(null);
+  const [activityEvidenceList, setActivityEvidenceList] = useState<Evidence[]>([]);
+  const [loadingActivityEvidence, setLoadingActivityEvidence] = useState<boolean>(false);
 
   // File Upload State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -276,6 +306,24 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
+  // Fetch Project Evidence (PASS 13)
+  const fetchEvidence = useCallback(async (projectId: string) => {
+    setLoadingEvidence(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/evidence`);
+      const data = await res.json();
+      if (res.ok) {
+        setEvidenceList(data.evidence || []);
+      } else {
+        setEvidenceList([]);
+      }
+    } catch {
+      setEvidenceList([]);
+    } finally {
+      setLoadingEvidence(false);
+    }
+  }, []);
+
   // Fetch Projects and restore saved selection
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
@@ -298,6 +346,7 @@ export function App(): React.JSX.Element {
           localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, found.id);
           fetchSchedules(found.id);
           fetchProgressUpdates(found.id);
+          fetchEvidence(found.id);
         } else {
           localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
           setSelectedProject(null);
@@ -313,7 +362,7 @@ export function App(): React.JSX.Element {
     } finally {
       setLoadingProjects(false);
     }
-  }, [showNotification, fetchSchedules, fetchProgressUpdates]);
+  }, [showNotification, fetchSchedules, fetchProgressUpdates, fetchEvidence]);
 
   // Initial load
   useEffect(() => {
@@ -332,6 +381,9 @@ export function App(): React.JSX.Element {
     setImportSummary(null);
     setReportFormError(null);
     setReportSuccessMessage(null);
+    setEvidenceError(null);
+    setEvidenceSuccess(null);
+    setEvidenceUploadFile(null);
     setReportFormData({
       reportDate: new Date().toISOString().slice(0, 10),
       reporterName: '',
@@ -341,6 +393,7 @@ export function App(): React.JSX.Element {
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
     fetchSchedules(project.id);
     fetchProgressUpdates(project.id);
+    fetchEvidence(project.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -351,11 +404,16 @@ export function App(): React.JSX.Element {
     setSchedules([]);
     setActivities([]);
     setProgressUpdates([]);
+    setEvidenceList([]);
     setSelectedFile(null);
+    setEvidenceUploadFile(null);
     setUploadError(null);
     setImportSummary(null);
     setReportFormError(null);
     setReportSuccessMessage(null);
+    setEvidenceError(null);
+    setEvidenceSuccess(null);
+    setTraceActivity(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
   };
 
@@ -674,6 +732,88 @@ export function App(): React.JSX.Element {
     }
   };
 
+  // Handle Upload Evidence (PASS 13)
+  const handleUploadEvidence = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProject || !evidenceUploadFile) return;
+
+    setUploadingEvidence(true);
+    setEvidenceError(null);
+    setEvidenceSuccess(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', evidenceUploadFile);
+      if (evidenceSelectedUpdateId) {
+        formData.append('progressUpdateId', evidenceSelectedUpdateId);
+      }
+
+      const res = await fetch(`/api/projects/${selectedProject.id}/evidence`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to upload evidence');
+      }
+
+      setEvidenceUploadFile(null);
+      setEvidenceSelectedUpdateId('');
+      setEvidenceSuccess(`Evidence file "${data.evidence.fileName}" uploaded and persisted successfully.`);
+      showNotification('success', `Evidence "${data.evidence.fileName}" uploaded.`);
+      await fetchEvidence(selectedProject.id);
+      setTimeout(() => setEvidenceSuccess(null), 5000);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error uploading evidence';
+      setEvidenceError(msg);
+      showNotification('error', msg);
+    } finally {
+      setUploadingEvidence(false);
+    }
+  };
+
+  // Handle Delete Evidence (PASS 13)
+  const handleDeleteEvidence = async (evidenceId: string) => {
+    if (!selectedProject) return;
+    if (!window.confirm('Are you sure you want to delete this evidence file?')) return;
+
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/evidence/${evidenceId}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        showNotification('success', 'Evidence file deleted.');
+        await fetchEvidence(selectedProject.id);
+      } else {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to delete evidence');
+      }
+    } catch (err: unknown) {
+      showNotification('error', err instanceof Error ? err.message : 'Error deleting evidence');
+    }
+  };
+
+  // Trace Evidence for Activity (PASS 13)
+  const handleOpenActivityTrace = async (activity: ScheduleActivity) => {
+    if (!selectedProject) return;
+    setTraceActivity(activity);
+    setLoadingActivityEvidence(true);
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/activities/${activity.id}/evidence`);
+      const data = await res.json();
+      if (res.ok) {
+        setActivityEvidenceList(data.evidence || []);
+      } else {
+        setActivityEvidenceList([]);
+      }
+    } catch {
+      setActivityEvidenceList([]);
+    } finally {
+      setLoadingActivityEvidence(false);
+    }
+  };
+
   // Filtered projects for search
   const filteredProjects = projects.filter((p) => {
     const query = searchQuery.toLowerCase();
@@ -848,10 +988,24 @@ export function App(): React.JSX.Element {
                 </span>
               )}
             </button>
-            <button className="workspace-tab future" disabled title="Evidence ingestion will be enabled in Pass 13">
+            <button
+              id="tab-evidence"
+              className={`workspace-tab ${activeWorkspaceTab === 'evidence' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveWorkspaceTab('evidence');
+                if (selectedProject) {
+                  fetchEvidence(selectedProject.id);
+                  fetchProgressUpdates(selectedProject.id);
+                }
+              }}
+            >
               <FileText size={16} />
               <span>Evidence</span>
-              <span className="tab-future-pill">Pass 13</span>
+              {evidenceList.length > 0 && (
+                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                  {evidenceList.length}
+                </span>
+              )}
             </button>
             <button className="workspace-tab future" disabled title="AI insights will be enabled in Pass 8+">
               <TrendingUp size={16} />
@@ -1112,136 +1266,163 @@ export function App(): React.JSX.Element {
                 )}
               </div>
 
-              {/* Schedules Selector and Activity Table */}
-              {loadingSchedules ? (
-                <div className="empty-state-card" style={{ padding: '2.5rem 1.5rem' }}>
-                  <RefreshCw size={24} className="pulse-dot" />
-                  <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading schedules...</p>
-                </div>
-              ) : schedules.length > 0 ? (
-                <div className="activities-card">
-                  {/* Selector Bar */}
-                  <div className="schedules-selector-bar">
-                    <div className="schedules-pills-list">
-                      <span style={{ fontSize: '0.775rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                        Schedules:
-                      </span>
-                      {schedules.map((s) => (
-                        <button
-                          key={s.id}
-                          className={`schedule-pill-btn ${selectedSchedule?.id === s.id ? 'active' : ''}`}
-                          onClick={() => handleSelectSchedule(s)}
-                        >
-                          <FileSpreadsheet size={13} />
-                          <span>{s.name}</span>
-                          {s.isBaseline && <span className="baseline-tag">Baseline</span>}
-                          <span className="format-tag">{s.sourceType}</span>
-                        </button>
-                      ))}
-                    </div>
-
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      Imported: {selectedSchedule ? new Date(selectedSchedule.importedAt).toLocaleDateString() : ''}
-                    </div>
-                  </div>
-
-                  {/* Header with Activity Count */}
-                  <div className="activities-card-header">
-                    <div className="activities-header-left">
-                      <h4 className="schedule-title">{selectedSchedule?.name || 'Schedule Activities'}</h4>
-                      <span className="activity-count-badge">
-                        <Activity size={12} />
-                        {activities.length} {activities.length === 1 ? 'Activity' : 'Activities'}
-                      </span>
-                    </div>
-
-                    {selectedSchedule?.sourceFilename && (
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                        Source: <span className="mono">{selectedSchedule.sourceFilename}</span>
+              {/* Schedules and Activities View */}
+              <div className="schedules-view-section">
+                <div className="section-toolbar">
+                  <div className="toolbar-left">
+                    <h3 className="section-title">Schedule Activities</h3>
+                    {selectedSchedule && (
+                      <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
+                        {selectedSchedule.name} &bull; {activities.length} Work Items
                       </span>
                     )}
                   </div>
 
-                  {/* Activity Verification Table */}
-                  {loadingActivities ? (
-                    <div style={{ padding: '2rem', textAlign: 'center' }}>
-                      <RefreshCw size={20} className="pulse-dot" />
-                      <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activities...</p>
-                    </div>
-                  ) : activities.length > 0 ? (
-                    <div className="table-responsive">
-                      <table className="activities-table">
-                        <thead>
-                          <tr>
-                            <th>Activity ID</th>
-                            <th>Activity Name</th>
-                            <th>WBS</th>
-                            <th>Location</th>
-                            <th>Planned Start</th>
-                            <th>Planned Finish</th>
-                            <th style={{ textAlign: 'right' }}>Quantity</th>
-                            <th>Unit</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {activities.map((act) => (
-                            <tr key={act.id}>
-                              <td>
-                                <span className="act-id-cell">{act.externalId}</span>
-                              </td>
-                              <td style={{ fontWeight: 500 }}>{act.name}</td>
-                              <td>
-                                {act.wbsCode ? (
-                                  <span className="wbs-badge">{act.wbsCode}</span>
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
-                                )}
-                              </td>
-                              <td>
-                                {act.location || <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                              </td>
-                              <td>
-                                <span className="date-cell">{act.plannedStart}</span>
-                              </td>
-                              <td>
-                                <span className="date-cell">{act.plannedFinish}</span>
-                              </td>
-                              <td style={{ textAlign: 'right' }}>
-                                {act.plannedQuantity !== null ? (
-                                  <span className="qty-cell">
-                                    {act.plannedQuantity.toLocaleString()}
-                                  </span>
-                                ) : (
-                                  <span style={{ color: 'var(--text-muted)' }}>—</span>
-                                )}
-                              </td>
-                              <td>
-                                {act.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
-                      <p className="empty-desc">No activities found for this schedule.</p>
+                  {/* Schedule Selector if multiple exist */}
+                  {schedules.length > 1 && (
+                    <div className="toolbar-right">
+                      <label className="form-label" style={{ margin: 0, fontSize: '0.8rem' }}>Schedule:</label>
+                      <select
+                        className="form-select"
+                        style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
+                        value={selectedSchedule?.id || ''}
+                        onChange={(e) => {
+                          const sched = schedules.find((s) => s.id === e.target.value);
+                          if (sched) handleSelectSchedule(sched);
+                        }}
+                      >
+                        {schedules.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.sourceType.toUpperCase()})
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   )}
                 </div>
-              ) : (
-                <div className="empty-state-card">
-                  <div className="empty-icon-wrapper">
-                    <FileSpreadsheet size={32} />
+
+                {/* If schedules exist */}
+                {schedules.length > 0 ? (
+                  <div className="activities-table-card">
+                    {/* Schedule Metadata Bar */}
+                    {selectedSchedule && (
+                      <div className="schedules-selector-bar">
+                        <div className="schedule-meta-pill">
+                          <span className="meta-label">Source File:</span>
+                          <span className="meta-val">{selectedSchedule.sourceFilename || 'Manual / Embedded'}</span>
+                        </div>
+                        <div className="schedule-meta-pill">
+                          <span className="meta-label">Format:</span>
+                          <span className="meta-val uppercase">{selectedSchedule.sourceType}</span>
+                        </div>
+                        <div className="schedule-meta-pill">
+                          <span className="meta-label">Imported:</span>
+                          <span className="meta-val">
+                            {new Date(selectedSchedule.importedAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                        {selectedSchedule.isBaseline && (
+                          <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
+                            Official Baseline
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Activity Verification Table */}
+                    {loadingActivities ? (
+                      <div style={{ padding: '2rem', textAlign: 'center' }}>
+                        <RefreshCw size={20} className="pulse-dot" />
+                        <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activities...</p>
+                      </div>
+                    ) : activities.length > 0 ? (
+                      <div className="table-responsive">
+                        <table className="activities-table">
+                          <thead>
+                            <tr>
+                              <th>Activity ID</th>
+                              <th>Activity Name</th>
+                              <th>WBS</th>
+                              <th>Location</th>
+                              <th>Planned Start</th>
+                              <th>Planned Finish</th>
+                              <th style={{ textAlign: 'right' }}>Quantity</th>
+                              <th>Unit</th>
+                              <th style={{ textAlign: 'center' }}>Evidence</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {activities.map((act) => (
+                              <tr key={act.id}>
+                                <td>
+                                  <span className="act-id-cell">{act.externalId}</span>
+                                </td>
+                                <td style={{ fontWeight: 500 }}>{act.name}</td>
+                                <td>
+                                  {act.wbsCode ? (
+                                    <span className="wbs-badge">{act.wbsCode}</span>
+                                  ) : (
+                                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  {act.location || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                                </td>
+                                <td>
+                                  <span className="date-cell">{act.plannedStart}</span>
+                                </td>
+                                <td>
+                                  <span className="date-cell">{act.plannedFinish}</span>
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  {act.plannedQuantity !== null ? (
+                                    <span className="qty-cell">
+                                      {act.plannedQuantity.toLocaleString()}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                  )}
+                                </td>
+                                <td>
+                                  {act.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
+                                    onClick={() => handleOpenActivityTrace(act)}
+                                    title="Trace originating evidence for this activity"
+                                  >
+                                    <Paperclip size={12} />
+                                    <span>Trace</span>
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
+                        <p className="empty-desc">No activities found for this schedule.</p>
+                      </div>
+                    )}
                   </div>
-                  <h3 className="empty-title">No Schedules Imported Yet</h3>
-                  <p className="empty-desc">
-                    Import your master construction schedule using the uploader above. FieldLine will extract all activity work items into the SQLite database.
-                  </p>
-                </div>
-              )}
+                ) : (
+                  <div className="empty-state-card">
+                    <div className="empty-icon-wrapper">
+                      <FileSpreadsheet size={32} />
+                    </div>
+                    <h3 className="empty-title">No Schedules Imported Yet</h3>
+                    <p className="empty-desc">
+                      Import your master construction schedule using the uploader above. FieldLine will extract all activity work items into the SQLite database.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-          ) : (
+          ) : activeWorkspaceTab === 'progress' ? (
             /* Tab 3: Progress Updates Content (PASS 7) */
             <div className="progress-container">
               {/* Form Card: Record Manual Field Progress */}
@@ -1264,13 +1445,6 @@ export function App(): React.JSX.Element {
                   </div>
                 </div>
 
-                {reportSuccessMessage && (
-                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
-                    <CheckCircle2 size={16} />
-                    <span>{reportSuccessMessage}</span>
-                  </div>
-                )}
-
                 {reportFormError && (
                   <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
                     <AlertTriangle size={16} />
@@ -1278,99 +1452,90 @@ export function App(): React.JSX.Element {
                   </div>
                 )}
 
-                <form id="manual-progress-form" onSubmit={handleProgressUpdateSubmit}>
-                  <div className="form-row" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '1rem' }}>
+                {reportSuccessMessage && (
+                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
+                    <CheckCircle2 size={16} />
+                    <span>{reportSuccessMessage}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleProgressUpdateSubmit}>
+                  <div className="form-row">
                     <div className="form-group">
-                      <label className="form-label" htmlFor="report-date-input">
-                        <Calendar size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
+                      <label className="form-label">
                         Report Date <span className="required-star">*</span>
                       </label>
                       <input
-                        id="report-date-input"
                         type="date"
                         className="form-input"
                         value={reportFormData.reportDate}
-                        onChange={(e) => setReportFormData({ ...reportFormData, reportDate: e.target.value })}
+                        onChange={(e) =>
+                          setReportFormData({ ...reportFormData, reportDate: e.target.value })
+                        }
                         required
                       />
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label" htmlFor="reporter-name-input">
-                        <User size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
-                        Reporter Name
-                      </label>
+                      <label className="form-label">Reporter Name (Optional)</label>
                       <input
-                        id="reporter-name-input"
                         type="text"
                         className="form-input"
-                        placeholder="e.g., Rajesh Sharma"
+                        placeholder="e.g. Ramesh Deshmukh"
                         value={reportFormData.reporterName}
-                        onChange={(e) => setReportFormData({ ...reportFormData, reporterName: e.target.value })}
+                        onChange={(e) =>
+                          setReportFormData({ ...reportFormData, reporterName: e.target.value })
+                        }
                       />
                     </div>
 
                     <div className="form-group">
-                      <label className="form-label" htmlFor="reporter-role-input">
-                        <ShieldCheck size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
-                        Reporter Role
-                      </label>
+                      <label className="form-label">Reporter Role (Optional)</label>
                       <input
-                        id="reporter-role-input"
                         type="text"
                         className="form-input"
-                        placeholder="e.g., Site Supervisor / Project Engineer"
+                        placeholder="e.g. Resident Site Engineer"
                         value={reportFormData.reporterRole}
-                        onChange={(e) => setReportFormData({ ...reportFormData, reporterRole: e.target.value })}
+                        onChange={(e) =>
+                          setReportFormData({ ...reportFormData, reporterRole: e.target.value })
+                        }
                       />
                     </div>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: '1.25rem' }}>
-                    <label className="form-label" htmlFor="raw-text-input">
-                      <FileText size={13} style={{ display: 'inline', marginRight: '0.35rem', verticalAlign: 'middle' }} />
-                      Field Progress Report <span className="required-star">*</span>
+                  <div className="form-group">
+                    <label className="form-label">
+                      Field Observation / Shift Narrative <span className="required-star">*</span>
                     </label>
                     <textarea
-                      id="raw-text-input"
+                      id="progress-report-raw-text"
                       className="form-textarea"
-                      rows={4}
-                      placeholder="Foundation work at Block B is 60% complete. Concrete pouring started today."
+                      placeholder="Enter raw field observation notes, work progress percentages, foundation pour logs, or inspection records..."
                       value={reportFormData.rawText}
-                      onChange={(e) => setReportFormData({ ...reportFormData, rawText: e.target.value })}
+                      onChange={(e) =>
+                        setReportFormData({ ...reportFormData, rawText: e.target.value })
+                      }
+                      rows={4}
                       required
-                      style={{ fontFamily: 'inherit', fontSize: '0.9rem' }}
                     />
-                    <div className="raw-text-hint">
-                      <span>Raw text integrity guaranteed: All metrics, numbers, and notes are preserved verbatim.</span>
-                      <span className="mono">{reportFormData.rawText.length} chars</span>
-                    </div>
                   </div>
 
-                  <div className="form-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
                     <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setReportFormData({ ...reportFormData, rawText: '' })}
-                      disabled={submittingReport || !reportFormData.rawText}
-                    >
-                      Clear Text
-                    </button>
-                    <button
-                      id="submit-progress-update-btn"
+                      id="submit-progress-report-btn"
                       type="submit"
                       className="btn btn-primary"
-                      disabled={submittingReport || !reportFormData.rawText.trim()}
+                      disabled={submittingReport}
                     >
                       {submittingReport ? (
                         <>
                           <RefreshCw size={14} className="pulse-dot" />
-                          <span>Recording Report...</span>
+                          <span>Persisting Field Update...</span>
                         </>
                       ) : (
                         <>
-                          <CheckCircle2 size={15} />
-                          <span>Record Field Update</span>
+                          <FileUp size={14} />
+                          <span>Submit Field Progress Report</span>
                         </>
                       )}
                     </button>
@@ -1378,67 +1543,53 @@ export function App(): React.JSX.Element {
                 </form>
               </div>
 
-              {/* History Section: Stored Progress Updates */}
-              <div className="progress-history-card">
-                <div className="progress-card-header">
-                  <div className="progress-card-title-group">
-                    <div className="progress-card-icon-badge" style={{ background: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.25)' }}>
-                      <Clock size={18} color="var(--accent-emerald)" />
-                    </div>
-                    <div>
-                      <h3 className="progress-card-title">Progress Update History</h3>
-                      <p className="progress-card-subtitle">
-                        Persisted chronological feed of ground-truth updates (newest reports first).
-                      </p>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
+              {/* Progress Updates List */}
+              <div className="progress-history-section">
+                <div className="section-toolbar">
+                  <div className="toolbar-left">
+                    <h3 className="section-title">Field Progress History</h3>
+                    <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
                       {progressUpdates.length} {progressUpdates.length === 1 ? 'Report' : 'Reports'}
                     </span>
+                  </div>
+                  <div className="toolbar-right">
                     <button
-                      id="refresh-progress-btn"
-                      type="button"
                       className="btn btn-secondary btn-sm"
                       onClick={() => selectedProject && fetchProgressUpdates(selectedProject.id)}
                       disabled={loadingProgressUpdates}
-                      title="Refresh updates from SQLite"
                     >
-                      <RefreshCw size={13} className={loadingProgressUpdates ? 'pulse-dot' : ''} />
-                      <span>Refresh</span>
+                      <RefreshCw size={14} className={loadingProgressUpdates ? 'pulse-dot' : ''} />
+                      <span>Refresh Feed</span>
                     </button>
                   </div>
                 </div>
 
                 {loadingProgressUpdates ? (
-                  <div className="loading-state" style={{ padding: '3rem 1rem' }}>
-                    <RefreshCw size={24} className="pulse-dot" color="var(--accent-blue)" />
-                    <p style={{ marginTop: '0.75rem', color: 'var(--text-secondary)' }}>Loading progress updates from SQLite...</p>
+                  <div style={{ padding: '3rem', textAlign: 'center' }}>
+                    <RefreshCw size={24} className="pulse-dot" />
+                    <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading field updates...</p>
                   </div>
                 ) : progressUpdates.length === 0 ? (
-                  <div id="progress-empty-state" className="progress-empty-state">
-                    <div className="empty-icon-circle" style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
-                      <Activity size={28} color="var(--text-muted)" />
+                  <div className="empty-state-card">
+                    <div className="empty-icon-wrapper">
+                      <Activity size={32} />
                     </div>
-                    <h4 className="empty-title" style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.4rem' }}>No Progress Updates Recorded</h4>
-                    <p className="empty-desc" style={{ maxWidth: 450, color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                      No manual field updates have been submitted for <strong>{selectedProject.name}</strong> yet. Use the form above to record your first field update.
+                    <h4 className="empty-title">No Field Reports Captured Yet</h4>
+                    <p className="empty-desc">
+                      Capture site observations, milestone completions, and shift summaries using the manual form above.
                     </p>
                   </div>
                 ) : (
-                  <div id="progress-update-list" className="progress-feed">
-                    {progressUpdates.map((update, idx) => (
-                      <div
-                        key={update.id}
-                        id={`progress-update-item-${idx}`}
-                        className="progress-item"
-                      >
+                  <div className="progress-updates-feed">
+                    {progressUpdates.map((update) => (
+                      <div key={update.id} className="progress-feed-item">
                         <div className="progress-item-header">
                           <div className="progress-item-meta-left">
                             <div className="progress-date-badge">
                               <Calendar size={13} />
-                              <span>Report Date: {update.reportDate}</span>
+                              <span>{update.reportDate}</span>
                             </div>
+
                             {update.reporterName ? (
                               <div className="progress-reporter-badge">
                                 <User size={13} />
@@ -1483,7 +1634,195 @@ export function App(): React.JSX.Element {
                 )}
               </div>
             </div>
-          )}
+          ) : activeWorkspaceTab === 'evidence' ? (
+            /* Tab 4: Evidence System & Provenance (PASS 13) */
+            <div className="evidence-container">
+              {/* Evidence Upload Card */}
+              <div className="evidence-uploader-card">
+                <div className="progress-card-header" style={{ marginBottom: '1rem' }}>
+                  <div>
+                    <h3 className="section-title">Upload Project Evidence</h3>
+                    <p className="section-subtitle">
+                      Attach ground-truth site memos, inspection sign-offs, batch tickets, or drawings to this project.
+                    </p>
+                  </div>
+                </div>
+
+                {evidenceError && (
+                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                    <AlertTriangle size={16} />
+                    <span>{evidenceError}</span>
+                  </div>
+                )}
+
+                {evidenceSuccess && (
+                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
+                    <CheckCircle2 size={16} />
+                    <span>{evidenceSuccess}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleUploadEvidence}>
+                  <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '1rem' }}>
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">
+                        Select Evidence File <span className="required-star">*</span>
+                      </label>
+                      <input
+                        id="evidence-file-input"
+                        type="file"
+                        className="form-input"
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            setEvidenceUploadFile(e.target.files[0]);
+                          }
+                        }}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ flex: 1 }}>
+                      <label className="form-label">
+                        Attach to Field Progress Report (Optional)
+                      </label>
+                      <select
+                        id="evidence-progress-update-select"
+                        className="form-select"
+                        value={evidenceSelectedUpdateId}
+                        onChange={(e) => setEvidenceSelectedUpdateId(e.target.value)}
+                      >
+                        <option value="">None (Project-level Evidence)</option>
+                        {progressUpdates.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.reportDate} — {u.reporterName || 'Anonymous'} ({u.rawText.slice(0, 35)}...)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ flexShrink: 0 }}>
+                      <button
+                        id="submit-evidence-upload-btn"
+                        type="submit"
+                        className="btn btn-primary"
+                        disabled={uploadingEvidence || !evidenceUploadFile}
+                        style={{ height: '42px' }}
+                      >
+                        {uploadingEvidence ? (
+                          <>
+                            <RefreshCw size={16} className="pulse-dot" />
+                            <span>Uploading...</span>
+                          </>
+                        ) : (
+                          <>
+                            <UploadCloud size={16} />
+                            <span>Upload Evidence</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+
+              {/* Evidence Inventory */}
+              <div className="evidence-inventory-section">
+                <div className="section-toolbar" style={{ marginBottom: '1rem' }}>
+                  <div className="toolbar-left">
+                    <h3 className="section-title">Evidence Inventory</h3>
+                    <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
+                      {evidenceList.length} {evidenceList.length === 1 ? 'file' : 'files'}
+                    </span>
+                  </div>
+                  <div className="toolbar-right">
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => selectedProject && fetchEvidence(selectedProject.id)}
+                      disabled={loadingEvidence}
+                    >
+                      <RefreshCw size={14} className={loadingEvidence ? 'pulse-dot' : ''} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {loadingEvidence ? (
+                  <div style={{ padding: '3rem', textAlign: 'center' }}>
+                    <RefreshCw size={24} className="pulse-dot" />
+                    <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading project evidence...</p>
+                  </div>
+                ) : evidenceList.length === 0 ? (
+                  <div className="empty-state-card">
+                    <div className="empty-icon-wrapper">
+                      <FileText size={32} />
+                    </div>
+                    <h4 className="empty-title">No Evidence Attached Yet</h4>
+                    <p className="empty-desc">
+                      Upload PDF blueprints, inspection tickets, site photos, or Excel logs above to establish traceable provenance.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="evidence-grid">
+                    {evidenceList.map((ev) => (
+                      <div key={ev.id} className="evidence-card">
+                        <div>
+                          <div className="evidence-card-header">
+                            <div className="evidence-title-group">
+                              <FileText size={20} color="var(--accent-blue)" style={{ flexShrink: 0 }} />
+                              <span className="evidence-file-name" title={ev.fileName}>
+                                {ev.fileName}
+                              </span>
+                            </div>
+                            <span className={`evidence-badge ${ev.fileType}`}>
+                              {ev.fileType}
+                            </span>
+                          </div>
+
+                          <div className="evidence-meta-list" style={{ marginTop: '0.75rem' }}>
+                            <div className="evidence-meta-row">
+                              <span style={{ color: 'var(--text-muted)' }}>Size:</span>
+                              <span className="mono">{ev.fileSizeBytes !== null ? formatFileSize(ev.fileSizeBytes) : '—'}</span>
+                            </div>
+                            <div className="evidence-meta-row">
+                              <span style={{ color: 'var(--text-muted)' }}>Uploaded:</span>
+                              <span>{new Date(ev.uploadedAt).toLocaleString()}</span>
+                            </div>
+                            {ev.progressUpdateId && (
+                              <div className="evidence-meta-row">
+                                <span style={{ color: 'var(--text-muted)' }}>Report:</span>
+                                <span className="mono" style={{ fontSize: '0.7rem' }}>{ev.progressUpdateId.slice(0, 12)}...</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="evidence-card-footer">
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => window.open(`/api/projects/${selectedProject.id}/evidence/${ev.id}/content`, '_blank')}
+                            style={{ gap: '0.35rem', fontSize: '0.75rem' }}
+                          >
+                            <ExternalLink size={13} />
+                            <span>Open Content</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleDeleteEvidence(ev.id)}
+                            style={{ color: 'var(--accent-rose)', borderColor: 'rgba(244, 63, 94, 0.2)' }}
+                            title="Delete evidence record"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : projects.length === 0 ? (
         /* ========================================================================= */
@@ -1921,6 +2260,82 @@ export function App(): React.JSX.Element {
                 disabled={formSubmitting}
               >
                 {formSubmitting ? 'Deleting...' : 'Delete Project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Activity Evidence Provenance (PASS 13) */}
+      {traceActivity && selectedProject && (
+        <div className="modal-overlay" onClick={() => setTraceActivity(null)}>
+          <div className="modal-card" style={{ maxWidth: '650px' }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Paperclip size={18} color="var(--accent-blue)" />
+                  <span>Activity Evidence Provenance</span>
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                  Trace all ground-truth evidence linked to <strong>{traceActivity.externalId} — {traceActivity.name}</strong>
+                </p>
+              </div>
+              <button
+                className="modal-close-btn"
+                onClick={() => setTraceActivity(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {loadingActivityEvidence ? (
+                <div style={{ padding: '2rem', textAlign: 'center' }}>
+                  <RefreshCw size={20} className="pulse-dot" />
+                  <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Tracing originating evidence...</p>
+                </div>
+              ) : activityEvidenceList.length === 0 ? (
+                <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
+                  <p className="empty-desc">
+                    No originating evidence attached to this activity yet. Evidence uploaded with matching progress reports will automatically appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="evidence-trace-list">
+                  {activityEvidenceList.map((ev) => (
+                    <div key={ev.id} className="evidence-trace-item">
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                          <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ev.fileName}</span>
+                          <span className={`evidence-badge ${ev.fileType}`}>{ev.fileType}</span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '1rem' }}>
+                          <span>Size: {ev.fileSizeBytes !== null ? formatFileSize(ev.fileSizeBytes) : '—'}</span>
+                          <span>Uploaded: {new Date(ev.uploadedAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => window.open(`/api/projects/${selectedProject.id}/evidence/${ev.id}/content`, '_blank')}
+                        style={{ gap: '0.35rem', fontSize: '0.75rem' }}
+                      >
+                        <ExternalLink size={13} />
+                        <span>View Evidence</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setTraceActivity(null)}
+              >
+                Close
               </button>
             </div>
           </div>

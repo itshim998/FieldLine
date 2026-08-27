@@ -8,6 +8,7 @@ export interface ActivityRepository {
   create(input: CreateActivityInput): Activity;
   createMany(inputs: CreateActivityInput[]): Activity[];
   getById(id: string): Activity | null;
+  getByIdAndProjectId(id: string, projectId: string): Activity | null;
   listByScheduleId(scheduleId: string): Activity[];
   listByProjectId(projectId: string): Activity[];
   countByScheduleId(scheduleId: string): number;
@@ -173,6 +174,17 @@ export class SqliteActivityRepository implements ActivityRepository {
       return row ? mapRowToActivity(row) : null;
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to fetch activity by ID: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  getByIdAndProjectId(id: string, projectId: string): Activity | null {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare('SELECT * FROM activities WHERE id = ? AND project_id = ?');
+      const row = stmt.get(id, projectId) as ActivityDbRow | undefined;
+      return row ? mapRowToActivity(row) : null;
+    } catch (err: unknown) {
+      throw new DatabaseError(`Failed to fetch activity by ID and Project ID: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

@@ -134,7 +134,7 @@ Example response:
 - [x] **PASS 10 — Progress Normalization** *(Completed)*
 - [x] **PASS 11 — Planned vs Actual Engine** *(Completed)*
 - [x] **PASS 12 — Delay and Risk Engine** *(Completed)*
-- [ ] **PASS 13 — Evidence System**
+- [x] **PASS 13 — Evidence System** *(Completed)*
 - [ ] **PASS 14 — Document Ingestion**
 - [ ] **PASS 15 — In-process Processing Jobs**
 - [ ] **PASS 16 — Failure Isolation and Idempotency**

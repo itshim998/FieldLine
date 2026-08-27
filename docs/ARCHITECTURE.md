@@ -478,6 +478,28 @@ frontend/
     - Clean dependency boundary: defines optional `DependencyRiskSignal[]` input seam without persisting unused dependency models.
     - Read-only REST endpoint `GET /api/projects/:projectId/risk-status` with Zod schema validation.
     - Zero AI / zero database persistence.
+14. **Pass 13 — Evidence System**:
+    - Dedicated `EvidenceService` orchestrating project existence checks, cross-project validation, safe filename generation, and atomic SQLite transaction + file rollback cleanup.
+    - Storage location: strictly project-scoped under `<UPLOAD_DIR>/<projectId>/<generated-safe-name>`.
+    - Content-type detection with fallback: `text`, `xlsx`, `pdf`, `image`, `transcript`, `other`.
+    - Dedicated `SqliteEvidenceRepository` implementing complete CRUD and traceability queries (`create`, `createWithEvent`, `getById`, `getByIdAndProjectId`, `listByProjectId`, `listByProgressUpdateId`, `listByActivityId`, `countByProjectId`, `delete`, `deleteByIdAndProjectId`).
+    - Bidirectional provenance chain:
+      - Progress Update → Attached Evidence (`GET /api/projects/:projectId/progress-updates/:updateId/evidence`).
+      - Schedule Activity → Historical Originating Evidence (`GET /api/projects/:projectId/activities/:activityId/evidence`).
+      - Evidence Content Streaming (`GET /api/projects/:projectId/evidence/:evidenceId/content`).
+    - REST Endpoints:
+      - `POST /api/projects/:projectId/evidence` (Multer disk storage with 20MB payload limit).
+      - `GET /api/projects/:projectId/evidence`
+      - `GET /api/projects/:projectId/evidence/:evidenceId`
+      - `GET /api/projects/:projectId/evidence/:evidenceId/content`
+      - `GET /api/projects/:projectId/progress-updates/:updateId/evidence`
+      - `GET /api/projects/:projectId/activities/:activityId/evidence`
+      - `DELETE /api/projects/:projectId/evidence/:evidenceId`
+    - Frontend Workspace Integration:
+      - Enabled Evidence workspace tab with file uploader, progress update attachment selector, and evidence inventory grid.
+      - 1-click Activity Evidence Traceability modal on schedule work item rows allowing site managers to trace physical ground truth back to any activity.
+      - Verbatim file preview/download links.
+
 
 
 

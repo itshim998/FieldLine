@@ -40,3 +40,10 @@ export {
 } from './activity-progress.repository.js';
 export type { ActivityProgressRepository } from './activity-progress.repository.js';
 
+export {
+  SqliteEvidenceRepository,
+  evidenceRepository
+} from './evidence.repository.js';
+export type { EvidenceRepository } from './evidence.repository.js';
+
+

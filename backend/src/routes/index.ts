@@ -8,6 +8,7 @@ import { activityMatchingRouter } from './activity-matching.router.js';
 import { progressRouter } from './progress.router.js';
 import { progressSnapshotRouter } from './progress-snapshot.router.js';
 import { riskRouter } from './risk.router.js';
+import { evidenceRouter } from './evidence.router.js';
 
 export const apiRouter = Router();
 
@@ -20,6 +21,8 @@ apiRouter.use(activityMatchingRouter);
 apiRouter.use(progressRouter);
 apiRouter.use(progressSnapshotRouter);
 apiRouter.use(riskRouter);
+apiRouter.use(evidenceRouter);
+
 
 
 

@@ -105,6 +105,19 @@ export type {
   RiskStatusInput
 } from './risk/risk-classification.types.js';
 
+export {
+  DefaultEvidenceService,
+  evidenceService,
+  detectEvidenceFileType
+} from './evidence/evidence.service.js';
+export type {
+  EvidenceService,
+  UploadedFilePayload,
+  UploadEvidenceOptions,
+  EvidenceFileContentResult
+} from './evidence/evidence.types.js';
+
+
 
 
 
