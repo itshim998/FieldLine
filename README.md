@@ -135,7 +135,7 @@ Example response:
 - [x] **PASS 11 — Planned vs Actual Engine** *(Completed)*
 - [x] **PASS 12 — Delay and Risk Engine** *(Completed)*
 - [x] **PASS 13 — Evidence System** *(Completed)*
-- [ ] **PASS 14 — Document Ingestion**
+- [x] **PASS 14 — Document Ingestion** *(Completed)*
 - [ ] **PASS 15 — In-process Processing Jobs**
 - [ ] **PASS 16 — Failure Isolation and Idempotency**
 - [ ] **PASS 17 — Project Intelligence Queries**

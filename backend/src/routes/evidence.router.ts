@@ -3,6 +3,10 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { evidenceService as defaultEvidenceService, EvidenceService } from '../services/evidence/evidence.service.js';
+import {
+  documentIngestionService as defaultIngestionService,
+  DocumentIngestionService
+} from '../services/ingestion/document-ingestion.service.js';
 import { validateParams } from '../middleware/validate.js';
 import {
   evidenceProjectIdParamSchema,
@@ -14,7 +18,10 @@ import {
 import { ValidationError } from '../errors/AppError.js';
 import { env } from '../config/env.js';
 
-export function createEvidenceRouter(service: EvidenceService = defaultEvidenceService): Router {
+export function createEvidenceRouter(
+  service: EvidenceService = defaultEvidenceService,
+  ingestionService: DocumentIngestionService = defaultIngestionService
+): Router {
   const router = Router();
 
   // Ensure local temporary upload directory exists
@@ -202,6 +209,21 @@ export function createEvidenceRouter(service: EvidenceService = defaultEvidenceS
         const { projectId, evidenceId } = req.params;
         service.deleteEvidence(projectId, evidenceId);
         res.status(200).json({ success: true });
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  // POST /projects/:projectId/evidence/:evidenceId/process - Process evidence document and create progress update
+  router.post(
+    '/projects/:projectId/evidence/:evidenceId/process',
+    validateParams(evidenceParamsSchema),
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      try {
+        const { projectId, evidenceId } = req.params;
+        const result = await ingestionService.processEvidence(projectId, evidenceId);
+        res.status(200).json(result);
       } catch (error) {
         next(error);
       }

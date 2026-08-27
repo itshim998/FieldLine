@@ -166,7 +166,7 @@ export function App(): React.JSX.Element {
   const [reportFormError, setReportFormError] = useState<string | null>(null);
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
 
-  // Evidence State (PASS 13)
+  // Evidence State (PASS 13 & PASS 14)
   const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
   const [loadingEvidence, setLoadingEvidence] = useState<boolean>(false);
   const [evidenceUploadFile, setEvidenceUploadFile] = useState<File | null>(null);
@@ -174,6 +174,8 @@ export function App(): React.JSX.Element {
   const [uploadingEvidence, setUploadingEvidence] = useState<boolean>(false);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [evidenceSuccess, setEvidenceSuccess] = useState<string | null>(null);
+  const [processingEvidenceId, setProcessingEvidenceId] = useState<string | null>(null);
+  const [processingStatusMap, setProcessingStatusMap] = useState<Record<string, 'processing' | 'processed' | 'failed'>>({});
 
   // Activity Evidence Traceability Modal State
   const [traceActivity, setTraceActivity] = useState<ScheduleActivity | null>(null);
@@ -384,6 +386,8 @@ export function App(): React.JSX.Element {
     setEvidenceError(null);
     setEvidenceSuccess(null);
     setEvidenceUploadFile(null);
+    setProcessingEvidenceId(null);
+    setProcessingStatusMap({});
     setReportFormData({
       reportDate: new Date().toISOString().slice(0, 10),
       reporterName: '',
@@ -413,6 +417,8 @@ export function App(): React.JSX.Element {
     setReportSuccessMessage(null);
     setEvidenceError(null);
     setEvidenceSuccess(null);
+    setProcessingEvidenceId(null);
+    setProcessingStatusMap({});
     setTraceActivity(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
   };
@@ -791,6 +797,52 @@ export function App(): React.JSX.Element {
       }
     } catch (err: unknown) {
       showNotification('error', err instanceof Error ? err.message : 'Error deleting evidence');
+    }
+  };
+
+  // Handle Process Evidence Document (PASS 14)
+  const handleProcessEvidence = async (evidenceId: string) => {
+    if (!selectedProject) return;
+
+    setProcessingEvidenceId(evidenceId);
+    setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'processing' }));
+    setEvidenceError(null);
+    setEvidenceSuccess(null);
+
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/evidence/${evidenceId}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        const errorMsg = data.error?.message || data.message || 'Failed to process evidence document';
+        throw new Error(errorMsg);
+      }
+
+      setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'processed' }));
+      const factCount = data.extraction?.items?.length ?? 0;
+      setEvidenceSuccess(
+        `Evidence processed successfully! Created Field Progress Report (${data.progressUpdate?.id?.slice(0, 8)}...) with ${factCount} extracted fact${factCount === 1 ? '' : 's'}.`
+      );
+      showNotification(
+        'success',
+        `Evidence processed: ${factCount} fact${factCount === 1 ? '' : 's'} extracted.`
+      );
+
+      // Refresh evidence list and progress updates
+      await Promise.all([
+        fetchEvidence(selectedProject.id),
+        fetchProgressUpdates(selectedProject.id)
+      ]);
+    } catch (err: unknown) {
+      setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'failed' }));
+      const msg = err instanceof Error ? err.message : 'Error processing evidence document';
+      setEvidenceError(msg);
+      showNotification('error', msg);
+    } finally {
+      setProcessingEvidenceId(null);
     }
   };
 
@@ -1797,6 +1849,39 @@ export function App(): React.JSX.Element {
                         </div>
 
                         <div className="evidence-card-footer">
+                          {['pdf', 'xlsx', 'image', 'text', 'transcript'].includes(ev.fileType) && (
+                            <button
+                              id={`process-evidence-btn-${ev.id}`}
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleProcessEvidence(ev.id)}
+                              disabled={processingEvidenceId === ev.id}
+                              style={{ gap: '0.35rem', fontSize: '0.75rem' }}
+                              title="Extract document content and create progress update with AI facts"
+                            >
+                              {processingEvidenceId === ev.id ? (
+                                <>
+                                  <RefreshCw size={13} className="pulse-dot" />
+                                  <span>Processing...</span>
+                                </>
+                              ) : processingStatusMap[ev.id] === 'processed' ? (
+                                <>
+                                  <CheckCircle2 size={13} color="var(--accent-emerald)" />
+                                  <span>Processed</span>
+                                </>
+                              ) : processingStatusMap[ev.id] === 'failed' ? (
+                                <>
+                                  <AlertTriangle size={13} color="var(--accent-rose)" />
+                                  <span>Retry Process</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Activity size={13} />
+                                  <span>Process</span>
+                                </>
+                              )}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"

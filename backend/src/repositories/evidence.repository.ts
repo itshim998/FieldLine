@@ -20,6 +20,7 @@ export interface EvidenceRepository {
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): Evidence[];
   listByActivityId(activityId: string, projectId: string): Evidence[];
   countByProjectId(projectId: string): number;
+  attachToProgressUpdate(evidenceId: string, progressUpdateId: string, projectId: string): boolean;
   delete(id: string, projectId?: string): boolean;
   deleteByIdAndProjectId(id: string, projectId: string): boolean;
 }
@@ -280,6 +281,24 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
       return row ? row.count : 0;
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to count evidence for project '${projectId}': ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  attachToProgressUpdate(evidenceId: string, progressUpdateId: string, projectId: string): boolean {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare(`
+        UPDATE evidence
+        SET progress_update_id = ?
+        WHERE id = ? AND project_id = ?
+      `);
+      const result = stmt.run(progressUpdateId, evidenceId, projectId);
+      return result.changes > 0;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('cross-project evidence reference')) {
+        throw new ConflictError('Cannot associate evidence with a progress update from another project');
+      }
+      throw new DatabaseError(`Failed to attach evidence '${evidenceId}' to progress update '${progressUpdateId}': ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

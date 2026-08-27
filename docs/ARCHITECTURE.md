@@ -499,6 +499,40 @@ frontend/
       - Enabled Evidence workspace tab with file uploader, progress update attachment selector, and evidence inventory grid.
       - 1-click Activity Evidence Traceability modal on schedule work item rows allowing site managers to trace physical ground truth back to any activity.
       - Verbatim file preview/download links.
+15. **Pass 14 — Document Ingestion**:
+    - Dedicated `DocumentIngestionService` orchestrating document extraction from project evidence files into normalized text, bridging evidence into the progress capture and AI extraction pipeline.
+    - Architectural Pipeline:
+      ```text
+      Evidence
+        ↓
+      Document Ingestion (format-specific extraction)
+        ↓
+      Normalized text (deterministic, bounded ≤ 40k chars)
+        ↓
+      ProgressUpdate (persisted with mapped sourceType)
+        ↓
+      AI Extraction (existing FieldProgressExtractionService)
+        ↓
+      Activity Matching (existing ActivityMatchingService)
+        ↓ (Human Review)
+      Progress Normalization (existing ProgressService)
+      ```
+    - Format Extractors:
+      - **CSV**: Uses `csv-parse`, handles headers, formats deterministic tabular text, enforces 2,000 row / 50 col bounds.
+      - **XLSX**: Uses `xlsx`, multi-sheet support preserving sheet names and row order, magic bytes validation, bounded sheet and cell limits.
+      - **PDF**: Uses lightweight local JS engine `unpdf` to extract embedded page text with clean normalization; falls back to OCR for scanned/sparse PDFs.
+      - **OCR**: Uses local `tesseract.js` (WASM) for site photos, scanned documents, and ticket images without cloud or native binary dependencies.
+      - **Text**: UTF-8 plain text, inspection memos, and transcription log extractor.
+    - Synchronous Processing Endpoint:
+      - `POST /api/projects/:projectId/evidence/:evidenceId/process`
+      - Returns `{ evidence, progressUpdate, normalizedDocument, extraction }`.
+    - Evidence Provenance:
+      - Automatically links `evidence.progress_update_id = progressUpdate.id`, preserving bidirectional traceability from `ActivityProgress` back to the originating physical document.
+    - Scope Boundary:
+      - *Pass 14 = synchronous document ingestion*
+      - *Pass 15 = asynchronous / in-process processing jobs*
+      - *Pass 16 = failure isolation and idempotency hardening*
+
 
 
 

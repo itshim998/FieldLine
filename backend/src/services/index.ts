@@ -117,6 +117,40 @@ export type {
   EvidenceFileContentResult
 } from './evidence/evidence.types.js';
 
+export {
+  DefaultDocumentIngestionService,
+  documentIngestionService
+} from './ingestion/document-ingestion.service.js';
+export {
+  CsvExtractor,
+  csvExtractor
+} from './ingestion/extractors/csv.extractor.js';
+export {
+  XlsxExtractor,
+  xlsxExtractor
+} from './ingestion/extractors/xlsx.extractor.js';
+export {
+  PdfExtractor,
+  pdfExtractor
+} from './ingestion/extractors/pdf.extractor.js';
+export {
+  OcrExtractor,
+  ocrExtractor,
+  DefaultTesseractOcrEngine
+} from './ingestion/extractors/ocr.extractor.js';
+export type { OcrEngine } from './ingestion/extractors/ocr.extractor.js';
+export {
+  TextExtractor,
+  textExtractor
+} from './ingestion/extractors/text.extractor.js';
+export type {
+  DocumentIngestionService,
+  NormalizedDocument,
+  DocumentExtractor,
+  ExtractDocumentInput,
+  ProcessEvidenceResult
+} from './ingestion/document-ingestion.types.js';
+
 
 
 

@@ -1,215 +1,908 @@
-# FieldLine — Pass 13 Correction Required
+# FieldLine — PASS 14: Document Ingestion
 
-Do NOT start Pass 14.
+You are implementing **Pass 14 — Document Ingestion** in the existing FieldLine repository.
 
-The latest Pass 13 commit was independently reviewed against the approved Pass 12 architecture.
-
-Most of Pass 13 is correct, but two architectural blockers must be fixed before Pass 13 can be approved.
-
-## BLOCKER 1 — Rejected activity matches must not create activity provenance
-
-Current `EvidenceRepository.listByActivityId()` derives evidence from `activity_matches` without filtering by match status.
-
-The current query effectively does:
-
-```sql
-WHERE e.project_id = ?
-AND (
-  e.id IN (
-    SELECT am.evidence_id
-    FROM activity_matches am
-    WHERE am.project_id = ? AND am.activity_id = ?
-  )
-  OR e.progress_update_id IN (
-    SELECT am.progress_update_id
-    FROM activity_matches am
-    WHERE am.project_id = ? AND am.activity_id = ?
-  )
-  ...
-)
-```
-
-This is incorrect.
-
-Pass 9 established:
+The approved base is:
 
 ```text
-suggested = not accepted
-confirmed = accepted
-rejected = explicitly rejected
+a1ac92f2d6162e5d443e572d8b4596cb6b66f9e2
 ```
 
-A rejected match must NEVER make evidence appear as originating evidence for the activity.
-
-### Required behavior
-
-For provenance obtained through `activity_matches`:
+Previous pass:
 
 ```text
-confirmed → may contribute activity provenance
-rejected  → MUST NOT contribute activity provenance
-suggested → MUST NOT be treated as accepted provenance
+PASS 13 — Evidence System
 ```
 
-Do not reinterpret rejected matches.
+is approved.
 
-The existing historical-progress path remains valid:
+Do NOT start Pass 15 or implement background jobs.
+
+---
+
+# 1. Objective
+
+Expand FieldLine's progress-capture workflow beyond manually entered text.
+
+The new pipeline must become:
 
 ```text
+Evidence file
+      ↓
+document validation
+      ↓
+format-specific extraction
+      ↓
+normalized text/data
+      ↓
+ProgressUpdate
+      ↓
+existing AI field-progress extraction
+      ↓
+existing activity matching
+      ↓
+existing deterministic progress normalization
+      ↓
 ActivityProgress
-    ↓
-progressUpdateId
-    ↓
-Evidence
 ```
 
-because canonical ActivityProgress is already subject to Pass 10 match-status rules.
+Pass 14 is the **document-to-text/data ingestion bridge**.
 
-### Required implementation
+Do NOT duplicate or redesign the existing:
 
-Modify `listByActivityId()` so match-based evidence provenance is restricted to accepted/confirmed matches.
+* Evidence system
+* AI extraction system
+* Activity matching engine
+* Progress normalization
+* Planned-vs-actual engine
+* Risk engine
 
-Be careful that BOTH of these paths respect match status:
+Reuse them.
+
+---
+
+# 2. Current approved architecture
+
+FieldLine is a local modular monolith:
 
 ```text
-ActivityMatch.evidenceId
-ActivityMatch.progressUpdateId → Evidence.progressUpdateId
+React
+  ↓
+Express
+  ↓
+validation
+  ↓
+service
+  ↓
+repository
+  ↓
+SQLite
 ```
 
-Do not merely filter the direct `evidence_id` subquery while leaving the `progress_update_id` subquery unrestricted.
+Files are stored locally.
 
-### Required regression tests
-
-Add a test with:
+Evidence is already implemented through:
 
 ```text
-Progress Update U1
-Evidence E1 attached to U1
-Activity A1
-ActivityMatch M1:
-    progressUpdateId = U1
-    activityId = A1
-    status = rejected
+EvidenceRepository
+EvidenceService
+EvidenceRouter
+```
+
+with:
+
+```text
+POST /api/projects/:projectId/evidence
+GET  /api/projects/:projectId/evidence
+GET  /api/projects/:projectId/evidence/:evidenceId
+GET  /api/projects/:projectId/evidence/:evidenceId/content
+GET  /api/projects/:projectId/progress-updates/:updateId/evidence
+GET  /api/projects/:projectId/activities/:activityId/evidence
+DELETE /api/projects/:projectId/evidence/:evidenceId
+```
+
+The Evidence service already stores files safely and supports project-scoped retrieval.
+
+---
+
+# 3. Existing AI pipeline — MUST reuse
+
+The existing FieldProgressExtractionService accepts raw text.
+
+Current conceptual pipeline:
+
+```text
+rawText
+  ↓
+FieldProgressExtractionService
+  ↓
+AIService
+  ↓
+strict FieldProgressExtraction schema
+```
+
+The AI layer deliberately extracts facts only:
+
+```text
+reference
+location
+progress_percent
+status
+```
+
+and explicitly does NOT perform activity matching or project-truth calculations.
+
+Reuse this service exactly.
+
+Do NOT teach the AI layer how to read PDFs/XLSX/images.
+
+Document extraction belongs before the AI layer.
+
+---
+
+# 4. Existing activity matching — MUST reuse
+
+Current API:
+
+```text
+POST /api/projects/:projectId/progress-updates/:updateId/matches
+```
+
+and:
+
+```text
+GET /api/projects/:projectId/progress-updates/:updateId/matches
+```
+
+The existing `ActivityMatchingService` takes validated structured facts and matches them against project activities.
+
+It persists matches as:
+
+```text
+suggested
+```
+
+Do not modify its fundamental matching semantics.
+
+Do not make document ingestion directly assign activities.
+
+---
+
+# 5. Existing deterministic progress — MUST reuse
+
+Current canonical progress path:
+
+```text
+POST /api/projects/:projectId/progress-updates/:updateId/progress
+```
+
+The existing `ProgressService` performs:
+
+* project verification
+* update verification
+* match verification
+* match-status policy
+* deterministic progress normalization
+* chronological reconciliation
+* idempotency
+* atomic ActivityProgress + project event persistence
+
+Do not duplicate any of this in Pass 14.
+
+---
+
+# 6. Existing dependencies
+
+Current `package.json` already contains:
+
+```text
+xlsx
+csv-parse
+multer
+zod
+better-sqlite3
+express
+```
+
+Therefore reuse the existing XLSX and CSV infrastructure where appropriate.
+
+Do not add another CSV library.
+
+Do not add another spreadsheet library.
+
+For PDF extraction and OCR, inspect the repository and choose the smallest appropriate local libraries.
+
+Do NOT assume a PDF or OCR library is already installed.
+
+No cloud OCR service.
+
+No cloud document-processing platform.
+
+No Docker.
+
+---
+
+# 7. Pass 14 architecture
+
+Create a dedicated ingestion module.
+
+Suggested structure:
+
+```text
+backend/src/services/ingestion/
+    document-ingestion.service.ts
+    document-ingestion.types.ts
+    extractors/
+        csv.extractor.ts
+        xlsx.extractor.ts
+        pdf.extractor.ts
+        ocr.extractor.ts
+```
+
+The exact structure may be adjusted if the repository's current conventions suggest a cleaner arrangement.
+
+The important boundary is:
+
+```text
+DocumentIngestionService
+        ↓
+format-specific extractor
+        ↓
+NormalizedDocument
 ```
 
 Then:
 
 ```text
-GET /api/projects/<projectId>/activities/<activityId>/evidence
+NormalizedDocument
+        ↓
+ProgressUpdate
+        ↓
+existing AI extraction
+        ↓
+existing matching
+        ↓
+existing progress service
 ```
-
-must NOT return E1 solely because of the rejected match.
-
-Also test:
-
-```text
-suggested → no accepted match provenance
-confirmed → provenance is returned
-```
-
-Preserve the existing successful traceability test.
 
 ---
 
-# BLOCKER 2 — Evidence deletion can leave DB/file inconsistency
+# 8. Define a normalized ingestion contract
 
-Current `DefaultEvidenceService.deleteEvidence()` removes the physical file FIRST and only then deletes the SQLite evidence row.
+Create a typed internal representation for extracted document content.
 
-Current sequence:
+Conceptually:
 
-```text
-get evidence
-↓
-unlink physical file
-↓
-delete DB row
+```ts
+interface NormalizedDocument {
+  evidenceId: string;
+  projectId: string;
+  sourceFileName: string;
+  sourceType: 'csv' | 'xlsx' | 'pdf' | 'image';
+  text: string;
+  metadata?: Record<string, unknown>;
+}
 ```
 
-This creates an unsafe failure mode:
+You may adjust the exact contract to fit the existing project.
+
+Important:
+
+* `text` must be deterministic and bounded
+* preserve useful source context
+* do not let format-specific code leak into the AI service
+* preserve the originating `evidenceId`
+
+For tabular documents, the normalized text may contain:
 
 ```text
-unlink succeeds
-↓
-SQLite DELETE fails
-↓
-DB row still exists
-↓
-physical evidence file is gone
+Sheet: Daily Progress
+
+Date | Activity | Location | Quantity | Status
+2026-08-25 | Pier P1 Concrete | Zone A | 100 m3 | In Progress
+...
 ```
 
-The evidence record is now inconsistent and content retrieval fails.
+The exact serialization format should be deterministic and readable by the downstream extraction service.
 
-This is not acceptable.
+---
 
-## Required correction
+# 9. CSV ingestion
 
-Redesign deletion so a database failure cannot silently leave an evidence row pointing to a missing file.
+Implement CSV field-report ingestion using the existing `csv-parse` dependency.
 
-Remember:
+Do NOT treat CSV ingestion as schedule import.
+
+Pass 4/5/6 already handle schedule CSVs.
+
+Pass 14 must interpret CSV as an **evidence document**, not as a schedule.
+
+For CSV:
 
 ```text
-SQLite transaction and filesystem cannot participate in one atomic transaction.
+file
+ ↓
+validation
+ ↓
+CSV parser
+ ↓
+rows
+ ↓
+normalized tabular text
 ```
 
-Therefore explicitly choose a failure-safe ordering and document it.
+Requirements:
 
-A simple acceptable approach is:
+* handle UTF-8 text correctly
+* support headers when present
+* preserve row order
+* normalize empty cells consistently
+* bound maximum rows/cells/text size
+* produce useful validation errors for malformed CSV
+* prevent pathological inputs from producing unbounded AI prompts
+
+Do not silently invent missing values.
+
+---
+
+# 10. XLSX ingestion
+
+Use the existing `xlsx` library.
+
+For XLSX:
 
 ```text
-1. validate/project-scope evidence
-2. perform DB deletion successfully
-3. remove physical file
+file
+ ↓
+workbook
+ ↓
+sheet selection
+ ↓
+rows/cells
+ ↓
+normalized text
 ```
 
-but if using this ordering, handle filesystem deletion failures explicitly and define the resulting state. Do NOT silently swallow the failure.
+Requirements:
 
-Alternatively, implement a safe temporary-file/rollback strategy.
+* inspect workbook safely
+* support multiple sheets
+* preserve sheet names
+* preserve row ordering
+* normalize cells deterministically
+* represent empty cells consistently
+* impose reasonable workbook/sheet/cell/text bounds
+* reject malformed/unreadable workbooks cleanly
 
-The important invariant is:
+Do not assume a particular worksheet name.
+
+Do not silently discard all but the first worksheet.
+
+Prefer including useful sheets in deterministic order.
+
+Do not implement spreadsheet semantics for schedules.
+
+This is field-evidence ingestion.
+
+---
+
+# 11. PDF text extraction
+
+Implement embedded-text PDF ingestion.
+
+Pipeline:
 
 ```text
-No silent DB/file inconsistency.
+Evidence PDF
+   ↓
+PDF parser
+   ↓
+page text
+   ↓
+normalized text
 ```
 
-Do not pretend filesystem deletion is transactional.
+Requirements:
 
-## Required deletion tests
+* preserve page ordering
+* concatenate text deterministically
+* normalize common extraction artifacts
+* strip excessive whitespace
+* preserve meaningful line boundaries where possible
+* bound total extracted text
+* reject unreadable/corrupt PDFs cleanly
 
-Add at least one failure regression test that simulates:
+Do not implement arbitrary PDF-to-schedule interpretation.
+
+PDF extraction is only responsible for obtaining document content.
+
+---
+
+# 12. Scanned PDF / image OCR
+
+After embedded PDF extraction:
 
 ```text
-physical file exists
-DB deletion fails
+if usable text exists
+    ↓
+use extracted text
+else
+    ↓
+OCR path
 ```
 
-and verifies the system does not silently report successful deletion while leaving an inconsistent state.
+The same applies to image evidence.
 
-Also preserve the existing successful delete test.
-
-## DO NOT change
-
-Do not alter:
+Implement OCR for:
 
 ```text
-Evidence domain model
-Pass 10 ActivityProgress model
-Pass 11 snapshot logic
-Pass 12 risk logic
+image evidence
+scanned PDF
+```
+
+Choose a local library compatible with the current Node.js application.
+
+Do not require a cloud API.
+
+Do not redesign the evidence storage model.
+
+Keep OCR output as normalized text.
+
+OCR quality does not need to be perfect, but:
+
+* failures must be explicit
+* empty OCR output must not be treated as successful extraction
+* output must be bounded before reaching the AI layer
+* the system must preserve the originating `evidenceId`
+
+Do not pass raw arbitrary-size OCR output into the LLM.
+
+---
+
+# 13. Explicit processing endpoint
+
+Pass 14 should introduce an explicit synchronous processing operation.
+
+Add:
+
+```text
+POST /api/projects/:projectId/evidence/:evidenceId/process
+```
+
+Conceptual behavior:
+
+```text
+Evidence
+  ↓
+DocumentIngestionService
+  ↓
+NormalizedDocument
+  ↓
+ProgressUpdate creation
+  ↓
 AI extraction
-activity matching rules
-document ingestion
-OCR
-processing jobs
-hash/deduplication subsystem
-notifications
-dashboard architecture
+  ↓
+return extraction result / processing result
 ```
 
-Do not start Pass 14.
+The endpoint must remain synchronous.
 
-Do not introduce new infrastructure.
+Do NOT introduce the SQLite job queue yet.
 
-## Verification
+Do NOT create Pass 15 processing jobs.
+
+---
+
+# 14. What should be persisted
+
+The existing evidence record remains the source artifact.
+
+When document processing succeeds, create a corresponding `ProgressUpdate` using the normalized extracted text.
+
+Use the existing ProgressUpdate repository/service conventions.
+
+The progress update should preserve:
+
+```text
+projectId
+reportDate
+sourceType
+rawText
+```
+
+Use the existing source-type vocabulary where possible.
+
+Do not invent a parallel "document report" table.
+
+Do not store extracted text in a second redundant persistence model unless the existing architecture genuinely requires it.
+
+The originating evidence remains traceable through the existing Evidence → ProgressUpdate relationship.
+
+---
+
+# 15. Source type mapping
+
+Use the existing ProgressUpdate source types:
+
+```text
+manual
+voice
+pdf
+xlsx
+image
+text
+```
+
+Recommended mapping:
+
+```text
+CSV  → text
+XLSX → xlsx
+PDF  → pdf
+image → image
+```
+
+If this needs refinement to preserve existing semantics, document the decision.
+
+Do not alter unrelated source-type behavior.
+
+---
+
+# 16. Reuse the existing downstream pipeline
+
+After document extraction:
+
+```text
+NormalizedDocument.text
+        ↓
+ProgressUpdate.rawText
+        ↓
+FieldProgressExtractionService
+        ↓
+ActivityMatchingService
+        ↓
+ProgressService
+```
+
+Do not write a new AI prompt.
+
+Do not write a new matcher.
+
+Do not write a new progress calculator.
+
+Do not calculate percentages inside the document extractor.
+
+Do not ask the document parser to identify schedule activity IDs.
+
+---
+
+# 17. Processing result
+
+Create a coherent processing response.
+
+Conceptually:
+
+```json
+{
+  "evidence": {...},
+  "progressUpdate": {...},
+  "normalizedDocument": {
+    "sourceType": "pdf",
+    "textLength": 2480
+  },
+  "extraction": {
+    "items": [...]
+  }
+}
+```
+
+You may refine the response shape according to existing API conventions.
+
+The response should expose enough information for the frontend to show:
+
+```text
+Evidence processed
+↓
+Progress report created
+↓
+Facts extracted
+```
+
+Do not expose absolute filesystem paths.
+
+---
+
+# 18. Matching and progress execution
+
+Do not automatically force document ingestion all the way through ActivityProgress unless the existing human-review semantics allow it safely.
+
+The existing system deliberately distinguishes:
+
+```text
+suggested match
+confirmed match
+rejected match
+```
+
+and ProgressService currently permits suggested matches only with explicit `allowSuggested`.
+
+Therefore preserve this trust boundary.
+
+A safe Pass 14 workflow is:
+
+```text
+file
+↓
+normalized text
+↓
+ProgressUpdate
+↓
+AI extraction
+↓
+suggested activity matches
+↓
+human review
+↓
+existing ProgressService
+```
+
+If you implement automatic progression after matching, it must strictly reuse the existing confirmation/`allowSuggested` policy and must not bypass review semantics.
+
+Prefer the safer design above.
+
+---
+
+# 19. Evidence provenance must remain intact
+
+After processing:
+
+```text
+Activity
+   ↓
+ActivityProgress / ActivityMatch
+   ↓
+ProgressUpdate
+   ↓
+Evidence
+   ↓
+original physical file
+```
+
+must remain queryable using the existing Pass 13 provenance APIs.
+
+Do not break:
+
+```text
+GET /api/projects/:projectId/progress-updates/:updateId/evidence
+
+GET /api/projects/:projectId/activities/:activityId/evidence
+```
+
+A document-ingested ProgressUpdate must behave like a manually-created ProgressUpdate in the downstream system.
+
+---
+
+# 20. Failure semantics
+
+Pass 14 must never corrupt project truth.
+
+Examples:
+
+### Unsupported document
+
+```text
+upload exists
+↓
+processing fails clearly
+↓
+no fake ProgressUpdate
+```
+
+### PDF extraction failure
+
+```text
+Evidence remains intact
+ProgressUpdate is not created from fabricated text
+```
+
+### OCR failure
+
+```text
+Evidence remains intact
+processing returns an explicit failure
+```
+
+### AI extraction failure
+
+Use the existing AI service's failure semantics.
+
+Do not create fake facts.
+
+Do not create ActivityProgress from failed extraction.
+
+### Matching failure
+
+Do not fabricate activity identity.
+
+---
+
+# 21. Idempotency boundary
+
+Do NOT implement the full Pass 16 duplicate/deduplication subsystem.
+
+However, avoid accidental duplicate processing in a single request.
+
+An explicit processing request should not accidentally create multiple ProgressUpdates because of ordinary internal retries within the same call.
+
+Do not introduce content hashing yet.
+
+---
+
+# 22. File safety
+
+Reuse Pass 13's safe Evidence retrieval.
+
+Do not:
+
+* trust filesystem paths from the client
+* accept arbitrary local paths
+* copy files outside the configured evidence storage
+* expose absolute paths
+* allow path traversal
+* bypass EvidenceService to read arbitrary files
+
+The ingestion layer should retrieve content through the existing evidence abstraction or a narrowly scoped internal method.
+
+---
+
+# 23. Resource limits
+
+Document ingestion is an attack surface even in a local application.
+
+Add reasonable bounds for:
+
+```text
+maximum extracted text
+maximum CSV rows
+maximum XLSX sheets
+maximum XLSX cells
+maximum PDF pages or extracted characters
+maximum OCR input/output
+```
+
+Prefer deterministic limits.
+
+Do not make the numbers unnecessarily tiny for realistic construction reports.
+
+Do not permit unlimited document content to enter the AI prompt.
+
+---
+
+# 24. Frontend
+
+Extend the existing Evidence workspace rather than creating another document-management UI.
+
+The current Pass 13 frontend already has:
+
+* evidence inventory
+* evidence upload
+* content opening
+* activity traceability
+
+Add a small:
+
+```text
+Process
+```
+
+action for supported document types.
+
+Show at minimum:
+
+```text
+Processing...
+Processed
+Failed
+```
+
+and surface a useful result/error.
+
+After successful processing, the user should be able to see the created ProgressUpdate/facts and continue into the existing review/matching flow.
+
+Do NOT redesign the workspace.
+
+Do NOT build the future dashboard.
+
+---
+
+# 25. Tests
+
+Add focused tests.
+
+## CSV
+
+* valid CSV
+* header handling
+* row normalization
+* malformed CSV
+* empty CSV
+* size/bound limits
+
+## XLSX
+
+* valid workbook
+* multiple sheets
+* deterministic row order
+* empty cells
+* malformed workbook
+* resource bounds
+
+## PDF
+
+* valid text PDF
+* multi-page ordering
+* whitespace normalization
+* corrupted PDF
+* empty/no-text PDF
+
+## OCR
+
+* image extraction
+* scanned-PDF fallback
+* OCR failure
+* empty OCR output
+
+## Integration
+
+At minimum demonstrate:
+
+```text
+Evidence PDF/XLSX
+    ↓
+document processing
+    ↓
+ProgressUpdate
+    ↓
+AI extraction
+    ↓
+suggested ActivityMatch
+```
+
+Then separately verify:
+
+```text
+confirmed ActivityMatch
+    ↓
+existing ProgressService
+    ↓
+ActivityProgress
+```
+
+Do NOT duplicate progress normalization logic inside the ingestion tests.
+
+## Provenance regression
+
+After successful document processing:
+
+```text
+GET progress-update evidence
+```
+
+must return the originating evidence.
+
+After a confirmed match + progress:
+
+```text
+GET activity evidence
+```
+
+must return the originating evidence.
+
+Also retain all Pass 13 isolation tests.
+
+---
+
+# 26. Existing regression suite
 
 Run:
 
@@ -218,37 +911,187 @@ npm test
 npm run build
 ```
 
-Specifically verify:
+All existing tests must remain green.
+
+Do not weaken or delete existing tests to accommodate Pass 14.
+
+---
+
+# 27. Documentation
+
+Update:
 
 ```text
-[ ] rejected match never creates activity provenance
-[ ] suggested match never creates accepted provenance
-[ ] confirmed match creates provenance
-[ ] valid ActivityProgress → ProgressUpdate → Evidence trace still works
-[ ] successful evidence deletion still works
-[ ] failed DB deletion does not silently corrupt evidence state
-[ ] cross-project isolation remains green
-[ ] full regression suite remains green
+README.md
+docs/ARCHITECTURE.md
 ```
 
-Inspect the final diff for accidental Pass 14+ implementation.
+only where necessary.
 
-Commit the correction as:
+Document:
 
 ```text
-fix: harden FieldLine evidence provenance and deletion
+Evidence
+  ↓
+Document Ingestion
+  ↓
+Normalized text
+  ↓
+ProgressUpdate
+  ↓
+AI extraction
+  ↓
+Activity matching
+  ↓
+Progress normalization
 ```
 
-Push to `main`.
+Explicitly state:
+
+```text
+Pass 14 = synchronous document ingestion
+
+Pass 15 = asynchronous/in-process processing jobs
+
+Pass 16 = failure isolation and idempotency hardening
+```
+
+---
+
+# 28. Scope guard — DO NOT implement
+
+Do not implement:
+
+```text
+OCR job queues
+background workers
+SQLite processing queue
+duplicate-content hashing
+automatic deduplication
+forecasting
+risk scoring
+dashboard redesign
+new matching algorithms
+new AI providers
+document summarization
+semantic search
+embeddings
+vector database
+cloud object storage
+cloud OCR
+```
+
+Those belong to later work.
+
+---
+
+# 29. Definition of done
+
+Pass 14 is complete only when:
+
+```text
+[ ] Dedicated DocumentIngestionService exists.
+
+[ ] CSV evidence can be parsed.
+
+[ ] XLSX evidence can be parsed.
+
+[ ] PDF embedded text can be extracted.
+
+[ ] Image/scanned-PDF OCR path exists.
+
+[ ] Format-specific extractors produce a common normalized representation.
+
+[ ] Extracted content is bounded.
+
+[ ] Processing is project-scoped.
+
+[ ] Processing works from existing Evidence records.
+
+[ ] Processing creates a ProgressUpdate using normalized extracted content.
+
+[ ] Existing FieldProgressExtractionService is reused.
+
+[ ] Existing ActivityMatchingService is reused.
+
+[ ] Existing ProgressService is reused.
+
+[ ] No new AI interpretation layer was created.
+
+[ ] No activity identity is invented by the document parser.
+
+[ ] Evidence → ProgressUpdate provenance remains intact.
+
+[ ] Processing failures do not fabricate project truth.
+
+[ ] Explicit synchronous processing endpoint exists.
+
+[ ] Existing Evidence workspace can trigger processing.
+
+[ ] Existing Pass 13 provenance UX still works.
+
+[ ] Pass 13 isolation semantics remain intact.
+
+[ ] Full test suite passes.
+
+[ ] Build passes.
+
+[ ] Documentation is updated.
+
+[ ] No Pass 15+ functionality is implemented.
+```
+
+---
+
+# 30. Final verification and commit
+
+Before committing:
+
+```text
+npm test
+npm run build
+```
+
+Inspect the final diff carefully for:
+
+```text
+unnecessary dependencies
+duplicate parsers
+AI/matching/progress duplication
+unbounded extracted text
+filesystem path leakage
+project isolation regressions
+automatic approval of suggested matches
+Pass 15+ scope leakage
+```
+
+Commit with:
+
+```text
+feat: implement FieldLine document ingestion
+```
+
+Push to:
+
+```text
+main
+```
 
 Afterward report:
 
 ```text
-1. exact files changed
-2. provenance fix
-3. deletion failure-safety strategy
-4. tests added
-5. npm test result
-6. npm run build result
-7. final commit SHA
+1. files changed
+2. ingestion architecture
+3. CSV support
+4. XLSX support
+5. PDF support
+6. OCR support
+7. new endpoint(s)
+8. ProgressUpdate integration
+9. provenance behavior
+10. tests added
+11. npm test result
+12. npm run build result
+13. commit SHA
+14. known limitations
 ```
