@@ -22,6 +22,13 @@ export interface JobRepository {
   getByIdAndProjectId(id: string, projectId: string): ProcessingJob | null;
   listByProjectId(projectId: string, jobType?: ProcessingJobType): ProcessingJob[];
   findExistingActiveDocumentIngestionJob(projectId: string, evidenceId: string): ProcessingJob | null;
+  findLatestCompletedDocumentIngestionJob(projectId: string, evidenceId: string): ProcessingJob | null;
+  findOrCreateDocumentIngestionJob(
+    projectId: string,
+    evidenceId: string,
+    eventSummary: string,
+    eventPayloadJson: string
+  ): { job: ProcessingJob; isNew: boolean };
   claimNextQueued(): ProcessingJob | null;
   markCompleted(id: string, result: Record<string, unknown> | DocumentIngestionJobResult): ProcessingJob | null;
   markFailed(id: string, errorMessage: string): ProcessingJob | null;
@@ -229,6 +236,83 @@ export class SqliteJobRepository implements JobRepository {
       }
     }
     return null;
+  }
+
+  findLatestCompletedDocumentIngestionJob(projectId: string, evidenceId: string): ProcessingJob | null {
+    const db = this.getDb();
+    const rows = db.prepare(`
+      SELECT * FROM processing_jobs
+      WHERE project_id = ?
+        AND job_type = 'document_ingestion'
+        AND status = 'completed'
+      ORDER BY completed_at DESC, created_at DESC
+    `).all(projectId) as ProcessingJobDbRow[];
+
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload_json);
+        if (payload && payload.evidenceId === evidenceId) {
+          return mapRowToProcessingJob(row);
+        }
+      } catch {
+        // Skip malformed payload
+      }
+    }
+    return null;
+  }
+
+  findOrCreateDocumentIngestionJob(
+    projectId: string,
+    evidenceId: string,
+    eventSummary: string,
+    eventPayloadJson: string
+  ): { job: ProcessingJob; isNew: boolean } {
+    const db = this.getDb();
+
+    return db.transaction(() => {
+      // 1. Check for completed job first (idempotent completed reuse)
+      const existingCompleted = this.findLatestCompletedDocumentIngestionJob(projectId, evidenceId);
+      if (existingCompleted) {
+        return { job: existingCompleted, isNew: false };
+      }
+
+      // 2. Check for active (queued or processing) job
+      const existingActive = this.findExistingActiveDocumentIngestionJob(projectId, evidenceId);
+      if (existingActive) {
+        return { job: existingActive, isNew: false };
+      }
+
+      // 3. Create new queued job with event
+      const jobId = crypto.randomUUID();
+      const eventId = crypto.randomUUID();
+      const payloadJson = JSON.stringify({ evidenceId });
+
+      const insertJobStmt = db.prepare(`
+        INSERT INTO processing_jobs (
+          id, project_id, job_type, status, payload_json, attempt_count
+        ) VALUES (
+          ?, ?, 'document_ingestion', 'queued', ?, 0
+        )
+      `);
+
+      const insertEventStmt = db.prepare(`
+        INSERT INTO project_events (
+          id, project_id, event_type, entity_type, entity_id, summary, payload_json
+        ) VALUES (
+          ?, ?, 'processing_job_queued', 'processing_job', ?, ?, ?
+        )
+      `);
+
+      insertJobStmt.run(jobId, projectId, payloadJson);
+      insertEventStmt.run(eventId, projectId, jobId, eventSummary, eventPayloadJson);
+
+      const created = this.getByIdAndProjectId(jobId, projectId);
+      if (!created) {
+        throw new DatabaseError('Failed to retrieve newly created processing job');
+      }
+
+      return { job: created, isNew: true };
+    })();
   }
 
   claimNextQueued(): ProcessingJob | null {

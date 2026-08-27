@@ -56,45 +56,29 @@ export class DefaultJobService implements JobService {
       throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
     }
 
-    // 3. Check for existing active job (queued or processing)
-    const existingActive = this.jobRepo.findExistingActiveDocumentIngestionJob(projectId, evidenceId);
-    if (existingActive) {
-      logger.debug(
-        `JobService: Reusing existing active job ${existingActive.id} for evidence ${evidenceId} (status: ${existingActive.status})`
-      );
-      return existingActive;
-    }
+    // 3. Atomically find existing completed/active job or create new queued job
+    const summary = `Document ingestion job queued for file: ${evidence.fileName}`;
+    const eventPayloadJson = JSON.stringify({
+      jobType: 'document_ingestion',
+      evidenceId,
+      fileName: evidence.fileName,
+      fileType: evidence.fileType
+    });
 
-    // 4. Create new queued job with queued event
-    const jobId = crypto.randomUUID();
-    const eventId = crypto.randomUUID();
-
-    const createdJob = this.jobRepo.createWithEvent(
-      {
-        id: jobId,
-        projectId,
-        jobType: 'document_ingestion',
-        payload: { evidenceId }
-      },
-      {
-        id: eventId,
-        projectId,
-        eventType: 'processing_job_queued',
-        entityType: 'processing_job',
-        entityId: jobId,
-        summary: `Document ingestion job queued for file: ${evidence.fileName}`,
-        payloadJson: JSON.stringify({
-          jobId,
-          jobType: 'document_ingestion',
-          evidenceId,
-          fileName: evidence.fileName,
-          fileType: evidence.fileType
-        })
-      }
+    const { job, isNew } = this.jobRepo.findOrCreateDocumentIngestionJob(
+      projectId,
+      evidenceId,
+      summary,
+      eventPayloadJson
     );
 
-    logger.debug(`JobService: Created queued document ingestion job ${createdJob.id} for evidence ${evidenceId}`);
-    return createdJob;
+    if (isNew) {
+      logger.debug(`JobService: Created queued document ingestion job ${job.id} for evidence ${evidenceId}`);
+    } else {
+      logger.debug(`JobService: Reusing existing job ${job.id} for evidence ${evidenceId} (status: ${job.status})`);
+    }
+
+    return job;
   }
 
   /**

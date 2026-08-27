@@ -246,14 +246,16 @@ describe('DocumentIngestionService', () => {
 
   it('should rollback and delete created ProgressUpdate if evidence attachment fails', async () => {
     // Mock evidence repository whose attachToProgressUpdate always fails
-    const failingEvidenceRepo = Object.create(evidenceRepository);
-    failingEvidenceRepo.attachToProgressUpdate = () => false; // simulated attachment failure
+    const failingProgressRepo = Object.create(progressUpdateRepository);
+    failingProgressRepo.commitDocumentIngestionTransaction = () => {
+      throw new DatabaseError("Evidence 'memo3' could not be linked to report");
+    };
 
     const failingAttachIngestionService = new DefaultDocumentIngestionService({
-      evidenceRepo: failingEvidenceRepo,
+      evidenceRepo: evidenceRepository,
       evidenceService,
       projectRepo: projectRepository,
-      progressUpdateRepo: progressUpdateRepository,
+      progressUpdateRepo: failingProgressRepo,
       extractionService: new FieldProgressExtractionService({
         generateText: async () => 'OK',
         extractStructured: async () => ({ items: [] }) as any

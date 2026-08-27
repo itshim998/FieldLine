@@ -16,6 +16,7 @@ export interface EvidenceRepository {
   ): Evidence;
   getById(id: string): Evidence | null;
   getByIdAndProjectId(id: string, projectId: string): Evidence | null;
+  findByProjectIdAndHash(projectId: string, contentSha256: string): Evidence | null;
   listByProjectId(projectId: string): Evidence[];
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): Evidence[];
   listByActivityId(activityId: string, projectId: string): Evidence[];
@@ -35,6 +36,7 @@ interface EvidenceDbRow {
   file_size_bytes: number | null;
   mime_type: string | null;
   metadata_json: string | null;
+  content_sha256: string;
   uploaded_at: string;
   created_at: string;
 }
@@ -50,6 +52,7 @@ function mapRowToEvidence(row: EvidenceDbRow): Evidence {
     fileSizeBytes: row.file_size_bytes,
     mimeType: row.mime_type,
     metadataJson: row.metadata_json,
+    contentSha256: row.content_sha256 || '',
     uploadedAt: row.uploaded_at,
     createdAt: row.created_at
   };
@@ -65,13 +68,14 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
   create(input: CreateEvidenceInput): Evidence {
     const db = this.getDb();
     const id = input.id || crypto.randomUUID();
+    const contentSha256 = input.contentSha256 || crypto.createHash('sha256').update(id).digest('hex').toLowerCase();
 
     const stmt = db.prepare(`
       INSERT INTO evidence (
         id, project_id, progress_update_id, file_name, file_path,
-        file_type, file_size_bytes, mime_type, metadata_json
+        file_type, file_size_bytes, mime_type, metadata_json, content_sha256
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -85,14 +89,15 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
         input.fileType,
         input.fileSizeBytes ?? null,
         input.mimeType ?? null,
-        input.metadataJson ?? null
+        input.metadataJson ?? null,
+        contentSha256
       );
     } catch (err: unknown) {
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
         throw new ConflictError(`Evidence with ID '${id}' already exists`);
       }
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
-        throw new ConflictError(`Evidence with ID '${id}' already exists in this project`);
+        throw new ConflictError(`Evidence with ID '${id}' or matching content already exists in this project`);
       }
       if (err instanceof Error && err.message.includes('cross-project evidence reference')) {
         throw new ConflictError('Cannot associate evidence with a progress update from another project');
@@ -114,13 +119,14 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
     const db = this.getDb();
     const id = evidenceInput.id || crypto.randomUUID();
     const eventId = eventInput.id || crypto.randomUUID();
+    const contentSha256 = evidenceInput.contentSha256 || crypto.createHash('sha256').update(id).digest('hex').toLowerCase();
 
     const insertEvidenceStmt = db.prepare(`
       INSERT INTO evidence (
         id, project_id, progress_update_id, file_name, file_path,
-        file_type, file_size_bytes, mime_type, metadata_json
+        file_type, file_size_bytes, mime_type, metadata_json, content_sha256
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -142,7 +148,8 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
         evidenceInput.fileType,
         evidenceInput.fileSizeBytes ?? null,
         evidenceInput.mimeType ?? null,
-        evidenceInput.metadataJson ?? null
+        evidenceInput.metadataJson ?? null,
+        contentSha256
       );
 
       insertEventStmt.run(
@@ -163,7 +170,7 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
         throw new ConflictError(`Evidence with ID '${id}' already exists`);
       }
       if (err instanceof Error && 'code' in err && (err as { code: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
-        throw new ConflictError(`Evidence with ID '${id}' already exists in this project`);
+        throw new ConflictError(`Evidence with ID '${id}' or matching content already exists in this project`);
       }
       if (err instanceof Error && err.message.includes('cross-project evidence reference')) {
         throw new ConflictError('Cannot associate evidence with a progress update from another project');
@@ -176,6 +183,17 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
       throw new DatabaseError('Failed to retrieve newly created evidence');
     }
     return created;
+  }
+
+  findByProjectIdAndHash(projectId: string, contentSha256: string): Evidence | null {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare('SELECT * FROM evidence WHERE project_id = ? AND content_sha256 = ?');
+      const row = stmt.get(projectId, contentSha256) as EvidenceDbRow | undefined;
+      return row ? mapRowToEvidence(row) : null;
+    } catch (err: unknown) {
+      throw new DatabaseError(`Failed to fetch evidence by hash: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   getById(id: string): Evidence | null {

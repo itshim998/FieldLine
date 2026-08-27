@@ -75,12 +75,14 @@ export const evidenceSchema = z.object({
   fileSizeBytes: z.number().nullable(),
   mimeType: z.string().nullable(),
   metadataJson: z.string().nullable(),
+  contentSha256: z.string(),
   uploadedAt: z.string(),
   createdAt: z.string()
 });
 
 export const evidenceResponseSchema = z.object({
-  evidence: evidenceSchema
+  evidence: evidenceSchema,
+  deduplicated: z.boolean().optional()
 });
 
 export const evidenceListResponseSchema = z.object({

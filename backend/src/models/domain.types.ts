@@ -193,6 +193,7 @@ export interface Evidence {
   fileSizeBytes: number | null;
   mimeType: string | null;
   metadataJson: string | null;
+  contentSha256: string;
   uploadedAt: string;
   createdAt: string;
 }
@@ -207,6 +208,7 @@ export interface CreateEvidenceInput {
   fileSizeBytes?: number | null;
   mimeType?: string | null;
   metadataJson?: string | null;
+  contentSha256?: string;
 }
 
 // ==========================================

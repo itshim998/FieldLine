@@ -766,8 +766,13 @@ export function App(): React.JSX.Element {
 
       setEvidenceUploadFile(null);
       setEvidenceSelectedUpdateId('');
-      setEvidenceSuccess(`Evidence file "${data.evidence.fileName}" uploaded and persisted successfully.`);
-      showNotification('success', `Evidence "${data.evidence.fileName}" uploaded.`);
+      if (data.deduplicated) {
+        setEvidenceSuccess(`Evidence file "${data.evidence.fileName}" deduplicated (reusing existing identical content in project).`);
+        showNotification('info', `Evidence "${data.evidence.fileName}" deduplicated (existing content reused).`);
+      } else {
+        setEvidenceSuccess(`Evidence file "${data.evidence.fileName}" uploaded and persisted successfully.`);
+        showNotification('success', `Evidence "${data.evidence.fileName}" uploaded.`);
+      }
       await fetchEvidence(selectedProject.id);
       setTimeout(() => setEvidenceSuccess(null), 5000);
     } catch (err: unknown) {

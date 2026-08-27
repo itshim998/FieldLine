@@ -1,11 +1,28 @@
 import { Database as DatabaseType } from 'better-sqlite3';
 import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
-import { ProgressUpdate, CreateProgressUpdateInput } from '../models/domain.types.js';
+import {
+  ProgressUpdate,
+  CreateProgressUpdateInput,
+  CreateActivityMatchInput,
+  ActivityMatch
+} from '../models/domain.types.js';
 import { AppError, ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
+
+export interface DocumentProcessingTxInput {
+  progressUpdate: CreateProgressUpdateInput;
+  evidenceId: string;
+  suggestedMatches: Array<Omit<CreateActivityMatchInput, 'progressUpdateId'> & { progressUpdateId?: string }>;
+}
+
+export interface DocumentProcessingTxResult {
+  progressUpdate: ProgressUpdate;
+  matches: ActivityMatch[];
+}
 
 export interface ProgressUpdateRepository {
   create(input: CreateProgressUpdateInput): ProgressUpdate;
+  commitDocumentIngestionTransaction(input: DocumentProcessingTxInput): DocumentProcessingTxResult;
   getById(id: string): ProgressUpdate | null;
   getByIdAndProjectId(id: string, projectId: string): ProgressUpdate | null;
   listByProjectId(projectId: string): ProgressUpdate[];
@@ -124,6 +141,157 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       throw new DatabaseError('Failed to retrieve newly created progress update');
     }
     return created;
+  }
+
+  commitDocumentIngestionTransaction(input: DocumentProcessingTxInput): DocumentProcessingTxResult {
+    const db = this.getDb();
+    const puId = input.progressUpdate.id || crypto.randomUUID();
+    const eventId = crypto.randomUUID();
+    const sourceType = input.progressUpdate.sourceType || 'manual';
+    const status = input.progressUpdate.status || 'received';
+
+    const insertUpdateStmt = db.prepare(`
+      INSERT INTO progress_updates (
+        id, project_id, report_date, reporter_name, reporter_role, source_type, raw_text, status
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const insertEventStmt = db.prepare(`
+      INSERT INTO project_events (
+        id, project_id, event_type, entity_type, entity_id, summary, payload_json
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const attachEvidenceStmt = db.prepare(`
+      UPDATE evidence
+      SET progress_update_id = ?
+      WHERE id = ? AND project_id = ?
+    `);
+
+    const deleteSuggestionsStmt = db.prepare(`
+      DELETE FROM activity_matches
+      WHERE progress_update_id = ? AND project_id = ? AND status = 'suggested'
+    `);
+
+    const insertMatchStmt = db.prepare(`
+      INSERT INTO activity_matches (
+        id, project_id, progress_update_id, evidence_id, activity_id,
+        confidence_score, match_method, matched_text, rationale, status,
+        reviewed_by, reviewed_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const runTx = db.transaction(() => {
+      // 1. Insert progress update
+      insertUpdateStmt.run(
+        puId,
+        input.progressUpdate.projectId,
+        input.progressUpdate.reportDate,
+        input.progressUpdate.reporterName ?? null,
+        input.progressUpdate.reporterRole ?? null,
+        sourceType,
+        input.progressUpdate.rawText,
+        status
+      );
+
+      // 2. Insert event
+      insertEventStmt.run(
+        eventId,
+        input.progressUpdate.projectId,
+        'progress_reported',
+        'progress_updates',
+        puId,
+        `Document ingestion report created for evidence '${input.evidenceId}'`,
+        JSON.stringify({
+          updateId: puId,
+          reportDate: input.progressUpdate.reportDate,
+          sourceType,
+          evidenceId: input.evidenceId
+        })
+      );
+
+      // 3. Attach evidence
+      const attachRes = attachEvidenceStmt.run(
+        puId,
+        input.evidenceId,
+        input.progressUpdate.projectId
+      );
+      if (attachRes.changes === 0) {
+        throw new DatabaseError(`Evidence '${input.evidenceId}' could not be linked to report '${puId}'`);
+      }
+
+      // 4. Delete existing suggestions and insert suggested matches
+      deleteSuggestionsStmt.run(puId, input.progressUpdate.projectId);
+      const insertedMatchIds: string[] = [];
+      for (const m of input.suggestedMatches) {
+        const mId = m.id || crypto.randomUUID();
+        insertMatchStmt.run(
+          mId,
+          input.progressUpdate.projectId,
+          puId,
+          input.evidenceId,
+          m.activityId,
+          m.confidenceScore,
+          m.matchMethod,
+          m.matchedText ?? null,
+          m.rationale ?? null,
+          m.status || 'suggested',
+          m.reviewedBy ?? null,
+          m.reviewedAt ?? null
+        );
+        insertedMatchIds.push(mId);
+      }
+
+      return insertedMatchIds;
+    });
+
+    let insertedMatchIds: string[] = [];
+    try {
+      insertedMatchIds = runTx();
+    } catch (err: unknown) {
+      if (err instanceof AppError) {
+        throw err;
+      }
+      throw new DatabaseError(`Failed to commit document processing transaction: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const createdProgressUpdate = this.getById(puId);
+    if (!createdProgressUpdate) {
+      throw new DatabaseError('Failed to retrieve created progress update after transaction');
+    }
+
+    let persistedMatches: ActivityMatch[] = [];
+    if (insertedMatchIds.length > 0) {
+      const placeholders = insertedMatchIds.map(() => '?').join(',');
+      const rows = db.prepare(`SELECT * FROM activity_matches WHERE id IN (${placeholders}) ORDER BY confidence_score DESC`).all(...insertedMatchIds) as any[];
+      persistedMatches = rows.map((r: any) => ({
+        id: r.id,
+        projectId: r.project_id,
+        progressUpdateId: r.progress_update_id,
+        evidenceId: r.evidence_id,
+        activityId: r.activity_id,
+        confidenceScore: r.confidence_score,
+        matchMethod: r.match_method,
+        matchedText: r.matched_text,
+        rationale: r.rationale,
+        status: r.status,
+        reviewedBy: r.reviewed_by,
+        reviewedAt: r.reviewed_at,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      }));
+    }
+
+    return {
+      progressUpdate: createdProgressUpdate,
+      matches: persistedMatches
+    };
   }
 
   getById(id: string): ProgressUpdate | null {

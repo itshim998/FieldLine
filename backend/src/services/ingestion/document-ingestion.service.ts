@@ -12,6 +12,10 @@ import {
   progressUpdateRepository as defaultProgressUpdateRepo
 } from '../../repositories/progress-update.repository.js';
 import {
+  ActivityMatchRepository,
+  activityMatchRepository as defaultActivityMatchRepo
+} from '../../repositories/activity-match.repository.js';
+import {
   EvidenceService,
   evidenceService as defaultEvidenceService
 } from '../evidence/evidence.service.js';
@@ -23,6 +27,10 @@ import {
   ActivityMatchingService,
   activityMatchingService as defaultMatchingService
 } from '../matching/activity-matching.service.js';
+import {
+  CandidateMatch,
+  FieldFactMatchResult
+} from '../matching/activity-matching.types.js';
 import {
   DocumentExtractor,
   DocumentIngestionService,
@@ -36,7 +44,7 @@ import { xlsxExtractor } from './extractors/xlsx.extractor.js';
 import { pdfExtractor } from './extractors/pdf.extractor.js';
 import { ocrExtractor } from './extractors/ocr.extractor.js';
 import { textExtractor } from './extractors/text.extractor.js';
-import { DatabaseError, NotFoundError, ValidationError } from '../../errors/AppError.js';
+import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
 export class DefaultDocumentIngestionService implements DocumentIngestionService {
@@ -44,6 +52,7 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
   private evidenceService: EvidenceService;
   private projectRepo: ProjectRepository;
   private progressUpdateRepo: ProgressUpdateRepository;
+  private activityMatchRepo: ActivityMatchRepository;
   private extractionService: FieldProgressExtractionService;
   private matchingService: ActivityMatchingService;
   private extractors: DocumentExtractor[];
@@ -53,6 +62,7 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
     evidenceService?: EvidenceService;
     projectRepo?: ProjectRepository;
     progressUpdateRepo?: ProgressUpdateRepository;
+    activityMatchRepo?: ActivityMatchRepository;
     extractionService?: FieldProgressExtractionService;
     matchingService?: ActivityMatchingService;
     extractors?: DocumentExtractor[];
@@ -61,6 +71,7 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
     this.evidenceService = dependencies?.evidenceService || defaultEvidenceService;
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.progressUpdateRepo = dependencies?.progressUpdateRepo || defaultProgressUpdateRepo;
+    this.activityMatchRepo = dependencies?.activityMatchRepo || defaultActivityMatchRepo;
     this.extractionService = dependencies?.extractionService || defaultExtractionService;
     this.matchingService = dependencies?.matchingService || defaultMatchingService;
     this.extractors = dependencies?.extractors || [
@@ -125,15 +136,14 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
   }
 
   /**
-   * Explicit synchronous document processing workflow:
+   * Explicit document processing workflow:
    * 1. Validate project and evidence existence
    * 2. Extract and validate normalized document text
    * 3. Determine report date from document content
-   * 4. Invoke AI fact extraction (before persisting database records)
-   * 5. Persist progress report record
-   * 6. Attach evidence with strict rollback on failure
-   * 7. Invoke ActivityMatchingService to generate and persist suggested matches
-   * 8. Return comprehensive processing result
+   * 4. Invoke AI fact extraction before database mutation
+   * 5. Compute candidate matches before database mutation
+   * 6. Commit atomic transaction creating progress record, linking evidence, and persisting matches
+   * 7. Return comprehensive processing result
    */
   async processEvidence(projectId: string, evidenceId: string): Promise<ProcessEvidenceResult> {
     // 1. Verify project exists
@@ -155,19 +165,35 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
       throw new ValidationError('Extracted document content is empty or contains only whitespace');
     }
 
-    // 4. Determine report date (explicit date in document preferred over today's fallback)
+    // 4. Determine report date (explicit date in document preferred over today fallback)
     const reportDateStr =
       extractReportDate(normalizedDoc.text) || new Date().toISOString().slice(0, 10);
 
-    // 5. Invoke downstream AI fact extraction BEFORE creating database records
+    // 5. Invoke downstream AI fact extraction before persisting database records
     logger.debug('DocumentIngestionService: Invoking downstream FieldProgressExtractionService');
     const extraction = await this.extractionService.extractFromReport(normalizedDoc.text);
 
-    // 6. Persist progress-report record
+    // 6. Compute candidate matches outside transaction
+    logger.debug('DocumentIngestionService: Computing candidate matches via ActivityMatchingService');
+    const matchResults = await this.matchingService.computeMatches(projectId, extraction);
+
+    // 7. Atomic transaction: create progress report, link evidence, and persist matches
     const mappedSourceType = mapSourceTypeToProgressUpdateType(normalizedDoc.sourceType);
-    let createdProgressRecord;
-    try {
-      createdProgressRecord = this.progressUpdateRepo.create({
+    const toPersist = matchResults
+      .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)
+      .map(r => ({
+        projectId,
+        evidenceId,
+        activityId: r.bestMatch.activityId,
+        confidenceScore: r.bestMatch.confidenceScore,
+        matchMethod: r.bestMatch.matchMethod,
+        matchedText: r.bestMatch.matchedText,
+        rationale: r.bestMatch.rationale,
+        status: 'suggested' as const
+      }));
+
+    const txResult = this.progressUpdateRepo.commitDocumentIngestionTransaction({
+      progressUpdate: {
         projectId,
         reportDate: reportDateStr,
         reporterName: `Document Ingestion: ${evidence.fileName}`,
@@ -175,56 +201,23 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
         sourceType: mappedSourceType,
         rawText: normalizedDoc.text,
         status: 'received'
-      });
-    } catch (createErr) {
-      throw new DatabaseError(
-        `Failed to create progress report record: ${createErr instanceof Error ? createErr.message : String(createErr)}`
-      );
-    }
-
-    // 7. Link evidence to created report with atomic rollback on failure
-    try {
-      const attached = this.evidenceRepo.attachToProgressUpdate(
-        evidenceId,
-        createdProgressRecord.id,
-        projectId
-      );
-      if (!attached) {
-        throw new DatabaseError(
-          `Evidence '${evidenceId}' could not be linked to report '${createdProgressRecord.id}'`
-        );
-      }
-    } catch (attachErr) {
-      // Rollback created progress report to prevent orphaned records
-      try {
-        this.progressUpdateRepo.deleteByIdAndProjectId(createdProgressRecord.id, projectId);
-      } catch (rollbackErr) {
-        logger.error('Failed to rollback progress report after attachment failure', rollbackErr);
-      }
-      throw attachErr;
-    }
-
-    // 8. Invoke ActivityMatchingService to generate and persist suggested matches
-    logger.debug('DocumentIngestionService: Invoking downstream ActivityMatchingService');
-    const matchResult = await this.matchingService.matchProgressUpdate(
-      projectId,
-      createdProgressRecord.id,
-      extraction,
-      { persist: true }
-    );
+      },
+      evidenceId,
+      suggestedMatches: toPersist
+    });
 
     const refreshedEvidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId) || evidence;
 
     return {
       evidence: refreshedEvidence,
-      progressUpdate: createdProgressRecord,
+      progressUpdate: txResult.progressUpdate,
       normalizedDocument: {
         sourceType: normalizedDoc.sourceType,
         textLength: normalizedDoc.text.length,
         metadata: normalizedDoc.metadata
       },
       extraction,
-      matches: matchResult.matches
+      matches: matchResults
     };
   }
 }

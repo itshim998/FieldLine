@@ -82,7 +82,7 @@ export function createEvidenceRouter(
           throw new ValidationError(parsedBody.error.issues[0]?.message || 'Invalid evidence form payload');
         }
 
-        const evidence = await service.uploadEvidence(
+        const uploadResult = await service.uploadEvidence(
           projectId,
           {
             path: req.file.path,
@@ -97,7 +97,10 @@ export function createEvidenceRouter(
           }
         );
 
-        res.status(201).json({ evidence });
+        res.status(uploadResult.deduplicated ? 200 : 201).json({
+          evidence: uploadResult,
+          deduplicated: uploadResult.deduplicated
+        });
       } catch (error) {
         // Clean up temporary upload file if left over
         if (req.file?.path && fs.existsSync(req.file.path)) {
@@ -220,7 +223,8 @@ export function createEvidenceRouter(
       try {
         const { projectId, evidenceId } = req.params;
         const job = await jobSvc.enqueueDocumentIngestion(projectId, evidenceId);
-        res.status(202).json({
+        const statusCode = job.status === 'completed' ? 200 : 202;
+        res.status(statusCode).json({
           job: {
             id: job.id,
             projectId: job.projectId,

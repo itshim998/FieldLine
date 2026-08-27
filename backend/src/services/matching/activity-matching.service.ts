@@ -47,17 +47,14 @@ export class ActivityMatchingService {
   }
 
   /**
-   * Matches structured field progress extraction items against project activities
-   * and optionally persists candidates as 'suggested' matches.
+   * Computes candidate matches for field progress extraction items without mutating database state.
    */
-  async matchProgressUpdate(
+  async computeMatches(
     projectId: string,
-    progressUpdateId: string,
     extraction: FieldProgressExtraction,
     options: MatchingOptions = {}
-  ): Promise<MatchReportResult> {
+  ): Promise<FieldFactMatchResult[]> {
     const {
-      persist = true,
       minConfidenceThreshold = DEFAULT_MIN_CONFIDENCE_THRESHOLD,
       alternativeScoreMargin = DEFAULT_ALTERNATIVE_SCORE_MARGIN,
       maxAlternatives = DEFAULT_MAX_ALTERNATIVES,
@@ -70,15 +67,7 @@ export class ActivityMatchingService {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Verify progress report exists and belongs to the specified project (strict isolation)
-    const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
-    if (!progressRecord) {
-      throw new NotFoundError(
-        `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
-      );
-    }
-
-    // 3. Fetch scheduled activities for this project
+    // 2. Fetch scheduled activities for this project
     const activities = this.activityRepo.listByProjectId(projectId);
     logger.debug(`ActivityMatchingService: Loaded ${activities.length} activities for project ${projectId}`);
 
@@ -93,15 +82,10 @@ export class ActivityMatchingService {
           alternatives: []
         });
       }
-
-      return {
-        projectId,
-        progressUpdateId,
-        matches: matchResults
-      };
+      return matchResults;
     }
 
-    // 4. Score each field fact against project activities
+    // 3. Score each field fact against project activities
     for (const fact of extraction.items) {
       const candidates: CandidateMatch[] = [];
 
@@ -142,7 +126,38 @@ export class ActivityMatchingService {
       });
     }
 
-    // 5. Persist suggested matches if requested
+    return matchResults;
+  }
+
+  /**
+   * Matches structured field progress extraction items against project activities
+   * and optionally persists candidates as 'suggested' matches.
+   */
+  async matchProgressUpdate(
+    projectId: string,
+    progressUpdateId: string,
+    extraction: FieldProgressExtraction,
+    options: MatchingOptions = {}
+  ): Promise<MatchReportResult> {
+    const { persist = true } = options;
+
+    // 1. Verify progress report exists and belongs to the specified project (strict isolation)
+    const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
+    if (!progressRecord) {
+      // Also verify project exists for appropriate error message
+      const project = this.projectRepo.getById(projectId);
+      if (!project) {
+        throw new NotFoundError(`Project with ID '${projectId}' not found`);
+      }
+      throw new NotFoundError(
+        `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
+      );
+    }
+
+    // 2. Compute candidate matches
+    const matchResults = await this.computeMatches(projectId, extraction, options);
+
+    // 3. Persist suggested matches if requested
     if (persist) {
       // Clean up only previous suggestions for this report to preserve human-reviewed confirmed/rejected matches
       this.activityMatchRepo.deleteSuggestedByProgressUpdateId(progressUpdateId, projectId);

@@ -531,10 +531,34 @@ frontend/
     - Scope Boundary:
       - *Pass 14 = synchronous document ingestion*
       - *Pass 15 = asynchronous / in-process processing jobs*
-      - *Pass 16 = failure isolation and idempotency hardening*
-
-
-
-
-
-
+      - *Pass 16 = failure safety + repeatability + content identity*
+16. **Pass 15 — In-Process Processing Jobs**:
+    - Dedicated asynchronous in-process processing jobs architecture (`processing_jobs` SQLite table) using an in-process worker model without external message queues or brokers (no Redis, BullMQ, Kafka, or worker threads).
+    - Status lifecycle: `queued` → `processing` → `completed` | `failed`.
+    - Single-claimer lease pattern with automatic stale job recovery on application boot or worker poll.
+    - Bounded result JSON storage (`evidenceId`, `progressUpdateId`, `matchCount`, `sourceType`).
+    - REST endpoints:
+      - `POST /api/projects/:projectId/evidence/:evidenceId/process` (HTTP 202 Accepted)
+      - `GET /api/projects/:projectId/jobs/:jobId`
+      - `GET /api/projects/:projectId/jobs`
+17. **Pass 16 — Failure Isolation & Idempotency**:
+    - **Evidence Identity via Content SHA-256**:
+      - Server computes SHA-256 digest on raw uploaded file bytes (never trusting client-supplied hashes).
+      - Lowercase 64-character hexadecimal representation persisted in `evidence.content_sha256`.
+      - Project-scoped uniqueness guaranteed via `UNIQUE(project_id, content_sha256)` index.
+      - Cross-project same-content uploads remain independent; intra-project duplicate uploads reuse the existing Evidence record.
+      - Filesystem safety: temporary duplicate uploads are cleanly discarded without creating redundant permanent files or overwriting existing evidence files. Database insertion failures cleanly remove only newly created permanent files.
+    - **Processing Identity & Idempotency**:
+      - Evidence-scoped job idempotency:
+        - First processing request → creates a new queued job.
+        - Repeated request during active processing → returns existing queued/processing job.
+        - Repeated request after completion → returns existing completed job without re-executing `DocumentIngestionService` or creating duplicate `ProgressUpdate` or `ActivityMatch` records.
+        - Failed previous attempt → permits an explicit new processing retry attempt while preserving historical failed job records.
+    - **Atomic Project-State Transaction Boundary**:
+      - Heavy and asynchronous operations (file loading, document extractors, OCR, AI extraction, candidate match ranking, disambiguation) execute **strictly outside** the SQLite transaction.
+      - Single short-lived atomic SQLite transaction commits `ProgressUpdate` + `Evidence` linkage + suggested `ActivityMatches` + `ProjectEvents`.
+      - If any database mutation fails, the transaction is completely rolled back, leaving zero orphaned progress updates or partial matches.
+      - Historical valid `ActivityProgress` records (e.g. 60% completion) remain completely untouched and uncorrupted on processing failure.
+    - **Job Lifecycle Consistency**:
+      - Job is marked `completed` only AFTER the durable project-state transaction commits.
+      - Job is marked `failed` upon unhandled processing failure after transaction rollback.

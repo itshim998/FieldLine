@@ -26,6 +26,7 @@ import {
 import {
   UploadedFilePayload,
   UploadEvidenceOptions,
+  UploadEvidenceResult,
   EvidenceFileContentResult,
   EvidenceService
 } from './evidence.types.js';
@@ -122,7 +123,7 @@ export class DefaultEvidenceService implements EvidenceService {
     projectId: string,
     file: UploadedFilePayload,
     options?: UploadEvidenceOptions
-  ): Promise<Evidence> {
+  ): Promise<UploadEvidenceResult> {
     // 1. Verify project exists
     const project = this.projectRepo.getById(projectId);
     if (!project) {
@@ -153,10 +154,40 @@ export class DefaultEvidenceService implements EvidenceService {
       throw new ValidationError('Uploaded file temporary source not found');
     }
 
-    // 4. File type resolution
+    // 4. Compute SHA-256 hash of actual file bytes
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = fs.readFileSync(file.path);
+    } catch (readErr) {
+      throw new ValidationError(`Failed to read uploaded temporary file: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+    }
+
+    const contentSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex').toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
+      throw new ValidationError('Computed content SHA-256 hash is invalid');
+    }
+
+    // 5. Check for duplicate evidence in this project
+    const existingEvidence = this.evidenceRepo.findByProjectIdAndHash(projectId, contentSha256);
+    if (existingEvidence) {
+      // Discard temporary duplicate upload file cleanly
+      if (fs.existsSync(file.path)) {
+        try {
+          fs.unlinkSync(file.path);
+        } catch {
+          // Ignore temp cleanup error
+        }
+      }
+      return {
+        ...existingEvidence,
+        deduplicated: true
+      };
+    }
+
+    // 6. File type resolution
     const fileType = options?.fileType || detectEvidenceFileType(file.originalname, file.mimetype);
 
-    // 5. Generate server-controlled safe filename and destination directory
+    // 7. Generate server-controlled safe filename and destination directory
     const rawExt = path.extname(file.originalname).toLowerCase();
     const safeExt = /^\.[a-z0-9]+$/i.test(rawExt) ? rawExt : '';
     const generatedFilename = `evidence-${Date.now()}-${crypto.randomUUID()}${safeExt}`;
@@ -173,7 +204,7 @@ export class DefaultEvidenceService implements EvidenceService {
       throw new ValidationError('Invalid target storage path detected');
     }
 
-    // 6. Move/copy file to target storage path
+    // 8. Move/copy file to target storage path
     try {
       fs.copyFileSync(file.path, targetFilePath);
       // Try to clean up temp file if different from target
@@ -190,7 +221,7 @@ export class DefaultEvidenceService implements EvidenceService {
       );
     }
 
-    // 7. Persist evidence row and project event in a single SQLite transaction
+    // 9. Persist evidence row and project event in a single SQLite transaction
     const evidenceId = crypto.randomUUID();
     const relativePath = `${projectId}/${generatedFilename}`;
 
@@ -203,7 +234,8 @@ export class DefaultEvidenceService implements EvidenceService {
       fileType,
       fileSizeBytes: file.size,
       mimeType: file.mimetype ?? null,
-      metadataJson: options?.metadataJson ?? null
+      metadataJson: options?.metadataJson ?? null,
+      contentSha256
     };
 
     const eventInput: CreateProjectEventInput = {
@@ -218,15 +250,19 @@ export class DefaultEvidenceService implements EvidenceService {
         fileType,
         fileSizeBytes: file.size,
         mimeType: file.mimetype ?? null,
-        progressUpdateId: options?.progressUpdateId ?? null
+        progressUpdateId: options?.progressUpdateId ?? null,
+        contentSha256
       })
     };
 
     try {
       const persisted = this.evidenceRepo.createWithEvent(evidenceInput, eventInput);
-      return persisted;
+      return {
+        ...persisted,
+        deduplicated: false
+      };
     } catch (dbError) {
-      // Clean up the physical file on database failure to preserve atomicity
+      // Clean up the newly created permanent file on database failure to preserve atomicity
       if (fs.existsSync(targetFilePath)) {
         try {
           fs.unlinkSync(targetFilePath);

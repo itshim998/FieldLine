@@ -13,6 +13,10 @@ export interface UploadEvidenceOptions {
   metadataJson?: string | null;
 }
 
+export interface UploadEvidenceResult extends Evidence {
+  deduplicated: boolean;
+}
+
 export interface EvidenceFileContentResult {
   evidence: Evidence;
   absoluteFilePath: string;
@@ -26,7 +30,7 @@ export interface EvidenceService {
     projectId: string,
     file: UploadedFilePayload,
     options?: UploadEvidenceOptions
-  ): Promise<Evidence>;
+  ): Promise<UploadEvidenceResult>;
   listProjectEvidence(projectId: string): Evidence[];
   getEvidence(projectId: string, evidenceId: string): Evidence;
   getEvidenceContent(projectId: string, evidenceId: string): EvidenceFileContentResult;
