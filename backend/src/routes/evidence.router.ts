@@ -3,10 +3,7 @@ import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs';
 import { evidenceService as defaultEvidenceService, EvidenceService } from '../services/evidence/evidence.service.js';
-import {
-  documentIngestionService as defaultIngestionService,
-  DocumentIngestionService
-} from '../services/ingestion/document-ingestion.service.js';
+import { JobService, jobService as defaultJobService } from '../jobs/job.service.js';
 import { validateParams } from '../middleware/validate.js';
 import {
   evidenceProjectIdParamSchema,
@@ -20,7 +17,7 @@ import { env } from '../config/env.js';
 
 export function createEvidenceRouter(
   service: EvidenceService = defaultEvidenceService,
-  ingestionService: DocumentIngestionService = defaultIngestionService
+  jobSvc: JobService = defaultJobService
 ): Router {
   const router = Router();
 
@@ -215,15 +212,23 @@ export function createEvidenceRouter(
     }
   );
 
-  // POST /projects/:projectId/evidence/:evidenceId/process - Process evidence document and create progress update
+  // POST /projects/:projectId/evidence/:evidenceId/process - Enqueue document ingestion job asynchronously
   router.post(
     '/projects/:projectId/evidence/:evidenceId/process',
     validateParams(evidenceParamsSchema),
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, evidenceId } = req.params;
-        const result = await ingestionService.processEvidence(projectId, evidenceId);
-        res.status(200).json(result);
+        const job = await jobSvc.enqueueDocumentIngestion(projectId, evidenceId);
+        res.status(202).json({
+          job: {
+            id: job.id,
+            projectId: job.projectId,
+            jobType: job.jobType,
+            status: job.status,
+            createdAt: job.createdAt
+          }
+        });
       } catch (error) {
         next(error);
       }

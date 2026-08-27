@@ -79,8 +79,12 @@ describe('Database Migration Engine', () => {
     // 2. Run the migration engine
     const result = runMigrations(db);
 
-    // 3. Verify that 0003 and 0004 were applied
-    expect(result.applied).toEqual(['0003_upgrade_metadata_for_pass2', '0004_upgrade_cross_project_integrity']);
+    // 3. Verify that 0003, 0004, and 0005 were applied
+    expect(result.applied).toEqual([
+      '0003_upgrade_metadata_for_pass2',
+      '0004_upgrade_cross_project_integrity',
+      '0005_processing_jobs'
+    ]);
     expect(result.alreadyApplied).toContain('0001_baseline_system_metadata');
     expect(result.alreadyApplied).toContain('0002_core_domain_schema');
 
@@ -254,8 +258,8 @@ describe('Database Migration Engine', () => {
     // 3. Run migration engine to apply 0004
     const result = runMigrations(db);
 
-    // 4. Verify only 0004 was applied
-    expect(result.applied).toEqual(['0004_upgrade_cross_project_integrity']);
+    // 4. Verify 0004 and 0005 were applied
+    expect(result.applied).toEqual(['0004_upgrade_cross_project_integrity', '0005_processing_jobs']);
 
     // 5. Verify all existing valid data is preserved
     const project = db.prepare('SELECT name FROM projects WHERE id = ?').get('p1') as { name: string };

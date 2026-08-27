@@ -295,7 +295,11 @@ export type ProjectEventType =
   | 'progress_updated'
   | 'delay_detected'
   | 'variance_alert'
-  | 'evidence_uploaded';
+  | 'evidence_uploaded'
+  | 'processing_job_queued'
+  | 'processing_job_started'
+  | 'processing_job_completed'
+  | 'processing_job_failed';
 
 export interface ProjectEvent {
   id: string;
@@ -435,5 +439,45 @@ export interface ProjectRiskStatus {
   generatedAt?: string;
   activities: ActivityRiskStatusItem[];
   summary: ProjectRiskSummary;
+}
+
+// ==========================================
+// 11. In-Process Processing Jobs (Pass 15)
+// ==========================================
+export type ProcessingJobStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type ProcessingJobType = 'document_ingestion';
+
+export interface DocumentIngestionJobPayload {
+  evidenceId: string;
+}
+
+export interface DocumentIngestionJobResult {
+  evidenceId: string;
+  progressUpdateId?: string;
+  matchCount?: number;
+  sourceType?: string;
+}
+
+export interface ProcessingJob {
+  id: string;
+  projectId: string;
+  jobType: ProcessingJobType;
+  status: ProcessingJobStatus;
+  payload: Record<string, unknown> | DocumentIngestionJobPayload;
+  result: Record<string, unknown> | DocumentIngestionJobResult | null;
+  errorMessage: string | null;
+  attemptCount: number;
+  lockedAt: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}
+
+export interface CreateProcessingJobInput {
+  id?: string;
+  projectId: string;
+  jobType: ProcessingJobType;
+  payload: Record<string, unknown> | DocumentIngestionJobPayload;
 }
 

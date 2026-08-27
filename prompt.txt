@@ -1,474 +1,1104 @@
-# FieldLine — PASS 14 CORRECTIVE FIX
+# FieldLine — PASS 15: In-Process Processing Jobs
 
-The latest Pass 14 commit:
+You are implementing **Pass 15 — In-process Processing Jobs** in the existing FieldLine repository.
 
-```text id="stg9xz"
-eda4f4172e54d2a3cd1e8a347bfd0da2ac93f39b
+Approved base:
+
+```text
+babed120a01978c8d39478660255e323250a6dd0
 ```
 
-was independently reviewed and is NOT approved.
+Current approved state:
 
-Do not start Pass 15.
+```text
+PASS 13 — Evidence System ✅
+PASS 14 — Document Ingestion ✅
+```
 
-Fix ONLY the following Pass 14 issues.
+Do NOT implement Pass 16.
 
 ---
 
-# BLOCKER 1 — Implement real scanned-PDF OCR
+# 1. Objective
 
-Current `PdfExtractor` detects sparse/no embedded text and invokes `OcrExtractor` with the original PDF buffer.
+Move expensive document ingestion out of the HTTP request path.
 
-That is not a valid PDF OCR pipeline.
-
-Current conceptual behavior:
+Current Pass 14 behavior is synchronous:
 
 ```text
-PDF bytes
-↓
-Tesseract OCR
-```
-
-This must become:
-
-```text
-scanned PDF
-↓
-render PDF page(s) to raster image(s)
-↓
-OCR each rendered page
-↓
-combine page OCR text in deterministic page order
-↓
-NormalizedDocument
-```
-
-## Requirements
-
-For a valid PDF with little/no usable embedded text:
-
-1. determine the pages that need OCR
-2. render those pages to images using a local Node-compatible implementation
-3. OCR the rendered images
-4. preserve page ordering
-5. bound page count and output length
-6. normalize OCR output
-7. return:
-
-```text
-sourceType = 'pdf'
-metadata.fallbackMethod = 'ocr'
-```
-
-Do not pass raw PDF bytes directly into Tesseract.
-
-The OCR engine abstraction may remain:
-
-```ts
-interface OcrEngine {
-  recognize(imageBuffer: Buffer): Promise<{
-    text: string;
-    confidence?: number;
-  }>;
-}
-```
-
-That abstraction should receive actual image bytes.
-
-## PDF parse fallback
-
-Currently PDF parsing errors immediately become:
-
-```text
-ValidationError("Failed to parse PDF...")
-```
-
-Do not prevent the OCR path merely because embedded text extraction failed.
-
-Separate these conditions:
-
-```text
-PDF structurally unreadable
-vs
-PDF structurally readable but contains little/no embedded text
-```
-
-For a structurally valid scanned PDF, OCR must be reachable.
-
-Do not hide genuinely corrupt PDFs.
-
-## Tests
-
-Add a realistic scanned-PDF regression using a real or generated PDF fixture whose pages contain raster text.
-
-The test must prove:
-
-```text
-PDF
-↓
-rendered page image
-↓
-OCR
-↓
-non-empty normalized text
-```
-
-Do not satisfy this test merely by mocking OCR against raw PDF bytes.
-
-Retain existing embedded-text PDF tests.
-
----
-
-# BLOCKER 2 — Do not persist ProgressUpdate before the processing workflow is valid
-
-Current sequence:
-
-```text
-extract document
-↓
-create ProgressUpdate
-↓
-attach evidence
-↓
+POST /evidence/:evidenceId/process
+        ↓
+DocumentIngestionService.processEvidence(...)
+        ↓
+document extraction
+        ↓
 AI extraction
+        ↓
+ProgressUpdate
+        ↓
+Evidence linkage
+        ↓
+ActivityMatchingService
+        ↓
+HTTP response
 ```
 
-is unsafe.
-
-AI extraction failure can leave a persistent ProgressUpdate behind.
-
-Change the workflow so failed document processing does not leave a partially-created progress capture.
-
-Required conceptual sequence:
+Pass 15 must change this to:
 
 ```text
-1. validate project/evidence
-2. extract document
-3. validate normalized text
-4. AI field extraction
-5. persist ProgressUpdate
-6. attach evidence
-7. run ActivityMatchingService
-8. return result
+POST /evidence/:evidenceId/process
+        ↓
+create SQLite processing job
+        ↓
+HTTP 202 Accepted
+        ↓
+same Node process worker
+        ↓
+claim job
+        ↓
+DocumentIngestionService.processEvidence(...)
+        ↓
+completed / failed
 ```
 
-However, preserve the existing downstream architecture and ensure persistence is failure-safe.
+No separate deployment service is required.
 
-If persistence of the ProgressUpdate + evidence association needs transaction support, use the existing repository/database transaction conventions.
+No separate worker process is required.
 
-Do not create a second persistence model.
+No Redis or external queue is allowed.
 
 ---
 
-# BLOCKER 3 — Evidence provenance failure MUST NOT be swallowed
+# 2. Current repository state
 
-Current code does:
+The repository is a local TypeScript/Express/SQLite monolith.
 
-```ts
-try {
-  attachToProgressUpdate(...)
-} catch {
-  logger.warn(...)
-}
-```
-
-This is unacceptable.
-
-A successful document-processing operation must guarantee:
+Current important architecture:
 
 ```text
-Evidence.progressUpdateId = created ProgressUpdate
+frontend React
+    ↓
+Express routes
+    ↓
+validation
+    ↓
+services
+    ↓
+repositories
+    ↓
+SQLite
 ```
 
-If attachment fails:
+The current `backend/src/jobs/` directory contains only:
 
 ```text
-processing must fail
+.gitkeep
 ```
 
-Do not continue and do not return success.
+Do not assume there is an existing job implementation.
 
-Do not merely log the error.
+SQLite:
 
-The originating Evidence must remain the authoritative source artifact.
+* uses `better-sqlite3`
+* enables foreign keys
+* uses WAL for file-backed DBs
+* already exposes `runInTransaction()`
+* has sequential migrations
 
-Add a regression test:
+Use these existing primitives.
 
-```text
-evidence
-+
-successful extraction
-+
-simulated attach failure
-```
-
-Expected result:
-
-```text
-processing fails
-no successful processing response
-no silently orphaned ProgressUpdate
-```
-
-If a ProgressUpdate was already created before the attachment failure, it must be rolled back/deleted as part of the failure-safe transaction.
-
-Do not leave partial state.
+Do not introduce a new persistence technology.
 
 ---
 
-# BLOCKER 4 — Reuse ActivityMatchingService
+# 3. Existing Pass 14 processing service
 
-The current implementation ends at:
+The existing:
+
+```text
+DefaultDocumentIngestionService
+```
+
+already owns the document-processing business operation.
+
+Its current pipeline is:
 
 ```text
 Evidence
 ↓
 Document extraction
 ↓
-ProgressUpdate
-↓
-FieldProgressExtractionService
-```
-
-Pass 14 must also connect the extracted facts into the EXISTING matching pipeline.
-
-Do NOT implement another matcher.
-
-Use:
-
-```text id="gx8n0q"
-ActivityMatchingService
-```
-
-with its existing semantics.
-
-The flow must be:
-
-```text
-Document
-↓
-format extractor
-↓
 NormalizedDocument
 ↓
-ProgressUpdate
+report date extraction
 ↓
 FieldProgressExtractionService
 ↓
-FieldProgressExtraction
+ProgressUpdate persistence
+↓
+Evidence → ProgressUpdate linkage
 ↓
 ActivityMatchingService
 ↓
-suggested ActivityMatch records
+suggested matches
 ```
 
-Do NOT automatically confirm matches.
+Do NOT move this business logic into the worker.
 
-Do NOT bypass the existing human-review boundary.
-
-Do NOT create ActivityProgress automatically from an unconfirmed suggested match.
-
-The existing ProgressService remains responsible for canonical progress persistence.
-
-Therefore the new processing response should expose:
-
-```text
-evidence
-progressUpdate
-normalizedDocument
-extraction
-matches
-```
-
-where `matches` are the normal results returned by the existing ActivityMatchingService.
-
-## Matching tests
-
-Add an integration test:
-
-```text
-XLSX/PDF evidence
-↓
-process
-↓
-ProgressUpdate created
-↓
-AI extraction
-↓
-ActivityMatchingService
-↓
-suggested match persisted
-```
-
-Verify the existing match status is:
-
-```text
-suggested
-```
-
-not:
-
-```text
-confirmed
-```
-
-Then separately verify that a confirmed match can still flow through the existing ProgressService.
-
-Do not duplicate progress normalization.
-
----
-
-# BLOCKER 5 — Preserve correct report date
-
-Do not use:
+The worker must simply invoke:
 
 ```ts
-new Date().toISOString().slice(0, 10)
+documentIngestionService.processEvidence(projectId, evidenceId)
 ```
 
-as the unconditional ProgressUpdate report date.
+The job system is orchestration/infrastructure around this service.
 
-The source document may contain an explicit report date.
+---
 
-Add a deterministic mechanism to identify an explicit report date from normalized document content before creating the ProgressUpdate.
+# 4. Required job state machine
 
-Requirements:
+Implement exactly these primary states:
 
 ```text
-explicit defensible date in document
-    ↓
-use it
+queued
+processing
+completed
+failed
 ```
 
+Transitions:
+
+```text
+queued → processing
+processing → completed
+processing → failed
+```
+
+For stale recovery after process restart:
+
+```text
+processing (stale)
+        ↓
+queued
+```
+
+Do not create additional public job states unless there is a compelling implementation reason.
+
+---
+
+# 5. Database migration
+
+Create a new sequential migration after the existing migrations.
+
+Do NOT modify old migration files.
+
+Create a table conceptually:
+
+```sql
+processing_jobs
+```
+
+Recommended columns:
+
+```text
+id
+project_id
+job_type
+status
+payload_json
+result_json
+error_message
+attempt_count
+locked_at
+created_at
+started_at
+completed_at
+updated_at
+```
+
+Constraints:
+
+```text
+project_id REFERENCES projects(id) ON DELETE CASCADE
+
+status CHECK (
+  status IN ('queued', 'processing', 'completed', 'failed')
+)
+
+job_type CHECK (
+  job_type IN ('document_ingestion')
+)
+```
+
+Use appropriate indexes:
+
+```text
+(project_id, created_at)
+(project_id, status, created_at)
+(status, created_at)
+```
+
+Do NOT store raw document content in `processing_jobs`.
+
+Payload for the first job type should contain only:
+
+```json
+{
+  "evidenceId": "..."
+}
+```
+
+Do not introduce arbitrary workflow payloads.
+
+---
+
+# 6. Job domain types
+
+Create strongly typed job models.
+
+Conceptually:
+
+```ts
+type ProcessingJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed';
+
+type ProcessingJobType =
+  | 'document_ingestion';
+```
+
+A job should expose:
+
+```text
+id
+projectId
+jobType
+status
+payload
+result
+errorMessage
+attemptCount
+lockedAt
+createdAt
+startedAt
+completedAt
+updatedAt
+```
+
+Keep internal DB row mapping separate from domain types.
+
+---
+
+# 7. Repository
+
+Create:
+
+```text
+backend/src/jobs/job.repository.ts
+```
+
+using the same repository style as existing repositories.
+
+At minimum support:
+
+```text
+create(...)
+getByIdAndProjectId(...)
+listByProjectId(...)
+findExistingActiveDocumentIngestionJob(...)
+claimNextQueued(...)
+markCompleted(...)
+markFailed(...)
+requeueStaleProcessingJobs(...)
+```
+
+Use project scoping where appropriate.
+
+Do not expose raw SQLite details to the service layer.
+
+---
+
+# 8. Queue insertion
+
+Create a job service:
+
+```text
+backend/src/jobs/job.service.ts
+```
+
+Responsibilities:
+
+* validate project
+* validate evidence
+* prevent duplicate active document-processing jobs
+* create queued job
+* emit queue event
+
+For:
+
+```text
+POST /api/projects/:projectId/evidence/:evidenceId/process
+```
+
+do:
+
+```text
+verify Evidence belongs to project
+↓
+check active queued/processing document_ingestion job
+↓
+if one exists:
+    return existing job
 otherwise:
-
-```text
-no defensible date
-    ↓
-use an explicitly documented fallback
+    create queued job
 ```
 
-Do NOT ask the AI field-fact extraction model to invent a report date if the current contract does not support one.
+Do not process the evidence during this HTTP request.
 
-Do not silently shift a historical field report to the processing date.
-
-Add a regression test showing a document containing:
+Return:
 
 ```text
-Report Date: 2026-08-25
-```
-
-creates a ProgressUpdate with:
-
-```text
-reportDate = 2026-08-25
+202 Accepted
 ```
 
 ---
 
-# Failure invariants
+# 9. Existing process endpoint changes
 
-After this correction:
-
-## Extraction failure
+Keep the existing endpoint:
 
 ```text
-Evidence remains intact
-ProgressUpdate does not exist
+POST /api/projects/:projectId/evidence/:evidenceId/process
 ```
 
-## AI extraction failure
+but change its semantics from synchronous processing to job enqueueing.
 
-```text
-Evidence remains intact
-ProgressUpdate does not exist
+Expected conceptual response:
+
+```json
+{
+  "job": {
+    "id": "...",
+    "projectId": "...",
+    "jobType": "document_ingestion",
+    "status": "queued",
+    "createdAt": "..."
+  }
+}
 ```
 
-## Evidence attachment failure
-
-```text
-Evidence remains intact
-ProgressUpdate does not remain partially persisted
-operation fails
-```
-
-## Matching failure
-
-Do not fabricate activity identity.
-
-The ProgressUpdate may exist as the captured raw report if extraction itself succeeded, but the system must clearly surface matching failure and must not fabricate ActivityProgress.
-
-Use the existing downstream service semantics.
+Do not return extraction results from this endpoint anymore.
 
 ---
 
-# Do NOT change
+# 10. Job status API
 
-Do not modify:
+Add:
 
 ```text
-Pass 13 Evidence architecture
-Pass 9 match status semantics
-Pass 10 ProgressService architecture
-Pass 11 Planned vs Actual Engine
-Pass 12 Risk Engine
+GET /api/projects/:projectId/jobs/:jobId
 ```
 
-Do not implement:
+Project scope is mandatory.
+
+Expected behavior:
 
 ```text
-Pass 15 processing jobs
-Pass 16 full idempotency/deduplication
-background workers
-queue infrastructure
-cloud OCR
-cloud document APIs
-embeddings
-vector search
-dashboard redesign
-new matching algorithm
-new AI extraction prompt
+queued
+    → status only
+
+processing
+    → status + startedAt
+
+completed
+    → status + completedAt + result
+
+failed
+    → status + completedAt + sanitized error message
 ```
 
-Do not replace the existing:
+Do NOT return:
+
+* stack traces
+* filesystem paths
+* arbitrary payload internals
+* sensitive provider errors
+
+---
+
+# 11. Optional project job list
+
+Add:
 
 ```text
+GET /api/projects/:projectId/jobs?type=document_ingestion
+```
+
+only if it fits existing route conventions cleanly.
+
+It is useful for the frontend and debugging.
+
+Do not make a generic workflow-management UI.
+
+---
+
+# 12. Worker
+
+Create a dedicated worker under:
+
+```text
+backend/src/jobs/
+```
+
+For example:
+
+```text
+document-ingestion.worker.ts
+worker-runner.ts
+```
+
+Architecture:
+
+```text
+WorkerRunner
+   ↓
+JobRepository.claimNextQueued()
+   ↓
+DocumentIngestionWorker
+   ↓
+DocumentIngestionService.processEvidence()
+```
+
+The worker must run inside the SAME Node process.
+
+Use one worker only.
+
+Do not use worker threads.
+
+Do not spawn child processes.
+
+Do not introduce external queues.
+
+---
+
+# 13. Job claiming
+
+Claiming a queued job must be safe against accidental double execution.
+
+Even though Pass 15 uses one worker, implement claim semantics in SQLite so the intended state transition is explicit.
+
+A job should only be claimed if:
+
+```text
+status = 'queued'
+```
+
+and claiming should atomically set:
+
+```text
+status = 'processing'
+started_at = now
+locked_at = now
+attempt_count = attempt_count + 1
+updated_at = now
+```
+
+The repository should return the claimed job or null.
+
+Do not hold a SQLite transaction open while performing:
+
+* PDF parsing
+* OCR
+* AI calls
+* document extraction
+
+The database transaction is only for job-state transition.
+
+---
+
+# 14. Worker execution
+
+For a claimed job:
+
+1. validate payload
+2. verify evidence still exists
+3. verify evidence belongs to job.projectId
+4. call:
+
+```ts
+documentIngestionService.processEvidence(
+  job.projectId,
+  payload.evidenceId
+)
+```
+
+5. on success:
+
+   * serialize a bounded result
+   * mark job completed
+6. on ordinary processing failure:
+
+   * mark job failed
+   * store sanitized error message
+7. continue worker loop
+
+A failed job must NOT crash the Node process.
+
+The worker must continue processing later jobs.
+
+---
+
+# 15. Result storage
+
+For completed jobs, store only useful bounded result metadata.
+
+Do NOT persist massive extracted text or raw OCR output in the jobs table.
+
+Prefer storing something like:
+
+```json
+{
+  "evidenceId": "...",
+  "progressUpdateId": "...",
+  "matchCount": 2,
+  "sourceType": "xlsx"
+}
+```
+
+The complete underlying records remain available from the existing Evidence, ProgressUpdate and ActivityMatch APIs.
+
+---
+
+# 16. Failure handling
+
+When the processing service throws:
+
+```text
+queued
+↓
+processing
+↓
+failed
+```
+
+Store:
+
+```text
+error_message
+completed_at
+updated_at
+```
+
+Do not retry automatically.
+
+Do not crash the worker.
+
+Do not delete the job.
+
+The failed job should remain inspectable through:
+
+```text
+GET /api/projects/:projectId/jobs/:jobId
+```
+
+---
+
+# 17. Stale job recovery
+
+On worker startup, recover abandoned jobs.
+
+Conceptually:
+
+```text
+processing job
++
+locked_at is older than configured lease threshold
+        ↓
+requeue
+        ↓
+queued
+```
+
+Add:
+
+```text
+requeueStaleProcessingJobs()
+```
+
+to the job repository.
+
+The threshold must be configurable.
+
+Do not use an extremely small timeout because OCR/PDF/AI processing can legitimately be slow.
+
+Do not reset every processing job immediately unless the implementation can prove it belongs to a dead worker.
+
+A practical local-worker lease is sufficient for this pass.
+
+---
+
+# 18. Worker lifecycle
+
+Current `backend/src/index.ts` does:
+
+```text
+initDatabase()
+createApp()
+app.listen()
+```
+
+and has graceful SIGINT/SIGTERM handling.
+
+Extend it to:
+
+```text
+initDatabase()
+recover stale jobs
+start worker
+create app
+start HTTP server
+```
+
+On shutdown:
+
+```text
+stop accepting new work
+stop worker polling
+allow current job state to settle according to the chosen shutdown policy
+close server
+close database
+```
+
+Do NOT terminate the process while a worker is actively executing in a way that would leave state incorrectly marked as completed.
+
+A clean approach is:
+
+```text
+stop scheduling new jobs
+wait for current worker iteration
+close server
+close DB
+```
+
+The implementation does not need elaborate shutdown orchestration.
+
+---
+
+# 19. Worker polling
+
+Use a small configurable polling interval, e.g.:
+
+```text
+250–1000 ms
+```
+
+Do not busy-loop.
+
+Use a timer.
+
+Ensure multiple timers are not accidentally started.
+
+Expose a small lifecycle API:
+
+```text
+start()
+stop()
+isRunning()
+```
+
+Make it testable without starting the real HTTP server.
+
+---
+
+# 20. Basic duplicate-active-job prevention
+
+Do NOT implement full Pass 16 idempotency.
+
+However, prevent obvious duplicate concurrent document-ingestion jobs.
+
+For a given:
+
+```text
+projectId
+evidenceId
+jobType = document_ingestion
+```
+
+if an existing job is:
+
+```text
+queued
+OR
+processing
+```
+
+reuse that job rather than creating another.
+
+A completed/failed historical job should NOT automatically block a future explicit process request.
+
+Do not introduce content hashes.
+
+Do not introduce an idempotency-key protocol.
+
+---
+
+# 21. Project isolation
+
+All job operations must be project-scoped.
+
+Examples:
+
+```text
+Project A cannot retrieve Project B's job.
+
+Project A cannot enqueue a job for Project B evidence.
+
+Project B cannot claim a Project A job.
+
+Job payload evidenceId must belong to the same project_id.
+
+Cross-project job status access must return 404.
+```
+
+The database should enforce:
+
+```text
+processing_jobs.project_id → projects.id
+```
+
+The service must also verify the Evidence project association before processing.
+
+---
+
+# 22. Project events
+
+Reuse existing `project_events`.
+
+Emit:
+
+```text
+processing_job_queued
+processing_job_started
+processing_job_completed
+processing_job_failed
+```
+
+with:
+
+```text
+entity_type = 'processing_job'
+entity_id = job.id
+```
+
+Payloads should contain bounded metadata only.
+
+Do NOT create a separate `job_events` table.
+
+Do NOT store filesystem paths.
+
+---
+
+# 23. Frontend integration
+
+Current Pass 14 Evidence cards contain:
+
+```text
+Process
+Processing...
+Processed
+Retry Process
+```
+
+Adapt this UI to asynchronous jobs.
+
+New flow:
+
+```text
+click Process
+↓
+POST endpoint
+↓
+receive job id
+↓
+show Processing...
+↓
+poll GET /jobs/:jobId
+↓
+completed
+↓
+refresh evidence/progress/match state
+```
+
+On failure:
+
+```text
+failed
+↓
+show sanitized error
+↓
+allow Process again
+```
+
+Do NOT add WebSockets.
+
+Do NOT add SSE.
+
+Do NOT build a global job dashboard.
+
+Keep the UI localized to the existing Evidence workspace.
+
+---
+
+# 24. Testing
+
+Add repository tests for:
+
+```text
+create queued job
+get project-scoped job
+list project jobs
+active duplicate lookup
+claim queued job
+cannot claim already processing job
+mark completed
+mark failed
+requeue stale processing job
+cross-project lookup isolation
+```
+
+Add worker tests for:
+
+```text
+queued job gets processed
+successful processing → completed
+DocumentIngestionService failure → failed
+worker continues after failed job
+malformed job payload → failed
+missing Evidence → failed
+```
+
+Add integration tests for:
+
+```text
+POST /evidence/:evidenceId/process
+→ 202
+→ queued job returned
+```
+
+Then:
+
+```text
+GET /jobs/:jobId
+```
+
+transitions correctly.
+
+Add an end-to-end test:
+
+```text
+Evidence
+↓
+enqueue job
+↓
+worker
+↓
+DocumentIngestionService
+↓
+ProgressUpdate
+↓
+suggested matches
+↓
+job completed
+```
+
+Do not duplicate the Pass 14 extractor tests.
+
+Use mocks/fakes for the worker's document-processing service where appropriate.
+
+---
+
+# 25. Recovery test
+
+This is mandatory.
+
+Create:
+
+```text
+processing job
+locked_at = stale timestamp
+```
+
+start recovery.
+
+Verify:
+
+```text
+status becomes queued
+```
+
+Then run the worker and verify it can process the recovered job.
+
+---
+
+# 26. Failure isolation test
+
+Create two jobs:
+
+```text
+Job A → processing service throws
+Job B → processing service succeeds
+```
+
+Run the worker.
+
+Verify:
+
+```text
+Job A = failed
+Job B = completed
+worker remains alive
+```
+
+This is the primary Pass 15 value proposition.
+
+---
+
+# 27. Concurrency sanity test
+
+Create multiple queued jobs.
+
+Run exactly one worker.
+
+Verify:
+
+```text
+each job is claimed once
+no job remains incorrectly stuck
+```
+
+Do not create concurrent worker instances.
+
+---
+
+# 28. Scope boundary
+
+Do NOT implement:
+
+```text
+automatic retry
+exponential backoff
+dead-letter queues
+content hashing
+duplicate-content detection
+idempotency keys
+distributed workers
+worker threads
+child processes
+Redis
+BullMQ
+RabbitMQ
+Kafka
+external job service
+cloud processing
+```
+
+These are outside Pass 15.
+
+Pass 16 will harden failure isolation and idempotency further.
+
+---
+
+# 29. Important Pass 14 compatibility
+
+Do not break:
+
+```text
+Evidence
+ProgressUpdate
 FieldProgressExtractionService
 ActivityMatchingService
 ProgressService
 ```
 
----
+The worker must reuse the existing document-processing service.
 
-# Tests required
+Do not copy its logic into the worker.
 
-Add/update tests for:
+The existing downstream semantics remain:
 
 ```text
-[ ] embedded-text PDF extraction
-[ ] scanned PDF → rendered page → OCR
-[ ] image → OCR
-[ ] malformed PDF
-[ ] empty OCR
-[ ] AI extraction failure leaves no partial ProgressUpdate
-[ ] evidence attachment failure leaves no partial ProgressUpdate
-[ ] successful processing preserves evidence → ProgressUpdate provenance
-[ ] successful processing invokes ActivityMatchingService
-[ ] matching persists suggested matches
-[ ] suggested matches are not auto-confirmed
-[ ] confirmed match still flows through existing ProgressService
-[ ] explicit report date is preserved
-[ ] full project isolation remains intact
+AI extraction
+↓
+suggested ActivityMatch
+↓
+human review
+↓
+existing ProgressService
 ```
 
-The scanned-PDF test is important:
+Do not auto-confirm matches.
 
-Do NOT use only a mocked `OcrEngine` with a PDF byte buffer and call that proof of scanned-PDF support.
-
-The test must exercise the rendering boundary or a realistic test double representing page rendering.
+Do not create ActivityProgress from unconfirmed suggestions.
 
 ---
 
-# Verification
+# 30. Definition of done
+
+Pass 15 is complete only when:
+
+```text
+[ ] SQLite processing_jobs table exists through a new migration.
+
+[ ] Job states are queued / processing / completed / failed.
+
+[ ] Document ingestion can be enqueued asynchronously.
+
+[ ] Existing process endpoint returns 202 instead of blocking.
+
+[ ] Job status endpoint exists.
+
+[ ] Same Node process contains the worker.
+
+[ ] Worker claims queued jobs atomically.
+
+[ ] Worker invokes existing DocumentIngestionService.
+
+[ ] Successful jobs become completed.
+
+[ ] Ordinary processing failures become failed.
+
+[ ] Failed jobs do not crash the Node process.
+
+[ ] Worker continues after a failed job.
+
+[ ] Stale processing jobs can be recovered after restart.
+
+[ ] Active duplicate jobs for the same evidence are reused.
+
+[ ] Project isolation is enforced.
+
+[ ] Job lifecycle events are recorded using existing project_events.
+
+[ ] Frontend Process button uses asynchronous job polling.
+
+[ ] Existing Pass 13 provenance remains intact.
+
+[ ] Existing Pass 14 processing semantics remain intact.
+
+[ ] Full regression suite passes.
+
+[ ] New job/worker/integration/recovery tests pass.
+
+[ ] npm run build passes.
+
+[ ] No Pass 16 functionality was implemented.
+```
+
+---
+
+# 31. Verification
 
 Run:
 
@@ -477,33 +1107,41 @@ npm test
 npm run build
 ```
 
-Confirm all existing tests remain green.
-
-Inspect the diff for accidental Pass 15+ functionality.
-
-Commit exactly:
+Inspect the final diff carefully for:
 
 ```text
-fix: complete FieldLine document ingestion workflow
+synchronous processing still happening in HTTP route
+multiple worker instances
+unsafe job claiming
+lost/stuck jobs
+project isolation failures
+unbounded job result payloads
+stack traces exposed through API
+automatic retry/idempotency scope leakage
+Pass 16+ functionality
 ```
 
-Push to:
+Commit:
 
 ```text
-main
+feat: implement FieldLine in-process processing jobs
 ```
+
+Push to `main`.
 
 Then report:
 
 ```text
 1. exact files changed
-2. scanned-PDF OCR implementation
-3. failure/rollback behavior
-4. matching integration
-5. report-date handling
-6. tests added
-7. npm test result
-8. build result
-9. commit SHA
-10. any remaining limitations
+2. jobs schema
+3. job state machine
+4. worker architecture
+5. API changes
+6. recovery behavior
+7. frontend behavior
+8. tests added
+9. npm test result
+10. npm run build result
+11. commit SHA
+12. remaining limitations
 ```

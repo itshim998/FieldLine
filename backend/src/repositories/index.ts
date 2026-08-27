@@ -46,4 +46,11 @@ export {
 } from './evidence.repository.js';
 export type { EvidenceRepository } from './evidence.repository.js';
 
+export {
+  SqliteJobRepository,
+  jobRepository
+} from '../jobs/job.repository.js';
+export type { JobRepository } from '../jobs/job.repository.js';
+
+
 

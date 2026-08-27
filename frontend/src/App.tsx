@@ -800,7 +800,7 @@ export function App(): React.JSX.Element {
     }
   };
 
-  // Handle Process Evidence Document (PASS 14)
+  // Handle Process Evidence Document (PASS 15: Asynchronous In-Process Processing Job)
   const handleProcessEvidence = async (evidenceId: string) => {
     if (!selectedProject) return;
 
@@ -810,6 +810,7 @@ export function App(): React.JSX.Element {
     setEvidenceSuccess(null);
 
     try {
+      // 1. Enqueue job (HTTP 202 Accepted)
       const res = await fetch(`/api/projects/${selectedProject.id}/evidence/${evidenceId}/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
@@ -817,25 +818,73 @@ export function App(): React.JSX.Element {
 
       const data = await res.json();
       if (!res.ok) {
-        const errorMsg = data.error?.message || data.message || 'Failed to process evidence document';
+        const errorMsg = data.error?.message || data.error || data.message || 'Failed to enqueue processing job';
         throw new Error(errorMsg);
       }
 
-      setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'processed' }));
-      const factCount = data.extraction?.items?.length ?? 0;
-      setEvidenceSuccess(
-        `Evidence processed successfully! Created Field Progress Report (${data.progressUpdate?.id?.slice(0, 8)}...) with ${factCount} extracted fact${factCount === 1 ? '' : 's'}.`
-      );
-      showNotification(
-        'success',
-        `Evidence processed: ${factCount} fact${factCount === 1 ? '' : 's'} extracted.`
-      );
+      const jobId = data.job?.id;
+      if (!jobId) {
+        throw new Error('No processing job ID returned by backend');
+      }
 
-      // Refresh evidence list and progress updates
-      await Promise.all([
-        fetchEvidence(selectedProject.id),
-        fetchProgressUpdates(selectedProject.id)
-      ]);
+      // 2. Poll job status endpoint
+      const maxAttempts = 120; // 120 seconds max timeout
+      let attempts = 0;
+      let isCompleted = false;
+
+      while (attempts < maxAttempts && !isCompleted) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        attempts++;
+
+        const jobRes = await fetch(`/api/projects/${selectedProject.id}/jobs/${jobId}`);
+        if (!jobRes.ok) {
+          const jobErrData = await jobRes.json().catch(() => ({}));
+          throw new Error(jobErrData.error || `Failed to check status for job ${jobId}`);
+        }
+
+        const jobData = await jobRes.json();
+        const job = jobData.job;
+
+        if (!job) {
+          throw new Error('Invalid job status response received');
+        }
+
+        if (job.status === 'completed') {
+          isCompleted = true;
+          setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'processed' }));
+          const reportId = job.result?.progressUpdateId;
+          const matchCount = job.result?.matchCount ?? 0;
+          const reportSnippet = reportId ? ` (${reportId.slice(0, 8)}...)` : '';
+          
+          setEvidenceSuccess(
+            `Evidence processed successfully! Created Field Progress Report${reportSnippet} with ${matchCount} suggested match${matchCount === 1 ? '' : 'es'}.`
+          );
+          showNotification(
+            'success',
+            `Evidence processed: ${matchCount} suggested match${matchCount === 1 ? '' : 'es'} created.`
+          );
+
+          // Refresh evidence list and progress updates
+          await Promise.all([
+            fetchEvidence(selectedProject.id),
+            fetchProgressUpdates(selectedProject.id)
+          ]);
+        } else if (job.status === 'failed') {
+          isCompleted = true;
+          setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'failed' }));
+          const errorMsg = job.errorMessage || 'Document processing failed';
+          setEvidenceError(errorMsg);
+          showNotification('error', errorMsg);
+        }
+        // If still 'queued' or 'processing', loop continues
+      }
+
+      if (!isCompleted) {
+        setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'failed' }));
+        const timeoutMsg = 'Job processing timed out after 120 seconds. Please check job status or try again.';
+        setEvidenceError(timeoutMsg);
+        showNotification('error', timeoutMsg);
+      }
     } catch (err: unknown) {
       setProcessingStatusMap((prev) => ({ ...prev, [evidenceId]: 'failed' }));
       const msg = err instanceof Error ? err.message : 'Error processing evidence document';

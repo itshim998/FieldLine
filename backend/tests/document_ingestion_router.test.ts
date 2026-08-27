@@ -4,8 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
+import { workerRunner } from '../src/jobs/worker-runner.js';
 
-describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evidenceId/process', () => {
+describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evidenceId/process (Pass 15 Async)', () => {
   let app: ReturnType<typeof createApp>;
   let projectId: string;
   let evidenceId: string;
@@ -54,30 +55,29 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
     closeDatabase();
   });
 
-  it('should synchronously process evidence document and return 200 with extraction result', async () => {
+  it('should enqueue document ingestion job and return 202 Accepted with queued job', async () => {
     const res = await request(app)
       .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
       .send();
 
-    expect(res.status).toBe(200);
-    expect(res.body.evidence).toBeDefined();
-    expect(res.body.evidence.id).toBe(evidenceId);
-    expect(res.body.evidence.progressUpdateId).toBe(res.body.progressUpdate.id);
+    expect(res.status).toBe(202);
+    expect(res.body.job).toBeDefined();
+    expect(res.body.job.id).toBeDefined();
+    expect(res.body.job.projectId).toBe(projectId);
+    expect(res.body.job.jobType).toBe('document_ingestion');
+    expect(res.body.job.status).toBe('queued');
+    expect(res.body.job.createdAt).toBeDefined();
 
-    expect(res.body.progressUpdate).toBeDefined();
-    expect(res.body.progressUpdate.projectId).toBe(projectId);
-    expect(res.body.progressUpdate.rawText).toContain('Pier P1 Pour');
+    // Verify worker can process this enqueued job
+    const processed = await workerRunner.processNextJob();
+    expect(processed).toBe(true);
 
-    expect(res.body.normalizedDocument).toBeDefined();
-    expect(res.body.normalizedDocument.sourceType).toBe('csv');
-    expect(res.body.normalizedDocument.textLength).toBeGreaterThan(0);
-
-    expect(res.body.extraction).toBeDefined();
-    expect(res.body.extraction.items).toBeDefined();
-    expect(Array.isArray(res.body.extraction.items)).toBe(true);
-
-    expect(res.body.matches).toBeDefined();
-    expect(Array.isArray(res.body.matches)).toBe(true);
+    const statusRes = await request(app)
+      .get(`/api/projects/${projectId}/jobs/${res.body.job.id}`);
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.job.status).toBe('completed');
+    expect(statusRes.body.job.result).toBeDefined();
+    expect(statusRes.body.job.result.evidenceId).toBe(evidenceId);
   });
 
   it('should return 404 for non-existent project', async () => {
@@ -96,7 +96,7 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
     expect(res.status).toBe(404);
   });
 
-  it('should return 400 for unprocessable / empty evidence file', async () => {
+  it('should enqueue unprocessable / empty evidence file and worker marks it failed', async () => {
     const emptyEvRes = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
       .attach('file', emptyFile);
@@ -106,7 +106,18 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
       .post(`/api/projects/${projectId}/evidence/${emptyEvId}/process`)
       .send();
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBeDefined();
+    expect(res.status).toBe(202);
+    expect(res.body.job).toBeDefined();
+    expect(res.body.job.status).toBe('queued');
+
+    // Run worker
+    const processed = await workerRunner.processNextJob();
+    expect(processed).toBe(true);
+
+    const statusRes = await request(app)
+      .get(`/api/projects/${projectId}/jobs/${res.body.job.id}`);
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.job.status).toBe('failed');
+    expect(statusRes.body.job.errorMessage).toBeDefined();
   });
 });

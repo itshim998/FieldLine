@@ -3,6 +3,7 @@ import * as migration0001 from './migrations/0001_baseline_system_metadata.js';
 import * as migration0002 from './migrations/0002_core_domain_schema.js';
 import * as migration0003 from './migrations/0003_upgrade_metadata_for_pass2.js';
 import * as migration0004 from './migrations/0004_upgrade_cross_project_integrity.js';
+import * as migration0005 from './migrations/0005_processing_jobs.js';
 
 export interface Migration {
   name: string;
@@ -18,7 +19,8 @@ export const MIGRATIONS: Migration[] = [
   { name: migration0001.name, up: migration0001.up },
   { name: migration0002.name, up: migration0002.up },
   { name: migration0003.name, up: migration0003.up },
-  { name: migration0004.name, up: migration0004.up }
+  { name: migration0004.name, up: migration0004.up },
+  { name: migration0005.name, up: migration0005.up }
 ];
 
 /**

@@ -5,6 +5,7 @@ import path from 'node:path';
 import * as XLSX from 'xlsx';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
+import { workerRunner } from '../src/jobs/worker-runner.js';
 
 describe('Document Ingestion End-to-End Traceability & Provenance', () => {
   let app: ReturnType<typeof createApp>;
@@ -79,18 +80,27 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     const evidenceId = evUploadRes.body.evidence.id;
 
     // -------------------------------------------------------------
-    // Step 2: Explicit Synchronous Document Ingestion
+    // Step 2: Asynchronous Document Ingestion Job Enqueue & Worker Execution
     // -------------------------------------------------------------
     const processRes = await request(app)
       .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
       .send();
-    expect(processRes.status).toBe(200);
+    expect(processRes.status).toBe(202);
+    expect(processRes.body.job).toBeDefined();
+    const jobId = processRes.body.job.id;
 
-    const progressUpdateId = processRes.body.progressUpdate.id;
+    // Process job with worker
+    const processed = await workerRunner.processNextJob();
+    expect(processed).toBe(true);
+
+    // Verify job completion
+    const jobStatusRes = await request(app).get(`/api/projects/${projectId}/jobs/${jobId}`);
+    expect(jobStatusRes.status).toBe(200);
+    expect(jobStatusRes.body.job.status).toBe('completed');
+    expect(jobStatusRes.body.job.result).toBeDefined();
+
+    const progressUpdateId = jobStatusRes.body.job.result.progressUpdateId;
     expect(progressUpdateId).toBeDefined();
-    expect(processRes.body.evidence.progressUpdateId).toBe(progressUpdateId);
-    expect(processRes.body.normalizedDocument.sourceType).toBe('xlsx');
-    expect(processRes.body.extraction.items.length).toBeGreaterThan(0);
 
     // -------------------------------------------------------------
     // Step 3: Provenance Check 1 — Progress Update -> Evidence
@@ -105,8 +115,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     // -------------------------------------------------------------
     // Step 4: Verify Activity Matching Integration & Human Review Boundary
     // -------------------------------------------------------------
-    expect(processRes.body.matches).toBeDefined();
-    expect(processRes.body.matches.length).toBeGreaterThan(0);
+    expect(jobStatusRes.body.job.result.matchCount).toBeGreaterThan(0);
 
     const matchesListRes = await request(app).get(
       `/api/projects/${projectId}/progress-updates/${progressUpdateId}/matches`
