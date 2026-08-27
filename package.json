@@ -17,6 +17,7 @@
     "demo:reset": "tsx scripts/demo-reset.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.8",
     "better-sqlite3": "^11.8.1",
     "cors": "^2.8.5",
     "csv-parse": "^7.0.2",

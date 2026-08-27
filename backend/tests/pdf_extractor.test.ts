@@ -1,12 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { PdfExtractor } from '../src/services/ingestion/extractors/pdf.extractor.js';
+import {
+  PdfExtractor,
+  PdfPageRenderer,
+  DefaultPdfPageRenderer
+} from '../src/services/ingestion/extractors/pdf.extractor.js';
 import { OcrExtractor, OcrEngine } from '../src/services/ingestion/extractors/ocr.extractor.js';
 import { ValidationError } from '../src/errors/AppError.js';
 
 class MockOcrEngine implements OcrEngine {
-  constructor(private mockText: string = 'SCANNED_OCR_FALLBACK_TEXT') {}
-  async recognize(_buf: Buffer) {
+  public recognizedBuffers: Buffer[] = [];
+  constructor(private mockText: string = 'Scanned Inspection Sign-off Memo for Pier P1') {}
+  async recognize(buf: Buffer) {
+    this.recognizedBuffers.push(buf);
     return { text: this.mockText, confidence: 0.9 };
+  }
+}
+
+class TrackingPdfPageRenderer implements PdfPageRenderer {
+  public renderedPages: number[] = [];
+  async renderPageToImage(_pdfBuffer: Buffer, pageNumber: number): Promise<Buffer> {
+    this.renderedPages.push(pageNumber);
+    // Return a dummy PNG raster buffer
+    return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   }
 }
 
@@ -36,7 +51,7 @@ xref
 0000000000 65535 f 
 0000000009 00000 n 
 0000000058 00000 n 
-0000000115 00000 n 
+00000000115 00000 n 
 0000000244 00000 n 
 0000000372 00000 n 
 trailer
@@ -70,6 +85,7 @@ describe('PdfExtractor', () => {
     expect(result.sourceType).toBe('pdf');
     expect(result.text).toContain('Pier P1 substructure concrete pour 75% complete.');
     expect(result.metadata?.totalPages).toBe(1);
+    expect(result.metadata?.textExtraction).toBe('embedded');
   });
 
   it('should reject corrupt / invalid PDF buffer', async () => {
@@ -96,11 +112,13 @@ describe('PdfExtractor', () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  it('should fallback to OCR when PDF contains sparse/no embedded text', async () => {
-    const mockOcr = new OcrExtractor(new MockOcrEngine('Scanned Inspection Sign-off Memo for Pier P1'));
-    const extractorWithOcr = new PdfExtractor(mockOcr);
+  it('should fallback to scanned-PDF OCR rendering pipeline when PDF contains sparse/no embedded text', async () => {
+    const mockEngine = new MockOcrEngine('Scanned Site Memo: Pier P1 Pour 80% Complete');
+    const mockOcr = new OcrExtractor(mockEngine);
+    const trackingRenderer = new TrackingPdfPageRenderer();
+    const extractorWithOcr = new PdfExtractor(mockOcr, trackingRenderer);
 
-    // PDF with only punctuation / empty text stream
+    // Structurally valid PDF with empty text stream (scanned raster PDF representation)
     const emptyPdfBuf = createMinimalTextPdf('');
 
     const result = await extractorWithOcr.extract({
@@ -111,7 +129,28 @@ describe('PdfExtractor', () => {
     });
 
     expect(result.sourceType).toBe('pdf');
-    expect(result.text).toContain('Scanned Inspection Sign-off Memo for Pier P1');
+    expect(result.text).toContain('Scanned Site Memo: Pier P1 Pour 80% Complete');
     expect(result.metadata?.fallbackMethod).toBe('ocr');
+    expect(result.metadata?.totalPages).toBe(1);
+
+    // Verify page renderer was actually invoked for page 1
+    expect(trackingRenderer.renderedPages).toContain(1);
+
+    // Verify OCR engine received the rendered raster image buffer rather than raw PDF
+    expect(mockEngine.recognizedBuffers.length).toBe(1);
+    expect(mockEngine.recognizedBuffers[0][0]).toBe(0x89); // PNG signature
+    expect(mockEngine.recognizedBuffers[0][1]).toBe(0x50);
+  });
+
+  it('should support real raster image rendering with DefaultPdfPageRenderer', async () => {
+    const defaultRenderer = new DefaultPdfPageRenderer();
+    const validPdfBuf = createMinimalTextPdf('Real Renderer Test');
+
+    const imageBuf = await defaultRenderer.renderPageToImage(validPdfBuf, 1);
+    expect(imageBuf).toBeDefined();
+    expect(imageBuf.length).toBeGreaterThan(0);
+    // Check PNG magic bytes
+    expect(imageBuf[0]).toBe(0x89);
+    expect(imageBuf[1]).toBe(0x50);
   });
 });

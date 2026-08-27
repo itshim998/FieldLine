@@ -75,6 +75,9 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
     expect(res.body.extraction).toBeDefined();
     expect(res.body.extraction.items).toBeDefined();
     expect(Array.isArray(res.body.extraction.items)).toBe(true);
+
+    expect(res.body.matches).toBeDefined();
+    expect(Array.isArray(res.body.matches)).toBe(true);
   });
 
   it('should return 404 for non-existent project', async () => {

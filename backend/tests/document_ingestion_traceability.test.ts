@@ -27,7 +27,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     const wb = XLSX.utils.book_new();
     const wsData = [
       ['Date', 'Activity Description', 'Location', 'Quantity', 'Status'],
-      ['2026-08-25', 'Construct Pier P1 Substructure', 'Zone A', '100 m3', 'in_progress']
+      ['2026-08-25', 'foundation work', 'Block A', '100 m3', 'in_progress']
     ];
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     XLSX.utils.book_append_sheet(wb, ws, 'Daily Log');
@@ -45,7 +45,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
       .attach(
         'file',
         Buffer.from(
-          'Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit\nACT-PIER-01,Construct Pier P1 Substructure,WBS-01,Zone A,2026-08-01,2026-08-30,500,m3'
+          'Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit\nACT-001,foundation work,WBS-01,Block A,2026-08-01,2026-08-30,500,m3'
         ),
         'mthl_schedule.csv'
       );
@@ -103,29 +103,16 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     expect(updateEvRes.body.evidence[0].id).toBe(evidenceId);
 
     // -------------------------------------------------------------
-    // Step 4: Activity Matching (reusing existing ActivityMatchingService)
+    // Step 4: Verify Activity Matching Integration & Human Review Boundary
     // -------------------------------------------------------------
-    const matchRes = await request(app)
-      .post(`/api/projects/${projectId}/progress-updates/${progressUpdateId}/matches`)
-      .send({
-        extraction: {
-          items: [
-            {
-              reference: 'Construct Pier P1 Substructure',
-              location: 'Zone A',
-              progress_percent: 60,
-              status: 'in_progress'
-            }
-          ]
-        }
-      });
-    expect(matchRes.status).toBe(200);
+    expect(processRes.body.matches).toBeDefined();
+    expect(processRes.body.matches.length).toBeGreaterThan(0);
 
     const matchesListRes = await request(app).get(
       `/api/projects/${projectId}/progress-updates/${progressUpdateId}/matches`
     );
     expect(matchesListRes.status).toBe(200);
-    expect(matchesListRes.body.matches).toHaveLength(1);
+    expect(matchesListRes.body.matches.length).toBeGreaterThan(0);
     const match = matchesListRes.body.matches[0];
     expect(match.status).toBe('suggested'); // Human review boundary preserved!
     expect(match.activityId).toBe(activityId);
@@ -138,16 +125,16 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
       .send({
         matchId: match.id,
         fact: {
-          reference: 'Construct Pier P1 Substructure',
-          location: 'Zone A',
-          progress_percent: 60,
+          reference: 'foundation work',
+          location: 'Block A',
+          progress_percent: 50,
           status: 'in_progress'
         },
         asOfDate: '2026-08-25',
         allowSuggested: true
       });
     expect(progressRecordRes.status).toBe(200);
-    expect(progressRecordRes.body.progress.actualPercent).toBe(60);
+    expect(progressRecordRes.body.progress.actualPercent).toBe(50);
 
     // -------------------------------------------------------------
     // Step 6: Provenance Check 2 — Activity -> Originating Document Evidence

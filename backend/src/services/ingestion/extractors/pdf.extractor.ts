@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { extractText, getDocumentProxy } from 'unpdf';
+import { extractText, getDocumentProxy, renderPageAsImage } from 'unpdf';
 import {
   DocumentExtractor,
   ExtractDocumentInput,
@@ -11,12 +11,35 @@ import { OcrExtractor, ocrExtractor as defaultOcrExtractor } from './ocr.extract
 import { ValidationError } from '../../../errors/AppError.js';
 import { logger } from '../../../config/logger.js';
 
+export interface PdfPageRenderer {
+  renderPageToImage(pdfBuffer: Buffer, pageNumber: number): Promise<Buffer>;
+}
+
+export class DefaultPdfPageRenderer implements PdfPageRenderer {
+  async renderPageToImage(pdfBuffer: Buffer, pageNumber: number): Promise<Buffer> {
+    const uint8 = new Uint8Array(
+      pdfBuffer.buffer,
+      pdfBuffer.byteOffset,
+      pdfBuffer.byteLength
+    );
+    const imgArrayBuffer = await renderPageAsImage(uint8, pageNumber, {
+      canvasImport: () => import('@napi-rs/canvas')
+    });
+    return Buffer.from(imgArrayBuffer);
+  }
+}
+
 export class PdfExtractor implements DocumentExtractor {
   public readonly name: string = 'pdf-extractor';
   private ocrFallback?: OcrExtractor;
+  private pageRenderer: PdfPageRenderer;
 
-  constructor(ocrFallback: OcrExtractor = defaultOcrExtractor) {
+  constructor(
+    ocrFallback: OcrExtractor = defaultOcrExtractor,
+    pageRenderer: PdfPageRenderer = new DefaultPdfPageRenderer()
+  ) {
     this.ocrFallback = ocrFallback;
+    this.pageRenderer = pageRenderer;
   }
 
   supports(fileType: string, fileName: string, mimeType?: string | null): boolean {
@@ -93,26 +116,68 @@ export class PdfExtractor implements DocumentExtractor {
       }
     }
 
-    // Check if usable text was extracted
+    // Check if usable text was extracted; if not, invoke scanned-PDF raster OCR pipeline
     if (pageBlocks.length === 0 || totalAlphanumericCount < 10) {
       logger.info('PDF embedded text is sparse or absent; evaluating OCR fallback for scanned PDF');
-      // If OCR fallback is configured, attempt OCR
       if (this.ocrFallback) {
         try {
-          const ocrResult = await this.ocrFallback.extract(input);
+          const pagesToOcr = Math.min(pdfData.totalPages, MAX_PDF_PAGES);
+          const ocrPageBlocks: string[] = [];
+          let totalOcrAlphaCount = 0;
+
+          for (let pageNum = 1; pageNum <= pagesToOcr; pageNum++) {
+            // 1. Render PDF page to raster image buffer
+            const pageImageBuffer = await this.pageRenderer.renderPageToImage(
+              input.fileBuffer,
+              pageNum
+            );
+
+            // 2. OCR the rendered page image buffer
+            const pageOcrResult = await this.ocrFallback.extract({
+              ...input,
+              fileBuffer: pageImageBuffer,
+              mimeType: 'image/png'
+            });
+
+            if (pageOcrResult && pageOcrResult.text && pageOcrResult.text.trim().length > 0) {
+              const pageText = pageOcrResult.text.trim();
+              totalOcrAlphaCount += (pageText.match(/[a-zA-Z0-9]/g) || []).length;
+              if (pdfData.totalPages > 1) {
+                ocrPageBlocks.push(`--- Page ${pageNum} (OCR) ---\n${pageText}`);
+              } else {
+                ocrPageBlocks.push(pageText);
+              }
+            }
+          }
+
+          if (ocrPageBlocks.length === 0 || totalOcrAlphaCount < 3) {
+            throw new ValidationError('OCR could not detect readable text from rendered PDF pages');
+          }
+
+          let combinedOcrText = ocrPageBlocks.join('\n\n');
+          if (combinedOcrText.length > MAX_EXTRACTED_TEXT_LENGTH) {
+            combinedOcrText = combinedOcrText.slice(0, MAX_EXTRACTED_TEXT_LENGTH);
+          }
+
           return {
-            ...ocrResult,
+            evidenceId: input.evidenceId,
+            projectId: input.projectId,
+            sourceFileName: input.sourceFileName,
             sourceType: 'pdf',
+            text: combinedOcrText,
             metadata: {
-              ...ocrResult.metadata,
               fallbackMethod: 'ocr',
-              totalPages: pdfData.totalPages
+              totalPages: pdfData.totalPages,
+              pagesProcessed: pagesToOcr
             }
           };
         } catch (ocrErr) {
-          logger.warn('OCR fallback for scanned PDF also failed', ocrErr);
+          logger.warn('OCR fallback for scanned PDF failed', ocrErr);
+          if (ocrErr instanceof ValidationError) {
+            throw ocrErr;
+          }
           throw new ValidationError(
-            'PDF document contains no extractable text and OCR fallback could not detect readable content'
+            `PDF document contains no extractable text and scanned PDF OCR failed: ${ocrErr instanceof Error ? ocrErr.message : String(ocrErr)}`
           );
         }
       }
@@ -120,10 +185,9 @@ export class PdfExtractor implements DocumentExtractor {
       throw new ValidationError('PDF document contains no readable text content');
     }
 
-    let normalizedText = pageBlocks.join('\n\n').trim();
-
-    if (normalizedText.length > MAX_EXTRACTED_TEXT_LENGTH) {
-      normalizedText = normalizedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH).trim();
+    let combinedText = pageBlocks.join('\n\n');
+    if (combinedText.length > MAX_EXTRACTED_TEXT_LENGTH) {
+      combinedText = combinedText.slice(0, MAX_EXTRACTED_TEXT_LENGTH);
     }
 
     return {
@@ -131,10 +195,11 @@ export class PdfExtractor implements DocumentExtractor {
       projectId: input.projectId,
       sourceFileName: input.sourceFileName,
       sourceType: 'pdf',
-      text: normalizedText,
+      text: combinedText,
       metadata: {
         totalPages: pdfData.totalPages,
-        extractedPages: pageBlocks.length
+        pagesProcessed: pdfData.text.length,
+        textExtraction: 'embedded'
       }
     };
   }

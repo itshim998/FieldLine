@@ -1,5 +1,7 @@
 import { Evidence, ProgressUpdate, ProgressUpdateSourceType } from '../../models/domain.types.js';
 import { FieldProgressExtraction } from '../../ai/contracts/field-progress-extraction.contract.js';
+import { FieldFactMatchResult } from '../matching/activity-matching.types.js';
+import { normalizeDate } from '../normalization/date-normalizer.js';
 
 export const MAX_EXTRACTED_TEXT_LENGTH = 40000;
 export const MAX_CSV_ROWS = 2000;
@@ -42,6 +44,7 @@ export interface ProcessEvidenceResult {
     metadata?: Record<string, unknown>;
   };
   extraction: FieldProgressExtraction;
+  matches: FieldFactMatchResult[];
 }
 
 export interface DocumentIngestionService {
@@ -65,4 +68,56 @@ export function mapSourceTypeToProgressUpdateType(
     default:
       return 'text';
   }
+}
+
+/**
+ * Deterministically extracts an explicit report date from normalized document text,
+ * or returns null if no valid, defensible date can be parsed.
+ */
+export function extractReportDate(text: string): string | null {
+  if (!text || typeof text !== 'string') return null;
+
+  // 1. Explicit labeled date patterns (e.g. "Report Date: 2026-08-25", "Date: 25/08/2026")
+  const labeledPatterns = [
+    /(?:report\s*date|date\s*of\s*report|as\s*of\s*date|report\s*period\s*(?:ending|date)|observation\s*date|field\s*date)\s*[:|=]\s*([^\r\n,;|]+)/i,
+    /(?:date)\s*[:|=]\s*([^\r\n,;|]+)/i,
+    /(?:report\s*date|date\s*of\s*report|as\s*of\s*date)\s*\|\s*([^\r\n|]+)/i
+  ];
+
+  for (const pattern of labeledPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const candidate = match[1].trim();
+      try {
+        const canonical = normalizeDate(candidate, 'reportDate');
+        if (canonical) return canonical;
+      } catch {
+        // try next pattern
+      }
+    }
+  }
+
+  // 2. Standalone ISO date YYYY-MM-DD
+  const isoMatch = text.match(/\b(20\d{2}[-/](?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01]))\b/);
+  if (isoMatch) {
+    try {
+      const canonical = normalizeDate(isoMatch[1], 'reportDate');
+      if (canonical) return canonical;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Standalone DD/MM/YYYY or DD-MM-YYYY
+  const dmyMatch = text.match(/\b((?:0[1-9]|[12]\d|3[01])[-/.](?:0[1-9]|1[0-2])[-/.](?:20\d{2}))\b/);
+  if (dmyMatch) {
+    try {
+      const canonical = normalizeDate(dmyMatch[1], 'reportDate');
+      if (canonical) return canonical;
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
 }
