@@ -113,18 +113,20 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     const match1Id = matches1Res.body.matches[0].id;
 
     // Step D: Normalize and record canonical progress
-    await request(app)
+    const prog1Res = await request(app)
       .post(`/api/projects/${projectId}/progress-updates/${update1Id}/progress`)
       .send({
         matchId: match1Id,
         fact: {
           reference: 'Construct Pier P1 Substructure',
+          location: 'Zone A',
           progress_percent: 20,
           status: 'in_progress'
         },
         asOfDate: '2026-08-10',
         allowSuggested: true
       });
+    expect(prog1Res.status).toBe(200);
 
     // -------------------------------------------------------------
     // Observation 2: Day 25 (2026-08-25) - 100% completed
@@ -168,18 +170,20 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     const match2Id = matches2Res.body.matches[0].id;
 
     // Step G: Normalize second progress observation
-    await request(app)
+    const prog2Res = await request(app)
       .post(`/api/projects/${projectId}/progress-updates/${update2Id}/progress`)
       .send({
         matchId: match2Id,
         fact: {
           reference: 'Construct Pier P1 Substructure',
+          location: 'Zone A',
           progress_percent: 100,
           status: 'completed'
         },
         asOfDate: '2026-08-25',
         allowSuggested: true
       });
+    expect(prog2Res.status).toBe(200);
 
     // -------------------------------------------------------------
     // VERIFICATION: Provenance Traceability Checks
@@ -234,5 +238,87 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     expect(content3.status).toBe(200);
     const text3 = content3.text || (Buffer.isBuffer(content3.body) ? content3.body.toString('utf-8') : '');
     expect(text3).toBe('QA INSPECTION SIGN-OFF BY CHIEF ENGINEER');
+  });
+
+  it('should NOT create activity evidence provenance when activity match is rejected or suggested', async () => {
+    // 1. Create a distinct test activity
+    const sRes = await request(app)
+      .post(`/api/projects/${projectId}/schedules/import`)
+      .attach(
+        'file',
+        Buffer.from(
+          'Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit\nACT-DRAIN-01,Stormwater Drainage Trench,WBS-02,Zone B,2026-08-01,2026-08-15,200,m'
+        ),
+        'drain_schedule.csv'
+      );
+    const drainSchedId = sRes.body.schedule.id;
+    const actListRes = await request(app).get(
+      `/api/projects/${projectId}/schedules/${drainSchedId}/activities`
+    );
+    const drainActivityId = actListRes.body.activities[0].id;
+
+    // 2. Create progress update with attached evidence
+    const uRes = await request(app)
+      .post(`/api/projects/${projectId}/progress-updates`)
+      .send({
+        reportDate: '2026-08-05',
+        rawText: 'Excavation completed for some trench work in Zone B.'
+      });
+    const updateId = uRes.body.progressUpdate.id;
+
+    const evRes = await request(app)
+      .post(`/api/projects/${projectId}/evidence`)
+      .attach('file', file1)
+      .field('progressUpdateId', updateId);
+    const evidenceId = evRes.body.evidence.id;
+
+    // 3. Generate matches (default is 'suggested')
+    await request(app)
+      .post(`/api/projects/${projectId}/progress-updates/${updateId}/matches`)
+      .send({
+        extraction: {
+          items: [
+            {
+              reference: 'Stormwater Drainage Trench',
+              location: 'Zone B',
+              progress_percent: 50,
+              status: 'in_progress'
+            }
+          ]
+        }
+      });
+
+    // Case A: With suggested match status, activity evidence query must NOT return evidence
+    const suggestedTraceRes = await request(app).get(
+      `/api/projects/${projectId}/activities/${drainActivityId}/evidence`
+    );
+    expect(suggestedTraceRes.status).toBe(200);
+    expect(suggestedTraceRes.body.evidence).toHaveLength(0);
+
+    // Case B: Reject the match -> activity evidence query must STILL return 0 evidence
+    const getMatchesRes = await request(app).get(
+      `/api/projects/${projectId}/progress-updates/${updateId}/matches`
+    );
+    const matchId = getMatchesRes.body.matches[0].id;
+
+    const { getDatabase } = await import('../src/database/db.js');
+    const db = getDatabase();
+    db.prepare("UPDATE activity_matches SET status = 'rejected' WHERE id = ?").run(matchId);
+
+    const rejectedTraceRes = await request(app).get(
+      `/api/projects/${projectId}/activities/${drainActivityId}/evidence`
+    );
+    expect(rejectedTraceRes.status).toBe(200);
+    expect(rejectedTraceRes.body.evidence).toHaveLength(0);
+
+    // Case C: Confirm the match -> evidence now appears in activity provenance
+    db.prepare("UPDATE activity_matches SET status = 'confirmed' WHERE id = ?").run(matchId);
+
+    const confirmedTraceRes = await request(app).get(
+      `/api/projects/${projectId}/activities/${drainActivityId}/evidence`
+    );
+    expect(confirmedTraceRes.status).toBe(200);
+    expect(confirmedTraceRes.body.evidence).toHaveLength(1);
+    expect(confirmedTraceRes.body.evidence[0].id).toBe(evidenceId);
   });
 });

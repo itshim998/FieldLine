@@ -250,12 +250,12 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
             e.id IN (
               SELECT am.evidence_id
               FROM activity_matches am
-              WHERE am.project_id = ? AND am.activity_id = ? AND am.evidence_id IS NOT NULL
+              WHERE am.project_id = ? AND am.activity_id = ? AND am.evidence_id IS NOT NULL AND am.status = 'confirmed'
             )
             OR e.progress_update_id IN (
               SELECT am.progress_update_id
               FROM activity_matches am
-              WHERE am.project_id = ? AND am.activity_id = ?
+              WHERE am.project_id = ? AND am.activity_id = ? AND am.status = 'confirmed'
             )
             OR e.progress_update_id IN (
               SELECT ap.progress_update_id

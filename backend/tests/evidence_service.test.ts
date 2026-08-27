@@ -355,5 +355,52 @@ describe('EvidenceService', () => {
         service.getEvidence(project1Id, ev.id);
       }).toThrow(NotFoundError);
     });
+
+    it('should safely roll back and preserve physical file when DB deletion fails', async () => {
+      const source = path.join(tempDir, 'preserve_me.pdf');
+      fs.writeFileSync(source, 'IMPORTANT-EVIDENCE-PAYLOAD');
+
+      const ev = await service.uploadEvidence(project1Id, {
+        path: source,
+        originalname: 'preserve_me.pdf',
+        size: 26
+      });
+
+      const physicalPath = path.resolve(testUploadRoot, ev.filePath);
+      expect(fs.existsSync(physicalPath)).toBe(true);
+
+      // Create a service instance with a failing evidence repository delete
+      const failingRepo: SqliteEvidenceRepository = Object.assign(
+        Object.create(evidenceRepo),
+        {
+          deleteByIdAndProjectId: () => {
+            throw new Error('Simulated SQLite disk I/O failure during delete');
+          }
+        }
+      );
+
+      const failingService = new DefaultEvidenceService(
+        failingRepo,
+        projectRepo,
+        progressUpdateRepo,
+        activityRepo,
+        testUploadRoot
+      );
+
+      // Attempt deletion: should throw and NOT silently report success
+      expect(() => {
+        failingService.deleteEvidence(project1Id, ev.id);
+      }).toThrow('Simulated SQLite disk I/O failure during delete');
+
+      // Crucial assertion: Physical file must still exist and contain original content (not missing)
+      expect(fs.existsSync(physicalPath)).toBe(true);
+      expect(fs.readFileSync(physicalPath, 'utf-8')).toBe('IMPORTANT-EVIDENCE-PAYLOAD');
+
+      // No stray .trash files left in the directory
+      const projectDir = path.resolve(testUploadRoot, project1Id);
+      const directoryFiles = fs.readdirSync(projectDir);
+      const trashFiles = directoryFiles.filter((f) => f.endsWith('.trash'));
+      expect(trashFiles).toHaveLength(0);
+    });
   });
 });

@@ -321,6 +321,87 @@ describe('SqliteEvidenceRepository', () => {
         expect.arrayContaining(['concrete_test_cert.pdf', 'site_drone_survey.jpg'])
       );
     });
+
+    it('should NOT return evidence linked via rejected or suggested activity matches', () => {
+      const sched = scheduleRepo.create({
+        projectId: project1Id,
+        name: 'Master Baseline',
+        version: '1.0',
+        sourceType: 'manual'
+      });
+
+      const activity = activityRepo.create({
+        projectId: project1Id,
+        scheduleId: sched.id,
+        externalId: 'ACT-REJECT-TEST',
+        name: 'Excavation Test Block',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-10'
+      });
+
+      // Update 1 with Evidence E1 (linked to rejected match)
+      const uRejected = progressUpdateRepo.create({
+        projectId: project1Id,
+        reportDate: '2026-08-02',
+        rawText: 'Rejected match progress update'
+      });
+
+      const evRejected = evidenceRepo.create({
+        projectId: project1Id,
+        progressUpdateId: uRejected.id,
+        fileName: 'rejected_inspection.pdf',
+        filePath: `${project1Id}/rejected_inspection.pdf`,
+        fileType: 'pdf'
+      });
+
+      matchRepo.create({
+        projectId: project1Id,
+        progressUpdateId: uRejected.id,
+        evidenceId: evRejected.id,
+        activityId: activity.id,
+        confidenceScore: 0.2,
+        matchMethod: 'text_similarity',
+        status: 'rejected'
+      });
+
+      // Update 2 with Evidence E2 (linked to suggested match)
+      const uSuggested = progressUpdateRepo.create({
+        projectId: project1Id,
+        reportDate: '2026-08-03',
+        rawText: 'Suggested match progress update'
+      });
+
+      const evSuggested = evidenceRepo.create({
+        projectId: project1Id,
+        progressUpdateId: uSuggested.id,
+        fileName: 'suggested_photo.jpg',
+        filePath: `${project1Id}/suggested_photo.jpg`,
+        fileType: 'image'
+      });
+
+      matchRepo.create({
+        projectId: project1Id,
+        progressUpdateId: uSuggested.id,
+        evidenceId: evSuggested.id,
+        activityId: activity.id,
+        confidenceScore: 0.6,
+        matchMethod: 'text_similarity',
+        status: 'suggested'
+      });
+
+      // Query activity evidence: rejected and suggested must NOT appear
+      const results = evidenceRepo.listByActivityId(activity.id, project1Id);
+      expect(results).toHaveLength(0);
+
+      // Now confirm the suggested match and verify it immediately becomes traceable
+      const db = getDatabase();
+      db.prepare("UPDATE activity_matches SET status = 'confirmed' WHERE progress_update_id = ?").run(uSuggested.id);
+
+      const confirmedResults = evidenceRepo.listByActivityId(activity.id, project1Id);
+      expect(confirmedResults).toHaveLength(1);
+      expect(confirmedResults[0].id).toBe(evSuggested.id);
+      expect(confirmedResults[0].fileName).toBe('suggested_photo.jpg');
+    });
   });
 
   describe('delete', () => {

@@ -227,17 +227,19 @@ describe('Evidence Router Endpoints', () => {
       );
       const matchId = getMatchesRes.body.matches[0].id;
 
-      await request(app)
+      const progRes = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates/${testUpdateId}/progress`)
         .send({
           matchId,
           fact: {
             reference: 'Pier 12 Pour',
+            location: null,
             progress_percent: 60,
             status: 'in_progress'
           },
           allowSuggested: true
         });
+      expect(progRes.status).toBe(200);
 
       // 4. Trace evidence for activity
       const traceRes = await request(app).get(

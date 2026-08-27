@@ -1,933 +1,254 @@
-# FieldLine — Pass 13: Evidence System
+# FieldLine — Pass 13 Correction Required
 
-You are implementing **Pass 13 — Evidence System** in the existing FieldLine repository.
+Do NOT start Pass 14.
 
-Do not redesign the application. Do not reopen approved passes unless your implementation discovers a concrete regression that must be fixed to safely implement this pass.
+The latest Pass 13 commit was independently reviewed against the approved Pass 12 architecture.
 
-## 1. Current repository state
+Most of Pass 13 is correct, but two architectural blockers must be fixed before Pass 13 can be approved.
 
-Repository:
+## BLOCKER 1 — Rejected activity matches must not create activity provenance
+
+Current `EvidenceRepository.listByActivityId()` derives evidence from `activity_matches` without filtering by match status.
+
+The current query effectively does:
+
+```sql
+WHERE e.project_id = ?
+AND (
+  e.id IN (
+    SELECT am.evidence_id
+    FROM activity_matches am
+    WHERE am.project_id = ? AND am.activity_id = ?
+  )
+  OR e.progress_update_id IN (
+    SELECT am.progress_update_id
+    FROM activity_matches am
+    WHERE am.project_id = ? AND am.activity_id = ?
+  )
+  ...
+)
+```
+
+This is incorrect.
+
+Pass 9 established:
 
 ```text
-itshim998/FieldLine
+suggested = not accepted
+confirmed = accepted
+rejected = explicitly rejected
 ```
 
-Branch:
+A rejected match must NEVER make evidence appear as originating evidence for the activity.
+
+### Required behavior
+
+For provenance obtained through `activity_matches`:
 
 ```text
-main
+confirmed → may contribute activity provenance
+rejected  → MUST NOT contribute activity provenance
+suggested → MUST NOT be treated as accepted provenance
 ```
 
-Current approved base commit:
+Do not reinterpret rejected matches.
+
+The existing historical-progress path remains valid:
 
 ```text
-7e85705b2351057784ffbd1bb9e990511522201d
-```
-
-Current architecture is a local modular monolith:
-
-```text
-React
-  ↓
-Express route
-  ↓
-Zod validation
-  ↓
-service
-  ↓
-repository
-  ↓
-SQLite
-```
-
-SQLite and the local filesystem are the intended infrastructure.
-
-Do not introduce PostgreSQL, Redis, Kafka, Docker, cloud storage, queues, microservices, or other infrastructure.
-
-## 2. Pass 13 objective
-
-Make important project results traceable back to their originating field evidence.
-
-The intended provenance chain is:
-
-```text
-source file
-   ↓
-evidence metadata
-   ↓
-progress update / raw field report
-   ↓
-activity match
-   ↓
-canonical activity progress
-```
-
-The original Pass 13 roadmap is:
-
-```text
-Evidence metadata
-+
-source file
-+
-raw update
-+
-extracted facts
-+
-activity match
-+
-resulting progress
-
-Local storage:
-
-uploads/
-  <project-id>/
-
-Use safe/generated filenames rather than trusting user-provided paths.
-
-Exit criterion:
-
-From an activity result, the user can navigate back to the originating evidence.
-```
-
-Implement this against the actual current repository rather than creating a parallel design.
-
-## 3. Existing structures that MUST be reused
-
-The repository already contains an `Evidence` domain entity.
-
-Current conceptual fields:
-
-```ts
-interface Evidence {
-  id: string;
-  projectId: string;
-  progressUpdateId: string | null;
-  fileName: string;
-  filePath: string;
-  fileType: EvidenceFileType;
-  fileSizeBytes: number | null;
-  mimeType: string | null;
-  metadataJson: string | null;
-  uploadedAt: string;
-  createdAt: string;
-}
-```
-
-Current file types:
-
-```ts
-type EvidenceFileType =
-  | 'text'
-  | 'xlsx'
-  | 'pdf'
-  | 'image'
-  | 'transcript'
-  | 'other';
-```
-
-`CreateEvidenceInput` already exists and should remain compatible unless there is a concrete reason to extend it.
-
-The SQLite `evidence` table already exists.
-
-Important existing schema behavior:
-
-```text
-evidence.project_id
-evidence.progress_update_id
-evidence.file_name
-evidence.file_path
-evidence.file_type
-evidence.file_size_bytes
-evidence.mime_type
-evidence.metadata_json
-evidence.uploaded_at
-evidence.created_at
-```
-
-The database already has cross-project integrity protection for evidence associated with progress updates.
-
-Do NOT create another evidence table or another evidence domain model.
-
-## 4. Existing related entities
-
-`ProgressUpdate` already exists and stores the raw field report.
-
-It contains:
-
-```text
-id
-projectId
-reportDate
-reporterName
-reporterRole
-sourceType
-rawText
-status
-createdAt
-updatedAt
-```
-
-The existing manual progress route is:
-
-```text
-POST /api/projects/:projectId/progress-updates
-GET  /api/projects/:projectId/progress-updates
-GET  /api/projects/:projectId/progress-updates/:updateId
-```
-
-`ActivityMatch` already contains:
-
-```text
-evidenceId: string | null
-```
-
-Therefore evidence must remain compatible with the existing matching model.
-
-`ActivityProgress` currently contains:
-
-```text
-progressUpdateId: string | null
-```
-
-Do NOT add `evidenceId` or `matchId` to `ActivityProgress` in this pass unless an unavoidable repository-level issue is discovered.
-
-Use the existing relationships for traceability.
-
-## 5. Required architecture
-
-Add a proper evidence module following existing repository/service/route conventions.
-
-Expected conceptual structure:
-
-```text
-backend/src/
-  repositories/
-    evidence.repository.ts
-
-  services/
-    evidence/
-      evidence.service.ts
-      evidence.types.ts   // only if useful
-
-  validation/
-    evidence.schema.ts
-
-  routes/
-    evidence.router.ts
-```
-
-Export the repository and service through the existing index files where appropriate.
-
-Follow the existing dependency-injection pattern used by other services/repositories so tests can provide fake implementations.
-
-Do not put SQL in routes or services.
-
-Do not put HTTP/Express concepts inside repositories.
-
-## 6. Evidence upload API
-
-Implement:
-
-```text
-POST /api/projects/:projectId/evidence
-```
-
-Use multipart/form-data with:
-
-```text
-file
-```
-
-and support an optional progress-update association:
-
-```text
+ActivityProgress
+    ↓
 progressUpdateId
-```
-
-The endpoint must:
-
-1. validate `projectId`
-2. validate the optional `progressUpdateId`
-3. verify the referenced project exists
-4. if `progressUpdateId` is provided, verify it belongs to the same project
-5. validate the uploaded file
-6. generate a safe server-controlled storage name
-7. store the physical file under:
-
-```text
-<UPLOAD_DIR>/<projectId>/<generated-filename>
-```
-
-8. persist the evidence metadata row
-9. record a `project_events` event using the existing event infrastructure with:
-
-```text
-event_type = evidence_uploaded
-entity_type = evidence
-entity_id = evidence.id
-```
-
-10. return the created evidence metadata
-
-Do not trust a user-supplied filesystem path.
-
-The original filename is display metadata only.
-
-## 7. Filesystem safety
-
-Reuse the existing `UPLOAD_DIR` configuration.
-
-The repository already uses Multer for schedule uploads. Reuse the same general approach and conventions rather than inventing an unrelated uploader.
-
-Storage must be project-scoped:
-
-```text
-uploads/
-  <project-id>/
-    <generated-safe-name>
-```
-
-Never write using:
-
-```text
-file.originalname
-```
-
-as the actual path.
-
-Never allow:
-
-```text
-../../
-..\..\ 
-absolute paths
-```
-
-or equivalent path traversal to influence storage location.
-
-Use generated identifiers and a controlled extension.
-
-Before reading/deleting/serving a stored file, verify that the resolved path is inside the intended evidence storage root/project directory.
-
-Do not expose arbitrary filesystem paths through the API.
-
-## 8. File validation
-
-Pass 13 is an evidence-storage foundation, not document parsing.
-
-Support the existing conceptual evidence types:
-
-```text
-text
-xlsx
-pdf
-image
-transcript
-other
-```
-
-Do not implement OCR, PDF parsing, Excel extraction, document ingestion pipelines, or AI processing.
-
-At minimum enforce a reasonable upload size limit consistent with the project's current local-upload conventions.
-
-Reject malformed or missing uploads cleanly.
-
-Preserve:
-
-```text
-original/display filename
-mime type
-size
-file type
-```
-
-as metadata.
-
-Do not treat MIME type from the browser as a security boundary by itself.
-
-The actual storage file should still use a controlled server-generated name.
-
-## 9. Evidence repository
-
-Implement the repository around the existing `evidence` table.
-
-At minimum support:
-
-```text
-create(...)
-getById(...)
-getByIdAndProjectId(...)
-listByProjectId(...)
-listByProgressUpdateId(...)
-delete(...)
-```
-
-Add any additional read method necessary for traceability.
-
-Repository queries must be project-scoped whenever the caller has a project context.
-
-Do not create unscoped "convenience" paths that make cross-project leakage easy.
-
-Map DB rows cleanly into the existing `Evidence` domain type.
-
-Handle SQLite constraint failures using the existing application-error conventions.
-
-## 10. Evidence service
-
-The service must be responsible for application-level validation and orchestration.
-
-It should verify:
-
-```text
-project exists
-progress update exists and belongs to project
-evidence belongs to project
-```
-
-Do not rely solely on Express route validation.
-
-Keep business logic out of the router.
-
-The service must not import Express request/response objects.
-
-The service must not execute raw SQL.
-
-## 11. Atomicity and failure handling
-
-Evidence creation spans:
-
-```text
-filesystem
-+
-SQLite evidence row
-+
-project event
-```
-
-SQLite can transactionally protect the DB records.
-
-The filesystem is not part of the SQLite transaction.
-
-Design the operation so common failures do not leave inconsistent state.
-
-Preferred ordering:
-
-```text
-validate everything first
-        ↓
-write generated file
-        ↓
-SQLite transaction:
-    INSERT evidence
-    INSERT evidence_uploaded event
-        ↓
-success
-```
-
-If the SQLite transaction fails after the file was written:
-
-```text
-delete the newly written file
-rethrow the original application error
-```
-
-Do not silently swallow cleanup failures; log them using the existing logger if appropriate, while preserving the original operation error.
-
-Do not create an evidence DB row pointing to a file that does not exist.
-
-Do not leave successful DB rows pointing to failed uploads.
-
-## 12. Idempotency boundary
-
-Do NOT implement the full duplicate-content/hash subsystem yet.
-
-That belongs to the later hardening/idempotency roadmap.
-
-However:
-
-* if the caller provides an explicit evidence ID, preserve the repository's normal conflict semantics
-* do not silently create duplicate records for the same explicit ID
-* do not pretend that two separately generated upload IDs are duplicate-safe
-
-Do not introduce SHA-256/content-deduplication infrastructure in this pass.
-
-## 13. Required read APIs
-
-Implement:
-
-```text
-GET /api/projects/:projectId/evidence
-GET /api/projects/:projectId/evidence/:evidenceId
-GET /api/projects/:projectId/evidence/:evidenceId/content
-```
-
-Expected behavior:
-
-### List project evidence
-
-Return evidence records belonging only to the specified project.
-
-### Get evidence metadata
-
-Return one evidence record only when it belongs to the specified project.
-
-Cross-project IDs must not return another project's evidence.
-
-### Get evidence content
-
-Stream/serve the underlying file safely.
-
-Use the stored metadata appropriately for:
-
-```text
-Content-Type
-Content-Disposition
-```
-
-Do not expose the actual absolute filesystem path to the client.
-
-The content endpoint must verify that the stored path resolves inside the configured evidence root before serving it.
-
-## 14. Traceability APIs
-
-This is essential to the Pass 13 exit criterion.
-
-Implement:
-
-```text
-GET /api/projects/:projectId/progress-updates/:updateId/evidence
-```
-
-and:
-
-```text
-GET /api/projects/:projectId/activities/:activityId/evidence
-```
-
-The activity-level endpoint must use existing relationships.
-
-It should return the evidence that can be traced to the activity through:
-
-```text
-ActivityProgress → progressUpdateId → Evidence.progressUpdateId
-```
-
-and/or:
-
-```text
-ActivityMatch → evidenceId → Evidence
-```
-
-Do not invent new provenance records.
-
-Return the evidence metadata needed by a client to navigate to the evidence endpoint/content endpoint.
-
-The activity-level result must remain strictly project-scoped.
-
-Example conceptual response:
-
-```json
-{
-  "evidence": [
-    {
-      "id": "...",
-      "fileName": "site-report.pdf",
-      "fileType": "pdf",
-      "progressUpdateId": "...",
-      "uploadedAt": "...",
-      "contentUrl": "/api/projects/<projectId>/evidence/<evidenceId>/content"
-    }
-  ]
-}
-```
-
-The exact response shape should follow existing project conventions.
-
-Do not hardcode URLs in the repository layer.
-
-## 15. Important provenance rule
-
-Do not force a single evidence record when several evidence records legitimately belong to the same progress update.
-
-A progress update may have multiple pieces of evidence.
-
-Return the complete applicable evidence set.
-
-Likewise, an activity may have multiple historical progress observations and multiple originating evidence records.
-
-Do not collapse historical provenance into "latest evidence" unless the existing model explicitly requires it.
-
-## 16. Project isolation
-
-This is a hard invariant.
-
-Test all relevant cross-project cases.
-
-Examples:
-
-```text
-Project A evidence cannot be retrieved through Project B.
-
-Project A progressUpdateId cannot be attached to Project B evidence.
-
-Project A evidence cannot be returned by Project B activity traceability.
-
-Project A evidence ID must not expose Project A metadata through Project B routes.
-
-Project A physical files must not be readable through Project B paths.
-```
-
-Use both:
-
-```text
-service-level checks
-+
-existing database constraints
-```
-
-Do not weaken existing cross-project triggers.
-
-## 17. Deletion semantics
-
-Implement deletion only if it is genuinely necessary for a coherent evidence foundation.
-
-If implemented:
-
-* require project scoping
-* delete the physical file safely
-* delete the DB row
-* do not follow arbitrary paths
-* consider the existing `ON DELETE SET NULL` semantics for dependent references
-* do not silently corrupt activity-match history
-
-Do NOT introduce destructive "delete all project evidence" helpers.
-
-Preserve historical relationships unless the existing domain explicitly requires hard deletion.
-
-## 18. Project event
-
-Use the existing event model:
-
-```text
-evidence_uploaded
-```
-
-Do not add a duplicate event type.
-
-The event should identify the evidence entity and include useful non-sensitive metadata in `payload_json`.
-
-Do not store an absolute filesystem path in project events.
-
-## 19. Validation
-
-Create Zod validation for:
-
-```text
-projectId params
-evidenceId params
-progressUpdateId where applicable
-```
-
-Validate any textual metadata passed alongside multipart data.
-
-Keep validation bounded and consistent with the rest of the project.
-
-Do not add excessive speculative validation unrelated to the evidence foundation.
-
-## 20. Frontend integration
-
-Inspect the current frontend before making changes.
-
-Do NOT build the future Pass 20 dashboard.
-
-However, the Pass 13 exit criterion requires practical navigation back to evidence.
-
-Therefore:
-
-* if the current frontend already exposes activity/progress result surfaces, add the smallest possible evidence-link affordance there
-* the affordance should call the new evidence API and allow the user to open/view the originating evidence
-* do not redesign the workspace
-* do not create a new dashboard
-* do not introduce a frontend routing framework if one does not already exist
-* keep this integration narrowly focused on provenance
-
-If the existing frontend does not yet expose a suitable activity-result surface, implement the backend traceability API and document the endpoint contract instead of fabricating an entirely new UI.
-
-## 21. Tests
-
-Add focused tests for:
-
-### Repository
-
-```text
-create evidence
-get by id
-get by project
-list by project
-list by progress update
-missing records
-```
-
-### Service
-
-```text
-project not found
-progress update not found
-cross-project progress update rejected
-project-scoped retrieval
-safe orchestration
-```
-
-### Upload/API
-
-```text
-successful upload
-missing file
-unsupported/invalid input
-size limit
-metadata persistence
-safe generated path
-content retrieval
-missing content file
-```
-
-### Project isolation
-
-```text
-cross-project evidence lookup rejected/not found
-cross-project progress update association rejected
-cross-project activity evidence lookup returns no foreign data
-```
-
-### Failure atomicity
-
-Test that if the DB transaction fails after a physical file is written:
-
-```text
-database row is not left behind
-project event is not left behind
-uploaded file is cleaned up
-```
-
-### Traceability
-
-Create a realistic chain:
-
-```text
-project
-+
-progress update
-+
-evidence
-+
-activity
-+
-activity match
-+
-activity progress
-```
-
-Then verify:
-
-```text
-activity → evidence
-progress update → evidence
-```
-
-works correctly.
-
-Test multiple evidence records attached to the same progress update.
-
-Test an activity with multiple historical progress observations.
-
-Ensure the full pre-Pass-13 regression suite remains green.
-
-## 22. Architecture constraints
-
-Do NOT:
-
-```text
-let AI create or interpret evidence
-let AI decide provenance
-let evidence determine activity identity
-let evidence calculate progress
-let evidence calculate variance
-let evidence calculate risk
-implement OCR
-implement document parsing
-implement background jobs
-implement notifications
-implement forecasting
-implement dashboard redesign
-implement duplicate-content detection
-```
-
-Pass 13 is:
-
-```text
-evidence persistence
-+
-safe local file storage
-+
-traceable relationships
-+
-safe retrieval
-+
-project isolation
-```
-
-and nothing more.
-
-## 23. Documentation
-
-Update:
-
-```text
-README.md
-docs/ARCHITECTURE.md
-```
-
-only as necessary to document the new evidence architecture and endpoints.
-
-Document:
-
-```text
-Evidence System
     ↓
-local filesystem storage
-    ↓
-Evidence metadata in SQLite
-    ↓
-Progress Update / Activity Match provenance
-    ↓
-Evidence retrieval
+Evidence
 ```
 
-Explicitly state that:
+because canonical ActivityProgress is already subject to Pass 10 match-status rules.
+
+### Required implementation
+
+Modify `listByActivityId()` so match-based evidence provenance is restricted to accepted/confirmed matches.
+
+Be careful that BOTH of these paths respect match status:
 
 ```text
-Pass 13 stores and retrieves evidence.
-Pass 14 performs document ingestion/parsing.
+ActivityMatch.evidenceId
+ActivityMatch.progressUpdateId → Evidence.progressUpdateId
 ```
 
-Do not rewrite unrelated architectural history.
+Do not merely filter the direct `evidence_id` subquery while leaving the `progress_update_id` subquery unrestricted.
 
-## 24. Implementation quality
+### Required regression tests
 
-Follow the existing coding style.
-
-Prefer small, cohesive modules.
-
-Reuse:
+Add a test with:
 
 ```text
-AppError
-NotFoundError
-ValidationError
-ConflictError
-DatabaseError
+Progress Update U1
+Evidence E1 attached to U1
+Activity A1
+ActivityMatch M1:
+    progressUpdateId = U1
+    activityId = A1
+    status = rejected
 ```
 
-and the existing error middleware.
-
-Reuse the existing configuration and logging patterns.
-
-Do not duplicate infrastructure that already exists.
-
-## 25. Definition of done
-
-Pass 13 is complete only when all of the following are true:
+Then:
 
 ```text
-[ ] Existing Evidence model is reused.
-
-[ ] EvidenceRepository exists.
-
-[ ] EvidenceService exists.
-
-[ ] Evidence validation exists.
-
-[ ] Evidence routes are registered.
-
-[ ] Files are stored only under the configured project-scoped upload directory.
-
-[ ] Storage filenames are generated by the server.
-
-[ ] User-supplied paths cannot cause traversal.
-
-[ ] Evidence metadata persists in SQLite.
-
-[ ] evidence_uploaded event is recorded.
-
-[ ] Evidence and event persistence are atomic at the DB level.
-
-[ ] Failed DB persistence cleans up the newly written file.
-
-[ ] Evidence can be listed by project.
-
-[ ] Evidence can be retrieved by project + evidence ID.
-
-[ ] Evidence content can be safely served.
-
-[ ] Evidence can be queried by progress update.
-
-[ ] Evidence can be queried by activity for provenance.
-
-[ ] Cross-project access is rejected.
-
-[ ] Multiple evidence records are supported.
-
-[ ] Historical provenance is preserved.
-
-[ ] Existing regression tests remain green.
-
-[ ] New repository/service/route/integration/edge-case tests pass.
-
-[ ] Documentation is updated.
-
-[ ] No Pass 14+ functionality has been implemented.
+GET /api/projects/<projectId>/activities/<activityId>/evidence
 ```
 
-## 26. Final verification
+must NOT return E1 solely because of the rejected match.
 
-Before finishing:
+Also test:
+
+```text
+suggested → no accepted match provenance
+confirmed → provenance is returned
+```
+
+Preserve the existing successful traceability test.
+
+---
+
+# BLOCKER 2 — Evidence deletion can leave DB/file inconsistency
+
+Current `DefaultEvidenceService.deleteEvidence()` removes the physical file FIRST and only then deletes the SQLite evidence row.
+
+Current sequence:
+
+```text
+get evidence
+↓
+unlink physical file
+↓
+delete DB row
+```
+
+This creates an unsafe failure mode:
+
+```text
+unlink succeeds
+↓
+SQLite DELETE fails
+↓
+DB row still exists
+↓
+physical evidence file is gone
+```
+
+The evidence record is now inconsistent and content retrieval fails.
+
+This is not acceptable.
+
+## Required correction
+
+Redesign deletion so a database failure cannot silently leave an evidence row pointing to a missing file.
+
+Remember:
+
+```text
+SQLite transaction and filesystem cannot participate in one atomic transaction.
+```
+
+Therefore explicitly choose a failure-safe ordering and document it.
+
+A simple acceptable approach is:
+
+```text
+1. validate/project-scope evidence
+2. perform DB deletion successfully
+3. remove physical file
+```
+
+but if using this ordering, handle filesystem deletion failures explicitly and define the resulting state. Do NOT silently swallow the failure.
+
+Alternatively, implement a safe temporary-file/rollback strategy.
+
+The important invariant is:
+
+```text
+No silent DB/file inconsistency.
+```
+
+Do not pretend filesystem deletion is transactional.
+
+## Required deletion tests
+
+Add at least one failure regression test that simulates:
+
+```text
+physical file exists
+DB deletion fails
+```
+
+and verifies the system does not silently report successful deletion while leaving an inconsistent state.
+
+Also preserve the existing successful delete test.
+
+## DO NOT change
+
+Do not alter:
+
+```text
+Evidence domain model
+Pass 10 ActivityProgress model
+Pass 11 snapshot logic
+Pass 12 risk logic
+AI extraction
+activity matching rules
+document ingestion
+OCR
+processing jobs
+hash/deduplication subsystem
+notifications
+dashboard architecture
+```
+
+Do not start Pass 14.
+
+Do not introduce new infrastructure.
+
+## Verification
+
+Run:
 
 ```text
 npm test
 npm run build
 ```
 
-Run any additional focused evidence tests you create.
-
-Inspect the final diff for:
+Specifically verify:
 
 ```text
-accidental scope expansion
-cross-project leakage
-unsafe path handling
-partial filesystem/database state
-duplicate abstractions
-Pass 14+ implementation
+[ ] rejected match never creates activity provenance
+[ ] suggested match never creates accepted provenance
+[ ] confirmed match creates provenance
+[ ] valid ActivityProgress → ProgressUpdate → Evidence trace still works
+[ ] successful evidence deletion still works
+[ ] failed DB deletion does not silently corrupt evidence state
+[ ] cross-project isolation remains green
+[ ] full regression suite remains green
 ```
 
-Then commit with exactly:
+Inspect the final diff for accidental Pass 14+ implementation.
+
+Commit the correction as:
 
 ```text
-feat: implement FieldLine evidence system
+fix: harden FieldLine evidence provenance and deletion
 ```
 
-Push the commit to `main`.
+Push to `main`.
 
-After implementation, report:
+Afterward report:
 
 ```text
-1. files changed
-2. evidence architecture
-3. endpoints added
-4. storage behavior
-5. tests added
-6. test result
-7. build result
-8. commit SHA
-9. any limitations
+1. exact files changed
+2. provenance fix
+3. deletion failure-safety strategy
+4. tests added
+5. npm test result
+6. npm run build result
+7. final commit SHA
 ```

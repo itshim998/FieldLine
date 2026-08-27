@@ -319,22 +319,74 @@ export class DefaultEvidenceService implements EvidenceService {
   deleteEvidence(projectId: string, evidenceId: string): boolean {
     const evidence = this.getEvidence(projectId, evidenceId);
 
-    // Try to remove physical file safely
     const resolvedPath = path.resolve(process.cwd(), this.uploadDir, evidence.filePath);
     const projectRoot = path.resolve(process.cwd(), this.uploadDir, projectId);
 
-    if (resolvedPath.startsWith(projectRoot) && fs.existsSync(resolvedPath)) {
+    const fileExists = resolvedPath.startsWith(projectRoot) && fs.existsSync(resolvedPath);
+    const tempTrashPath = `${resolvedPath}.${Date.now()}.${crypto.randomUUID()}.trash`;
+
+    let fileStaged = false;
+    if (fileExists) {
       try {
-        fs.unlinkSync(resolvedPath);
-      } catch (err) {
-        logger.error('Failed to unlink evidence file during delete', {
+        fs.renameSync(resolvedPath, tempTrashPath);
+        fileStaged = true;
+      } catch (stageErr) {
+        logger.error('Failed to stage evidence file for deletion', {
           resolvedPath,
-          error: err
+          error: stageErr
         });
+        throw new ValidationError(
+          `Failed to stage evidence file for deletion: ${stageErr instanceof Error ? stageErr.message : String(stageErr)}`
+        );
       }
     }
 
-    return this.evidenceRepo.deleteByIdAndProjectId(evidenceId, projectId);
+    try {
+      const deleted = this.evidenceRepo.deleteByIdAndProjectId(evidenceId, projectId);
+      if (!deleted) {
+        // If DB deletion was a no-op, restore the staged file
+        if (fileStaged && fs.existsSync(tempTrashPath)) {
+          try {
+            fs.renameSync(tempTrashPath, resolvedPath);
+          } catch (restoreErr) {
+            logger.error('Failed to restore staged evidence file after DB deletion no-op', {
+              tempTrashPath,
+              resolvedPath,
+              error: restoreErr
+            });
+          }
+        }
+        return false;
+      }
+
+      // DB row removed successfully; permanently clean up the staged trash file
+      if (fileStaged && fs.existsSync(tempTrashPath)) {
+        try {
+          fs.unlinkSync(tempTrashPath);
+        } catch (unlinkErr) {
+          logger.warn('Failed to unlink staged trash evidence file after successful DB deletion', {
+            tempTrashPath,
+            error: unlinkErr
+          });
+        }
+      }
+
+      return true;
+    } catch (dbError) {
+      // DB deletion failed: roll back the file to its original path to prevent DB/filesystem inconsistency
+      if (fileStaged && fs.existsSync(tempTrashPath)) {
+        try {
+          fs.renameSync(tempTrashPath, resolvedPath);
+        } catch (restoreErr) {
+          logger.error('Failed to restore staged evidence file after DB deletion failure', {
+            tempTrashPath,
+            resolvedPath,
+            error: restoreErr
+          });
+        }
+      }
+      throw dbError;
+    }
   }
 }
 
