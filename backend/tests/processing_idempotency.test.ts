@@ -227,7 +227,7 @@ describe('Pass 16 — Document Processing Idempotency & Repeatability', () => {
     expect(finalMatches).toHaveLength(initialMatches.length);
   });
 
-  it('permits an explicit new processing attempt if previous job failed', async () => {
+  it('permits an explicit new processing attempt if previous job failed before project-state commit', async () => {
     // 1. Enqueue job
     const job1 = await jobService.enqueueDocumentIngestion(projectId, evidenceId);
 
@@ -247,5 +247,59 @@ describe('Pass 16 — Document Processing Idempotency & Repeatability', () => {
     expect(allJobs).toHaveLength(2);
     expect(allJobs.some(j => j.id === job1.id && j.status === 'failed')).toBe(true);
     expect(allJobs.some(j => j.id === retryJob.id && j.status === 'queued')).toBe(true);
+  });
+
+  it('handles post-commit job-status failure: project state remains valid and retry produces NO duplicate ProgressUpdate or ActivityMatches', async () => {
+    // 1. Enqueue job
+    const job = await jobService.enqueueDocumentIngestion(projectId, evidenceId);
+    const claimed = jobRepository.claimNextQueued();
+    expect(claimed).not.toBeNull();
+
+    // 2. Mock jobRepository.markCompleted to throw once (simulating failure during markCompleted)
+    const originalMarkCompleted = jobRepository.markCompleted.bind(jobRepository);
+    let throwCount = 1;
+    vi.spyOn(jobRepository, 'markCompleted').mockImplementation((id, res) => {
+      if (throwCount > 0) {
+        throwCount--;
+        throw new Error('Simulated SQLite Lock / Crash during markCompleted');
+      }
+      return originalMarkCompleted(id, res);
+    });
+
+    // 3. Worker executes process
+    await worker.process(claimed!);
+
+    // 4. Verify ProgressUpdate exists
+    const updates = progressUpdateRepository.listByProjectId(projectId);
+    expect(updates).toHaveLength(1);
+    const puId = updates[0].id;
+
+    // 5. Verify Evidence points to that ProgressUpdate
+    const ev = evidenceRepository.getByIdAndProjectId(evidenceId, projectId);
+    expect(ev?.progressUpdateId).toBe(puId);
+
+    // 6. Verify suggested matches exist
+    const initialMatches = activityMatchRepository.listByProgressUpdateId(puId, projectId);
+    expect(initialMatches.length).toBeGreaterThan(0);
+
+    // 7. Retry / re-enqueue the same job for this evidence
+    const retryJob = await jobService.enqueueDocumentIngestion(projectId, evidenceId);
+
+    // If job was queued, process with worker
+    if (retryJob.status === 'queued') {
+      const retryClaimed = jobRepository.claimNextQueued();
+      if (retryClaimed) {
+        await worker.process(retryClaimed);
+      }
+    }
+
+    // 8. Verify NO second ProgressUpdate was created
+    const finalUpdates = progressUpdateRepository.listByProjectId(projectId);
+    expect(finalUpdates).toHaveLength(1);
+    expect(finalUpdates[0].id).toBe(puId);
+
+    // 9. Verify NO duplicate ActivityMatches
+    const finalMatches = activityMatchRepository.listByProjectId(projectId);
+    expect(finalMatches).toHaveLength(initialMatches.length);
   });
 });

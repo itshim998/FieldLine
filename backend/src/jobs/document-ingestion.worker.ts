@@ -116,6 +116,35 @@ export class DocumentIngestionWorker {
       this.jobRepo.markCompleted(jobId, boundedResult);
       logger.info(`DocumentIngestionWorker: Job ${jobId} successfully completed for evidence ${evidenceId}`);
     } catch (err: unknown) {
+      const payload = job.payload as DocumentIngestionJobPayload | undefined;
+      const evidenceId = payload?.evidenceId?.trim();
+
+      // Check if project state was already committed to prevent corrupting valid state
+      if (evidenceId) {
+        try {
+          const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, job.projectId);
+          if (evidence?.progressUpdateId) {
+            logger.warn(
+              `DocumentIngestionWorker: Project state was already committed for evidence ${evidenceId} (progressUpdateId: ${evidence.progressUpdateId}). Preserving durable project truth.`
+            );
+            // Attempt to repair job status to completed
+            try {
+              this.jobRepo.markCompleted(jobId, {
+                evidenceId,
+                progressUpdateId: evidence.progressUpdateId,
+                matchCount: 0,
+                sourceType: evidence.fileType
+              });
+            } catch {
+              // Ignore job status repair error; project truth is preserved
+            }
+            return;
+          }
+        } catch {
+          // If check fails, proceed to standard failure handling
+        }
+      }
+
       const rawError = err instanceof Error ? err.message : String(err);
       const sanitized = sanitizeErrorMessage(rawError);
       logger.error(`DocumentIngestionWorker: Job ${jobId} processing failed: ${sanitized}`);

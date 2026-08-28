@@ -282,7 +282,44 @@ export class SqliteJobRepository implements JobRepository {
         return { job: existingActive, isNew: false };
       }
 
-      // 3. Create new queued job with event
+      // 3. Check if evidence ALREADY produced durable project state (e.g. post-commit job-status failure recovery)
+      const evRow = db.prepare('SELECT progress_update_id, file_type FROM evidence WHERE id = ? AND project_id = ?').get(evidenceId, projectId) as { progress_update_id: string | null; file_type: string } | undefined;
+      if (evRow?.progress_update_id) {
+        const puRow = db.prepare('SELECT id FROM progress_updates WHERE id = ? AND project_id = ?').get(evRow.progress_update_id, projectId) as { id: string } | undefined;
+        if (puRow) {
+          const matchCountRow = db.prepare('SELECT count(*) as c FROM activity_matches WHERE progress_update_id = ? AND project_id = ?').get(puRow.id, projectId) as { c: number } | undefined;
+          const matchCount = matchCountRow?.c ?? 0;
+          const boundedResult = {
+            evidenceId,
+            progressUpdateId: puRow.id,
+            matchCount,
+            sourceType: evRow.file_type
+          };
+
+          // Find if there is an existing job to repair (e.g. failed)
+          const existingAnyJob = db.prepare("SELECT id FROM processing_jobs WHERE project_id = ? AND job_type = 'document_ingestion' AND payload_json LIKE ? ORDER BY created_at DESC LIMIT 1").get(projectId, `%"evidenceId":"${evidenceId}"%`) as { id: string } | undefined;
+          if (existingAnyJob) {
+            const now = new Date().toISOString();
+            db.prepare(`
+              UPDATE processing_jobs
+              SET status = 'completed',
+                  result_json = ?,
+                  completed_at = ?,
+                  locked_at = NULL,
+                  error_message = NULL,
+                  updated_at = ?
+              WHERE id = ?
+            `).run(JSON.stringify(boundedResult), now, now, existingAnyJob.id);
+
+            const repaired = this.getByIdAndProjectId(existingAnyJob.id, projectId);
+            if (repaired) {
+              return { job: repaired, isNew: false };
+            }
+          }
+        }
+      }
+
+      // 4. Create new queued job with event
       const jobId = crypto.randomUUID();
       const eventId = crypto.randomUUID();
       const payloadJson = JSON.stringify({ evidenceId });

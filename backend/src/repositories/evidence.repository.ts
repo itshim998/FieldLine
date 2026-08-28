@@ -17,6 +17,8 @@ export interface EvidenceRepository {
   getById(id: string): Evidence | null;
   getByIdAndProjectId(id: string, projectId: string): Evidence | null;
   findByProjectIdAndHash(projectId: string, contentSha256: string): Evidence | null;
+  updateContentSha256(id: string, contentSha256: string): boolean;
+  listUnreconciledLegacyEvidence(): Evidence[];
   listByProjectId(projectId: string): Evidence[];
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): Evidence[];
   listByActivityId(activityId: string, projectId: string): Evidence[];
@@ -36,7 +38,7 @@ interface EvidenceDbRow {
   file_size_bytes: number | null;
   mime_type: string | null;
   metadata_json: string | null;
-  content_sha256: string;
+  content_sha256: string | null;
   uploaded_at: string;
   created_at: string;
 }
@@ -52,7 +54,7 @@ function mapRowToEvidence(row: EvidenceDbRow): Evidence {
     fileSizeBytes: row.file_size_bytes,
     mimeType: row.mime_type,
     metadataJson: row.metadata_json,
-    contentSha256: row.content_sha256 || '',
+    contentSha256: row.content_sha256 || null,
     uploadedAt: row.uploaded_at,
     createdAt: row.created_at
   };
@@ -68,7 +70,7 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
   create(input: CreateEvidenceInput): Evidence {
     const db = this.getDb();
     const id = input.id || crypto.randomUUID();
-    const contentSha256 = input.contentSha256 || crypto.createHash('sha256').update(id).digest('hex').toLowerCase();
+    const contentSha256 = input.contentSha256 ?? null;
 
     const stmt = db.prepare(`
       INSERT INTO evidence (
@@ -119,7 +121,7 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
     const db = this.getDb();
     const id = evidenceInput.id || crypto.randomUUID();
     const eventId = eventInput.id || crypto.randomUUID();
-    const contentSha256 = evidenceInput.contentSha256 || crypto.createHash('sha256').update(id).digest('hex').toLowerCase();
+    const contentSha256 = evidenceInput.contentSha256 ?? null;
 
     const insertEvidenceStmt = db.prepare(`
       INSERT INTO evidence (
@@ -186,13 +188,38 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
   }
 
   findByProjectIdAndHash(projectId: string, contentSha256: string): Evidence | null {
+    if (!contentSha256 || !contentSha256.trim()) {
+      return null;
+    }
     try {
       const db = this.getDb();
       const stmt = db.prepare('SELECT * FROM evidence WHERE project_id = ? AND content_sha256 = ?');
-      const row = stmt.get(projectId, contentSha256) as EvidenceDbRow | undefined;
+      const row = stmt.get(projectId, contentSha256.trim().toLowerCase()) as EvidenceDbRow | undefined;
       return row ? mapRowToEvidence(row) : null;
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to fetch evidence by hash: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  updateContentSha256(id: string, contentSha256: string): boolean {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare('UPDATE evidence SET content_sha256 = ? WHERE id = ?');
+      const res = stmt.run(contentSha256, id);
+      return res.changes > 0;
+    } catch (err: unknown) {
+      throw new DatabaseError(`Failed to update evidence content hash: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  listUnreconciledLegacyEvidence(): Evidence[] {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare("SELECT * FROM evidence WHERE content_sha256 IS NULL OR content_sha256 = '' ORDER BY created_at ASC");
+      const rows = stmt.all() as EvidenceDbRow[];
+      return rows.map(mapRowToEvidence);
+    } catch (err: unknown) {
+      throw new DatabaseError(`Failed to list unreconciled legacy evidence: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

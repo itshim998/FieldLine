@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { initDatabase, closeDatabase } from './database/db.js';
 import { jobRepository } from './jobs/job.repository.js';
 import { workerRunner } from './jobs/worker-runner.js';
+import { reconcileLegacyEvidenceHashes } from './services/evidence/legacy-hash-reconciler.js';
 
 async function startServer(): Promise<void> {
   try {
@@ -11,6 +12,12 @@ async function startServer(): Promise<void> {
     // Initialize SQLite database
     initDatabase();
     console.log(`📦 Local SQLite initialized at: ${env.DATABASE_PATH}`);
+
+    // Reconcile any legacy evidence rows without content hashes
+    const reconciliation = reconcileLegacyEvidenceHashes();
+    if (reconciliation.reconciledCount > 0) {
+      console.log(`🔍 Reconciled ${reconciliation.reconciledCount} legacy evidence content hashes.`);
+    }
 
     // Recover any abandoned/stale processing jobs from a previous crash/restart
     const recoveredCount = jobRepository.requeueStaleProcessingJobs(5 * 60 * 1000);

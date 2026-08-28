@@ -75,7 +75,7 @@ export const evidenceSchema = z.object({
   fileSizeBytes: z.number().nullable(),
   mimeType: z.string().nullable(),
   metadataJson: z.string().nullable(),
-  contentSha256: z.string(),
+  contentSha256: z.string().nullable().optional(),
   uploadedAt: z.string(),
   createdAt: z.string()
 });

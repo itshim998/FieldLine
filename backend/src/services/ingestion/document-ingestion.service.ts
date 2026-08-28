@@ -158,7 +158,46 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
       throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
     }
 
-    // 3. Extract and normalize document content
+    // 3. Durable Idempotency: check if evidence is ALREADY linked to an existing progress report
+    if (evidence.progressUpdateId) {
+      const priorProgress = this.progressUpdateRepo.getByIdAndProjectId(evidence.progressUpdateId, projectId);
+      if (priorProgress) {
+        logger.debug(
+          `DocumentIngestionService: Evidence ${evidenceId} already has durable report ${evidence.progressUpdateId}. Reusing existing project state.`
+        );
+        const existingMatches = this.activityMatchRepo.listByProgressUpdateId(priorProgress.id, projectId);
+        return {
+          evidence,
+          progressUpdate: priorProgress,
+          normalizedDocument: {
+            sourceType: evidence.fileType as any,
+            textLength: priorProgress.rawText?.length ?? 0,
+            metadata: {}
+          },
+          extraction: { items: [] },
+          matches: existingMatches.map((m) => ({
+            fact: {
+              reference: m.matchedText || m.activityId,
+              location: null,
+              progress_percent: null,
+              status: 'in_progress' as const
+            },
+            bestMatch: {
+              activityId: m.activityId,
+              activityExternalId: m.activityId,
+              activityName: m.activityId,
+              confidenceScore: m.confidenceScore,
+              matchMethod: m.matchMethod,
+              matchedText: m.matchedText || '',
+              rationale: m.rationale || ''
+            },
+            alternatives: []
+          }))
+        };
+      }
+    }
+
+    // 4. Extract and normalize document content
     const normalizedDoc = await this.extractDocument(projectId, evidenceId);
 
     if (!normalizedDoc.text || normalizedDoc.text.trim().length === 0) {

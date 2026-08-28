@@ -20,18 +20,11 @@ export function up(db: DatabaseType): void {
   if (tableExists(db, 'evidence')) {
     if (!columnExists(db, 'evidence', 'content_sha256')) {
       db.exec(`
-        ALTER TABLE evidence ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT '';
+        ALTER TABLE evidence ADD COLUMN content_sha256 TEXT DEFAULT NULL;
       `);
     }
 
-    // Backfill any existing rows where content_sha256 is empty with a deterministic unique fallback
-    db.exec(`
-      UPDATE evidence
-      SET content_sha256 = lower(hex(id))
-      WHERE content_sha256 = '' OR content_sha256 IS NULL;
-    `);
-
-    // Create project-scoped unique index on (project_id, content_sha256)
+    // Create project-scoped unique index on (project_id, content_sha256) for non-null/non-empty hashes
     db.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS uq_evidence_project_content_sha256 
         ON evidence (project_id, content_sha256)
