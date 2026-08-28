@@ -11,7 +11,7 @@ import { SqliteProjectEventRepository } from '../src/repositories/project-event.
 import { ActivityMatchingService } from '../src/services/matching/activity-matching.service.js';
 import { DefaultProgressService } from '../src/services/progress/progress.service.js';
 import { FieldProgressExtraction } from '../src/ai/contracts/field-progress-extraction.contract.js';
-import { ValidationError } from '../src/errors/AppError.js';
+import { ValidationError, NotFoundError } from '../src/errors/AppError.js';
 
 describe('Canonical Truth Protection & Progress Integration (Pass 19)', () => {
   let db: DatabaseType;
@@ -112,7 +112,7 @@ describe('Canonical Truth Protection & Progress Integration (Pass 19)', () => {
     }
   });
 
-  it('Low-confidence match: cannot create ActivityProgress (rejected by ProgressService)', async () => {
+  it('Low-confidence match: cannot create ActivityProgress (rejected by ProgressService)', () => {
     // 1. Create a low-confidence match (suggested + unresolved)
     const lowMatch = matchRepo.create({
       projectId,
@@ -126,18 +126,17 @@ describe('Canonical Truth Protection & Progress Integration (Pass 19)', () => {
     });
 
     // 2. Attempt to normalize and record progress with ProgressService without confirmation
-    await expect(
-      () =>
-        progressService.normalizeAndRecordProgress({
-          projectId,
-          updateId,
-          matchId: lowMatch.id,
-          fact: {
-            reference: 'Excavation work',
-            progress_percent: 55,
-            status: 'in_progress'
-          }
-        })
+    expect(() =>
+      progressService.normalizeAndRecordProgress({
+        projectId,
+        updateId,
+        matchId: lowMatch.id,
+        fact: {
+          reference: 'Excavation work',
+          progress_percent: 55,
+          status: 'in_progress'
+        }
+      })
     ).toThrow(ValidationError);
 
     // 3. Verify zero ActivityProgress records created in database
@@ -251,5 +250,142 @@ describe('Canonical Truth Protection & Progress Integration (Pass 19)', () => {
     // Verify activity 1 has NO progress record
     const act1Progress = progressRepo.listByActivityId(activity1Id, projectId);
     expect(act1Progress).toHaveLength(0);
+  });
+
+  it('Auto-confirmed high-confidence match: directly eligible to record canonical ActivityProgress', async () => {
+    // 1. Process unambiguous match with exact activity ID
+    const extraction: FieldProgressExtraction = {
+      items: [
+        {
+          reference: 'ACT-101',
+          location: 'Block B',
+          progress_percent: 75,
+          status: 'in_progress'
+        }
+      ]
+    };
+
+    const matchResult = await matchingService.matchProgressUpdate(projectId, updateId, extraction);
+    expect(matchResult.matches).toHaveLength(1);
+
+    const matches = matchRepo.listByProgressUpdateId(updateId, projectId);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].status).toBe('confirmed');
+    expect(matches[0].confidenceTier).toBe('high');
+    expect(matches[0].reviewedBy).toBe('system');
+
+    // 2. ProgressService directly normalizes and records canonical progress
+    const recordedProgress = progressService.normalizeAndRecordProgress({
+      projectId,
+      updateId,
+      matchId: matches[0].id,
+      fact: extraction.items[0]
+    });
+
+    expect(recordedProgress).toBeDefined();
+    expect(recordedProgress.activityId).toBe(activity1Id);
+    expect(recordedProgress.actualPercent).toBe(75);
+
+    const persisted = progressRepo.listByProjectId(projectId);
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].actualPercent).toBe(75);
+  });
+
+  it('Rejected match: cannot create ActivityProgress (throws ValidationError)', async () => {
+    // 1. Create a match and reject it
+    const candidateMatch = matchRepo.create({
+      projectId,
+      progressUpdateId: updateId,
+      activityId: activity1Id,
+      confidenceScore: 0.65,
+      matchMethod: 'text_similarity',
+      status: 'suggested',
+      confidenceTier: 'medium',
+      reviewState: 'awaiting_review'
+    });
+
+    const rejectedMatch = await matchingService.rejectMatch(
+      projectId,
+      candidateMatch.id,
+      'Site Auditor',
+      'Irrelevant observation'
+    );
+    expect(rejectedMatch.status).toBe('rejected');
+
+    // 2. Attempting to record progress on a rejected match must throw ValidationError
+    expect(() =>
+      progressService.normalizeAndRecordProgress({
+        projectId,
+        updateId,
+        matchId: rejectedMatch.id,
+        fact: {
+          reference: 'Excavation work',
+          progress_percent: 50,
+          status: 'in_progress'
+        }
+      })
+    ).toThrow(ValidationError);
+
+    // 3. Verify zero progress records persisted
+    expect(progressRepo.listByProjectId(projectId)).toHaveLength(0);
+  });
+
+  it('Cross-project access: ProgressService rejects match belonging to a different project', () => {
+    // 1. Create a second project with its own schedule, activity, and progress update
+    const otherProject = projectRepo.create({
+      name: 'Other Project',
+      code: 'OTH-01',
+      status: 'active'
+    });
+
+    const otherSchedule = scheduleRepo.create({
+      projectId: otherProject.id,
+      name: 'Other Schedule',
+      sourceType: 'csv'
+    });
+
+    const otherActivity = activityRepo.create({
+      projectId: otherProject.id,
+      scheduleId: otherSchedule.id,
+      externalId: 'ACT-OTH-01',
+      name: 'Other Activity',
+      plannedStart: '2026-09-01',
+      plannedFinish: '2026-09-15'
+    });
+
+    const otherUpdate = updateRepo.create({
+      projectId: otherProject.id,
+      reportDate: '2026-09-05',
+      sourceType: 'manual',
+      rawText: 'Other update text'
+    });
+
+    const otherMatch = matchRepo.create({
+      projectId: otherProject.id,
+      progressUpdateId: otherUpdate.id,
+      activityId: otherActivity.id,
+      confidenceScore: 0.95,
+      matchMethod: 'exact_id',
+      status: 'confirmed',
+      confidenceTier: 'high',
+      reviewState: 'resolved'
+    });
+
+    // 2. Attempting to record progress in projectId using otherProject match must fail
+    expect(() =>
+      progressService.normalizeAndRecordProgress({
+        projectId, // Project A
+        updateId,
+        matchId: otherMatch.id, // Project B match
+        fact: {
+          reference: 'ACT-101',
+          progress_percent: 40,
+          status: 'in_progress'
+        }
+      })
+    ).toThrow(NotFoundError);
+
+    expect(progressRepo.listByProjectId(projectId)).toHaveLength(0);
+    expect(progressRepo.listByProjectId(otherProject.id)).toHaveLength(0);
   });
 });
