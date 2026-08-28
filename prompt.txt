@@ -1,213 +1,1332 @@
-# FieldLine — PASS 17 CORRECTIVE FIX
+# FieldLine — PASS 18: FIELDLINE ASSISTANT
 
-The latest Pass 17 commit:
+Implement **Pass 18 — FieldLine Assistant** in the existing FieldLine repository.
+
+Approved base:
+
+```text id="b467base18"
+22467d7b5149b419b3ebae7bc39a549319ac2e7e
+```
+
+Current approved passes:
+
+```text id="approved18"
+Pass 13 — Evidence System
+Pass 14 — Document Ingestion
+Pass 15 — In-process Processing Jobs
+Pass 16 — Failure Isolation & Idempotency
+Pass 17 — Project Intelligence Query Layer
+```
+
+Do NOT implement Pass 19+.
+
+---
+
+# 1. Objective
+
+Add natural-language interaction to FieldLine.
+
+A manager should be able to ask:
 
 ```text
-57af930ac2f23190dc3c2591e1f8f8d8f75b7505
+What is delayed?
+
+Why is Foundation B at risk?
+
+What changed today?
+
+Which activities are most behind schedule?
+
+Which milestones are approaching?
+
+Which activities have no recent updates?
 ```
 
-was independently reviewed.
+and receive an answer grounded strictly in actual project data.
 
-Most of Pass 17 is correct.
+Required architecture:
 
-There is one semantic blocker:
+```text id="arch18"
+Manager question
+      ↓
+AI structured intent interpretation
+      ↓
+application validation
+      ↓
+deterministic project/entity resolution
+      ↓
+ProjectIntelligenceService
+      ↓
+verified structured fact set
+      ↓
+AI structured answer generation
+      ↓
+validated grounded answer
+```
 
-# BLOCKER — `completedToday` is not actually “completed today”
+The LLM is NEVER the source of project truth.
 
-Current implementation uses:
+---
+
+# 2. Critical architectural rule
+
+DO NOT let the assistant query:
+
+* SQLite
+* repositories
+* filesystem
+* Evidence files
+* raw project tables
+
+The assistant receives only verified structured facts produced by application code.
+
+The architecture must remain:
+
+```text id="truth18"
+SQLite/project state
+      ↓
+deterministic domain services
+      ↓
+Project Intelligence
+      ↓
+Assistant
+```
+
+not:
+
+```text
+LLM
+ ↓
+database
+```
+
+---
+
+# 3. Current AI layer
+
+The repository already contains:
+
+```text id="ai18"
+AIService
+AIProvider
+MockAIProvider
+FieldProgressExtractionService
+```
+
+The current `AIProvider` interface supports:
 
 ```ts
-obs &&
-obs.asOfDate === canonicalAsOfDate &&
-(obs.status === 'completed' || obs.actualPercent >= 100)
+generateText(...)
+generateStructured(...)
 ```
 
-This can incorrectly report an activity as completed today merely because its latest observation on the requested date still shows 100% / completed.
+Reuse this abstraction.
+
+Do NOT create an Assistant-specific AI interface that duplicates it.
+
+The existing AI architecture already separates provider communication from business logic.
+
+Preserve:
+
+```text id="provider18"
+AIProvider
+  ↓
+AIService
+  ↓
+application service
+```
+
+---
+
+# 4. Add real Gemini provider
+
+The current repository contains only `MockAIProvider`.
+
+Add:
+
+```text id="gemini18"
+backend/src/ai/providers/gemini-ai.provider.ts
+```
+
+implementing the existing:
+
+```ts
+AIProvider
+```
+
+Use the current official Google Gemini JavaScript SDK/API.
+
+Target model configuration:
+
+```text
+GEMINI_MODEL
+```
+
+with default:
+
+```text
+gemini-3.7-flash
+```
+
+Do not hard-code API credentials.
+
+Use:
+
+```text
+GEMINI_API_KEY
+```
+
+from environment configuration.
+
+Add configuration:
+
+```text
+AI_PROVIDER=mock|gemini
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-3.7-flash
+```
+
+Keep `MockAIProvider` available for tests and offline development.
+
+Do not force all existing AI tests to use a network provider.
+
+Do not commit real keys.
+
+The application must fail clearly if `AI_PROVIDER=gemini` is selected without a usable Gemini API key.
+
+Use the current official SDK contract and current Gemini 3.7 Flash API semantics; do not rely on stale Gemini API examples from old model generations.
+
+---
+
+# 5. Preserve existing AI behavior
+
+Do not break:
+
+```text id="existingai18"
+FieldProgressExtractionService
+AIService
+MockAIProvider
+existing AI extraction tests
+```
+
+The existing Field Progress Extraction prompt must remain responsible for factual extraction from field reports.
+
+Pass 18 introduces assistant semantics separately.
+
+Do NOT merge assistant prompts into the field-progress extraction prompt.
+
+---
+
+# 6. Assistant domain contracts
+
+Create:
+
+```text id="assistant18"
+backend/src/ai/contracts/assistant.contract.ts
+```
+
+or equivalent clean location.
+
+Define:
+
+## Intent
+
+Supported intent types:
+
+```text id="intent18"
+delayed
+at_risk
+completed_today
+behind_schedule
+approaching_milestones
+stale_activities
+recent_changes
+activity_status
+```
+
+Intent shape conceptually:
+
+```ts
+interface AssistantIntent {
+  intent: AssistantIntentType;
+  activityQuery?: string | null;
+  explicitDate?: string | null;
+}
+```
+
+Do NOT allow the model to output authoritative activity IDs.
+
+The model may return human text such as:
+
+```text
+Foundation B
+```
+
+The application resolves that text against the actual project.
+
+---
+
+# 7. Intent interpretation
+
+Create:
+
+```text id="intentservice18"
+AssistantIntentService
+```
+
+that calls:
+
+```text
+AIService.extractStructured(...)
+```
+
+with the intent schema.
+
+Prompt the model to:
+
+* classify only into supported intents
+* extract an optional human activity reference
+* extract an optional explicit date
+* never invent activity IDs
+* never answer the question
+* never calculate project values
 
 Example:
 
 ```text
-Activity completed:
-2026-08-20
+Question:
+"Why is Foundation B at risk?"
 
-Another observation:
-2026-08-28
-actualPercent = 100
-status = completed
-actualFinish = 2026-08-20
+Expected intent:
+
+{
+  "intent": "at_risk",
+  "activityQuery": "Foundation B",
+  "explicitDate": null
+}
 ```
 
-The current implementation would classify this as:
+Another:
 
 ```text
-completedToday on 2026-08-28
+"Which activities are most behind schedule?"
+
+{
+  "intent": "behind_schedule",
+  "activityQuery": null,
+  "explicitDate": null
+}
 ```
 
-which is false.
-
-## Required semantic rule
-
-“Completed today” must mean that the activity's deterministic completion date is the requested `asOfDate`.
-
-Use the canonical ActivityProgress fields already available in the repository.
-
-Preferred rule:
+Another:
 
 ```text
-activity progress observation exists
-AND
-observation represents completion
-AND
-actualFinish === canonicalAsOfDate
+"What changed on 2026-08-25?"
+
+{
+  "intent": "recent_changes",
+  "activityQuery": null,
+  "explicitDate": "2026-08-25"
+}
 ```
 
-Do not classify an activity as completed today merely because:
+Invalid intent output must fail validation.
+
+---
+
+# 8. Application-controlled date semantics
+
+Do not trust the LLM with relative dates.
+
+If the user asks:
 
 ```text
-observation.asOfDate === canonicalAsOfDate
+today
 ```
 
-when its actual completion date is earlier.
+the application determines the canonical date using existing snapshot/date semantics.
 
-Also do not use:
+If the LLM returns:
 
 ```text
-Evidence.uploadedAt
-ProgressUpdate.createdAt
-processing job completedAt
+explicitDate
 ```
 
-as activity completion dates.
+validate it using the same date validation conventions already used by the ProgressSnapshotService.
 
-ActivityProgress remains the source of truth.
+Do not invent dates.
 
-# Edge cases
+Do not use Evidence.uploadedAt or job timestamps for semantic project dates.
 
-Test:
+---
 
-### Completion today
+# 9. Deterministic activity resolution
+
+Create a small deterministic resolver.
+
+Input:
 
 ```text
-actualFinish = 2026-08-28
-asOfDate = 2026-08-28
-status = completed
-actualPercent = 100
+projectId
+activityQuery
 ```
 
-→ MUST appear in `completedToday`.
-
-### Completed earlier, observed today
+Resolve against:
 
 ```text
-actualFinish = 2026-08-20
-asOfDate = 2026-08-28
-status = completed
-actualPercent = 100
+ActivityRepository.listByProjectId(projectId)
 ```
 
-→ MUST NOT appear in `completedToday`.
+Use deterministic matching only.
 
-### No actualFinish but 100%
+Preferred resolution precedence:
 
-Do NOT invent a completion date.
+```text id="resolve18"
+1. exact externalId
+2. exact case-insensitive normalized activity name
+3. exact normalized name + location
+4. unique deterministic textual match
+```
 
-Define and document the fallback behavior explicitly.
+Normalization may include:
 
-Prefer excluding it from `completedToday` unless the existing canonical progress semantics establish another deterministic completion-date signal.
+* trim
+* lowercase
+* collapse whitespace
 
-### Historical query
+Do not use an LLM for entity resolution.
+
+Do not invent an Activity ID.
+
+If no match:
+
+```text id="nomatch18"
+return a safe "activity not found" assistant result
+```
+
+If multiple equally valid matches:
+
+```text id="ambiguous18"
+do not guess
+return an ambiguity result containing the candidate activities
+```
+
+Do not silently choose one.
+
+---
+
+# 10. Project Intelligence integration
+
+The assistant MUST reuse:
+
+```text id="intel18"
+ProjectIntelligenceService.getIntelligence(...)
+```
+
+for all supported operational intents.
+
+Do not recreate:
+
+* delayed logic
+* at-risk logic
+* variance logic
+* stale logic
+* milestone logic
+* completed-today logic
+* recent-change logic
+
+Pass 17 is the authoritative information layer.
+
+---
+
+# 11. Build verified fact sets
+
+After intent resolution, application code obtains:
+
+```text id="verified18"
+ProjectIntelligence
+```
+
+and selects only the relevant facts.
+
+Examples:
+
+## "What is delayed?"
+
+Verified set:
+
+```text
+intelligence.delayed
+```
+
+## "Why is Foundation B at risk?"
+
+Verified set:
+
+```text
+intelligence.atRisk
+```
+
+filtered to the deterministically resolved activity.
+
+## "What changed today?"
+
+Verified set:
+
+```text
+intelligence.recentChanges
+```
+
+using the correct date/window.
+
+## "Which activities are most behind?"
+
+Verified set:
+
+```text
+intelligence.behindSchedule
+```
+
+preserving its deterministic sort order.
+
+Do not let the model choose which facts exist.
+
+---
+
+# 12. Activity status questions
 
 For:
 
 ```text
-asOfDate = 2026-08-20
+"What is the status of Foundation B?"
 ```
 
-an activity with:
+resolve the activity deterministically.
+
+Then use the authoritative snapshot/risk/intelligence data for that activity.
+
+Do NOT ask the LLM to infer status from the activity name or from natural-language knowledge.
+
+---
+
+# 13. Final assistant response contract
+
+Create:
+
+```ts
+interface AssistantAnswer {
+  answer: string;
+  factRefs: string[];
+}
+```
+
+Use:
 
 ```text
-actualFinish = 2026-08-20
+AIService.extractStructured(...)
 ```
 
-must appear.
+rather than raw `generateText()` for the final response.
 
-An activity with:
+The final response schema must validate:
 
 ```text
-actualFinish = 2026-08-21
+answer = non-empty string
+factRefs = array of strings
 ```
 
-must not appear because that completion was in the future relative to the snapshot.
+Keep the answer concise enough for a manager UI.
 
-# Required regression tests
+---
 
-Add tests to `project_intelligence_service.test.ts` covering:
+# 14. Grounding enforcement
+
+The final answer prompt must state:
+
+```text id="ground18"
+You are not the source of truth.
+
+The VERIFIED FACTS below are the only project facts available.
+
+You must:
+- answer only from VERIFIED FACTS
+- preserve numeric values exactly
+- preserve dates exactly
+- preserve activity identity exactly
+- cite factual claims with factRefs
+
+You must not:
+- invent project facts
+- invent percentages
+- invent dates
+- invent causes
+- invent activities
+- infer unsupported contractor/personnel issues
+- perform new project calculations
+- contradict VERIFIED FACTS
+
+If the VERIFIED FACTS are insufficient:
+say that the available project data is insufficient.
+
+Every factual statement in the answer must be supported by one or more supplied factRefs.
+```
+
+The model receives:
 
 ```text
-[ ] completed today appears
-[ ] completed earlier but observed today does not appear
-[ ] future completion does not appear for historical snapshot
-[ ] completion date is used rather than observation date
-[ ] upload timestamp cannot create completedToday
-[ ] job completion timestamp cannot create completedToday
+original question
++
+resolved intent
++
+verified fact set
 ```
 
-Preserve all existing Pass 17 tests.
+and nothing else from the project.
 
-# Do NOT change
+---
 
-Do not modify:
+# 15. Validate returned fact references
+
+After the LLM response:
+
+```text id="factcheck18"
+answer.factRefs
+```
+
+must be checked against the application-generated verified fact set.
+
+If the model returns an unknown reference:
+
+```text id="badref18"
+do not accept the answer
+```
+
+Return a safe assistant error or regenerate once using the same verified facts.
+
+Do NOT silently accept unsupported references.
+
+Prefer deterministic rejection over hallucination.
+
+---
+
+# 16. No unsupported causal reasoning
+
+For:
 
 ```text
-ProgressSnapshotService
-RiskClassificationService
-ActivityProgress semantics
-Pass 13–16 behavior
-milestone definition
-stale-activity definition
-recent-change definition
+"Why is Foundation B at risk?"
 ```
 
-Do not introduce another completion engine.
+the model may explain:
 
-Do not add LLM logic.
+```text
+classification
+reasons
+planned progress
+actual progress
+variance
+planned finish
+```
 
-Do not start Pass 18.
+only if those facts are supplied.
 
-# Verification
+It must NOT invent:
+
+```text
+contractor shortage
+material shortage
+weather problems
+labor issues
+design problems
+```
+
+unless such facts actually appear in the supplied verified data.
+
+---
+
+# 17. Ranking rule
+
+For:
+
+```text
+"Which activities are most behind schedule?"
+```
+
+the LLM must not perform ranking.
+
+The application uses the deterministic order from:
+
+```text id="behind18"
+ProjectIntelligence.behindSchedule
+```
+
+and the LLM only explains that ordered result.
+
+Never ask the model to recalculate variance.
+
+---
+
+# 18. Assistant service
+
+Create:
+
+```text id="assistantservice18"
+backend/src/services/assistant/
+    assistant.service.ts
+    assistant.types.ts
+```
+
+Suggested workflow:
+
+```text id="serviceflow18"
+AssistantService.answerQuestion(...)
+        ↓
+Intent interpretation
+        ↓
+Intent validation
+        ↓
+date normalization
+        ↓
+deterministic activity resolution
+        ↓
+ProjectIntelligenceService
+        ↓
+verified fact selection
+        ↓
+structured LLM answer generation
+        ↓
+fact-reference validation
+        ↓
+AssistantResponse
+```
+
+The assistant service must not import Express types.
+
+The assistant service must not execute SQL.
+
+---
+
+# 19. Assistant API
+
+Add:
+
+```text id="assistantroute18"
+POST /api/projects/:projectId/assistant/query
+```
+
+Request:
+
+```json
+{
+  "question": "Why is Foundation B at risk?"
+}
+```
+
+Optional:
+
+```json
+{
+  "question": "...",
+  "asOfDate": "2026-08-28"
+}
+```
+
+The application may use `asOfDate` as an explicit user/UI override, but must validate it.
+
+Response conceptually:
+
+```json
+{
+  "question": "Why is Foundation B at risk?",
+  "intent": {
+    "type": "at_risk",
+    "activityQuery": "Foundation B",
+    "explicitDate": null
+  },
+  "answer": "Foundation B is at risk because ...",
+  "factRefs": [
+    "activity-risk:ACT-123"
+  ],
+  "grounded": true,
+  "asOfDate": "2026-08-28"
+}
+```
+
+Exact contract may be refined consistently with existing API conventions.
+
+Do not expose raw LLM provider internals.
+
+---
+
+# 20. Unsupported questions
+
+Support a safe unsupported path.
+
+If the intent model cannot confidently classify the question into the supported intent set:
+
+```text
+assistant result:
+unsupported
+```
+
+The application must not manufacture an answer.
+
+Examples:
+
+```text
+"What is the weather?"
+"Who is the best contractor?"
+"What should we build next year?"
+```
+
+should NOT result in invented project answers.
+
+---
+
+# 21. Insufficient data
+
+If the question is valid but the verified data is insufficient:
+
+```text
+grounded = false
+```
+
+or an equivalent explicit status.
+
+Example:
+
+```text
+"What changed on 2025-01-01?"
+```
+
+when no relevant events exist.
+
+The assistant should say that the available project data does not contain the requested information.
+
+Do not fill the gap from general model knowledge.
+
+---
+
+# 22. Evidence/provenance references
+
+Where useful, enrich verified facts with existing provenance references:
+
+```text id="prov18"
+activityId
+progressUpdateId
+evidenceId
+```
+
+Use existing Pass 13 APIs/services.
+
+Do not redesign Evidence.
+
+Do not expose filesystem paths.
+
+A future frontend should be able to use returned identifiers to navigate to existing activity/evidence surfaces.
+
+---
+
+# 23. Real Gemini configuration
+
+Update:
+
+```text id="env18"
+backend/src/config/env.ts
+.env.example
+README.md
+```
+
+with:
+
+```text
+AI_PROVIDER
+GEMINI_API_KEY
+GEMINI_MODEL
+```
+
+Suggested defaults:
+
+```text
+AI_PROVIDER=mock
+GEMINI_MODEL=gemini-3.7-flash
+```
+
+Do not require a Gemini key for existing test/offline workflows.
+
+When:
+
+```text
+AI_PROVIDER=gemini
+```
+
+is selected, validate that:
+
+```text
+GEMINI_API_KEY
+```
+
+is present.
+
+Do not log the API key.
+
+Do not return it in health checks or errors.
+
+---
+
+# 24. AI provider error handling
+
+Provider failures should become the existing AI application error type.
+
+Do not expose:
+
+* API keys
+* raw authorization headers
+* internal SDK stack traces
+* sensitive provider responses
+
+The assistant route should return a clean application-level error.
+
+The existing AIService should remain the central wrapping layer where appropriate.
+
+---
+
+# 25. Frontend integration
+
+The existing frontend already contains the Project Intelligence workspace.
+
+Add an Assistant panel/tab in that workspace.
+
+UI:
+
+```text id="ui18"
+Ask FieldLine
+[ What is delayed?                         ]
+[ Ask ]
+
+Recent:
+"What is delayed?"
+"Why is Foundation B at risk?"
+```
+
+Answer:
+
+```text
+FieldLine
+
+Foundation B is at risk because ...
+```
+
+Then a compact:
+
+```text
+Verified facts
+```
+
+section with relevant facts/identifiers.
+
+Do not build:
+
+```text
+chat history database
+multi-turn conversation memory
+voice assistant
+streaming tokens
+WebSockets
+SSE
+```
+
+Those are later passes.
+
+---
+
+# 26. Testing — intent interpretation
+
+Add tests for:
+
+```text id="intenttests18"
+[ ] delayed
+[ ] at_risk
+[ ] completed_today
+[ ] behind_schedule
+[ ] approaching_milestones
+[ ] stale_activities
+[ ] recent_changes
+[ ] activity_status
+[ ] invalid intent rejected
+[ ] activityQuery preserved
+[ ] no activity ID accepted from model
+```
+
+Use injected/fake AIService implementations.
+
+Tests must not depend on a real Gemini API.
+
+---
+
+# 27. Testing — deterministic resolution
+
+Add:
+
+```text id="resolver18"
+[ ] exact externalId resolution
+[ ] exact activity-name resolution
+[ ] case-insensitive normalization
+[ ] unique location/name resolution if supported
+[ ] no match
+[ ] ambiguous match
+[ ] cross-project activity cannot resolve
+```
+
+Never allow an ambiguous activity to produce a confident answer.
+
+---
+
+# 28. Testing — grounding
+
+Create deterministic verified fact fixtures.
+
+Test that:
+
+```text id="groundtests18"
+[ ] answer can only cite known factRefs
+[ ] unknown factRef is rejected
+[ ] unsupported claim is rejected
+[ ] missing facts produce insufficient-data response
+[ ] numeric values remain grounded
+```
+
+Use a fake AI provider whose final structured response intentionally contains:
+
+```text
+valid factRefs
+```
+
+and another test with:
+
+```text
+fake factRefs
+```
+
+which must fail.
+
+---
+
+# 29. Testing — end-to-end
+
+Create realistic tests:
+
+### Query 1
+
+```text
+"What is delayed?"
+```
+
+Expected:
+
+```text
+intent = delayed
+verified facts = intelligence.delayed
+grounded answer
+```
+
+### Query 2
+
+```text
+"Why is Foundation B at risk?"
+```
+
+Expected:
+
+```text
+intent = at_risk
+deterministic activity resolution
+one matching fact
+grounded answer
+```
+
+### Query 3
+
+```text
+"What changed today?"
+```
+
+Expected:
+
+```text
+intent = recent_changes
+canonical date
+recent event facts
+```
+
+### Query 4
+
+```text
+"Which activities are most behind schedule?"
+```
+
+Expected:
+
+```text
+intent = behind_schedule
+existing deterministic order preserved
+```
+
+### Query 5
+
+```text
+"Tell me about imaginary activity X"
+```
+
+Expected:
+
+```text
+activity not found / insufficient data
+NO hallucinated answer
+```
+
+---
+
+# 30. Security / isolation tests
+
+Verify:
+
+```text id="security18"
+[ ] Project A question cannot surface Project B activity
+[ ] Project A question cannot surface Project B events
+[ ] Project A question cannot surface Project B evidence references
+[ ] arbitrary activity IDs from the LLM are ignored/rejected
+[ ] absolute filesystem paths are never returned
+[ ] provider errors do not expose secrets
+```
+
+The projectId from the route is authoritative.
+
+Never allow the LLM to choose a project.
+
+---
+
+# 31. Resource limits
+
+Bound:
+
+```text id="limits18"
+maximum user question length
+maximum verified facts passed to final model
+maximum answer length
+maximum fact references
+```
+
+Do not send the entire project's raw database state to the model.
+
+Only send the minimum relevant verified fact subset.
+
+This keeps latency and cost bounded.
+
+---
+
+# 32. No assistant memory yet
+
+Pass 18 is intentionally stateless.
+
+Do not add:
+
+```text
+assistant_messages
+conversation_sessions
+conversation_embeddings
+RAG memory
+vector database
+```
+
+A later pass may introduce conversational memory.
+
+---
+
+# 33. Documentation
+
+Update:
+
+```text id="docs18"
+README.md
+docs/ARCHITECTURE.md
+```
+
+to show:
+
+```text
+Manager question
+      ↓
+Assistant intent interpretation
+      ↓
+Deterministic Project Intelligence
+      ↓
+Verified fact set
+      ↓
+Grounded LLM explanation
+      ↓
+Manager answer
+```
+
+Explicitly document:
+
+```text
+AI interprets and explains.
+
+Application code determines project truth.
+```
+
+Update the Pass checklist so Pass 18 is marked complete.
+
+---
+
+# 34. Scope guard
+
+DO NOT implement:
+
+```text id="scope18"
+Pass 19 human review workflow
+Pass 20 full dashboard redesign
+Pass 21 activity detail system
+Pass 22 voice input
+Pass 23 evaluation suite
+Pass 24 golden demo environment
+Pass 25 presentation polish
+```
+
+Also do NOT implement:
+
+```text
+multi-turn memory
+RAG
+embeddings
+vector database
+agent tools
+function-calling workflow
+LLM-generated SQL
+LLM-generated filters
+automatic project mutations
+assistant-triggered progress updates
+assistant-triggered evidence processing
+```
+
+The assistant is strictly read-only in Pass 18.
+
+---
+
+# 35. Definition of done
+
+Pass 18 is complete only when:
+
+```text id="done18"
+[ ] Natural-language assistant endpoint exists.
+
+[ ] Intent interpretation uses structured AI output.
+
+[ ] Supported intent set is explicitly validated.
+
+[ ] Activity references are deterministically resolved.
+
+[ ] LLM cannot choose authoritative activity IDs.
+
+[ ] Project IntelligenceService is reused.
+
+[ ] Verified fact sets are created by application code.
+
+[ ] Final LLM answer uses only verified facts.
+
+[ ] Final answer uses structured output.
+
+[ ] Returned fact references are validated.
+
+[ ] Unknown fact references are rejected.
+
+[ ] Unsupported questions are safely rejected.
+
+[ ] Insufficient data produces a grounded insufficiency response.
+
+[ ] Existing risk/progress/variance formulas are not duplicated.
+
+[ ] Project isolation remains enforced.
+
+[ ] Real Gemini provider exists behind AIProvider.
+
+[ ] Mock provider remains usable for tests/offline development.
+
+[ ] GEMINI_API_KEY is configuration-only and never logged.
+
+[ ] Frontend contains an Assistant panel.
+
+[ ] Assistant remains read-only.
+
+[ ] Full regression suite passes.
+
+[ ] Assistant unit/integration/security tests pass.
+
+[ ] npm run build passes.
+
+[ ] Documentation is updated.
+
+[ ] No Pass 19+ functionality is implemented.
+```
+
+---
+
+# 36. Final verification
 
 Run:
 
-```text
+```text id="verify18"
 npm test
 npm run build
 ```
 
-Inspect the diff for:
+Inspect the final diff for:
 
-```text
-duplicate completion logic
-wall-clock dependence
-changes to canonical ActivityProgress semantics
-Pass 18+ scope leakage
+```text id="review18"
+LLM querying SQLite
+LLM choosing activity IDs
+hallucinated activity resolution
+duplicated intelligence formulas
+unsupported question leakage
+unknown fact references being accepted
+project isolation failures
+secrets in logs
+raw provider errors exposed
+excessive fact payloads
+multi-turn memory
+RAG/embeddings
+Pass 19+ scope leakage
 ```
 
-Commit:
+Commit exactly:
 
-```text
-fix: correct FieldLine completed-today intelligence
+```text id="commit18"
+feat: implement FieldLine assistant
 ```
 
-Push to `main`.
+Push to:
 
-Report:
+```text id="push18"
+main
+```
 
-```text
+After implementation report:
+
+```text id="report18"
 1. exact files changed
-2. corrected completedToday semantics
-3. tests added
-4. npm test result
-5. npm run build result
-6. commit SHA
-7. remaining limitations
+2. AI provider architecture
+3. intent schema
+4. activity resolution strategy
+5. Project Intelligence integration
+6. verified fact contract
+7. grounded answer contract
+8. fact-reference validation
+9. Gemini configuration
+10. frontend integration
+11. tests added
+12. npm test result
+13. npm run build result
+14. commit SHA
+15. known limitations
 ```

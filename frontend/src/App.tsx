@@ -27,7 +27,13 @@ import {
   FileUp,
   User,
   Paperclip,
-  ExternalLink
+  ExternalLink,
+  Bot,
+  Send,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare
 } from 'lucide-react';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
@@ -212,6 +218,44 @@ export interface ProjectIntelligence {
   recentChanges: RecentChangeFact[];
 }
 
+export interface AssistantIntent {
+  intent: string;
+  activityQuery?: string | null;
+  explicitDate?: string | null;
+}
+
+export interface VerifiedFact {
+  ref: string;
+  category: string;
+  summary: string;
+  activityId?: string | null;
+  externalId?: string | null;
+  activityName?: string | null;
+  progressUpdateId?: string | null;
+  evidenceId?: string | null;
+  data: Record<string, unknown>;
+}
+
+export interface ResolvedActivityInfo {
+  id: string;
+  externalId: string;
+  name: string;
+  location: string | null;
+}
+
+export interface AssistantQueryResponse {
+  question: string;
+  intent: AssistantIntent;
+  resolvedActivity: ResolvedActivityInfo | null;
+  ambiguousCandidates: ResolvedActivityInfo[] | null;
+  answer: string;
+  factRefs: string[];
+  grounded: boolean;
+  status: 'success' | 'activity_not_found' | 'ambiguous_activity' | 'insufficient_data' | 'unsupported';
+  asOfDate: string;
+  verifiedFacts: VerifiedFact[];
+}
+
 interface HealthData {
   status: 'ok' | 'degraded' | 'error';
   service: string;
@@ -240,6 +284,13 @@ export function App(): React.JSX.Element {
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<
     'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence'
   >('overview');
+
+  // FieldLine Assistant State (PASS 18)
+  const [assistantQuestion, setAssistantQuestion] = useState<string>('');
+  const [assistantLoading, setAssistantLoading] = useState<boolean>(false);
+  const [assistantError, setAssistantError] = useState<string | null>(null);
+  const [assistantResponse, setAssistantResponse] = useState<AssistantQueryResponse | null>(null);
+  const [showVerifiedFacts, setShowVerifiedFacts] = useState<boolean>(true);
 
   // Project Intelligence State (PASS 17)
   const [intelligence, setIntelligence] = useState<ProjectIntelligence | null>(null);
@@ -540,6 +591,9 @@ export function App(): React.JSX.Element {
       rawText: ''
     });
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
+    setAssistantQuestion('');
+    setAssistantError(null);
+    setAssistantResponse(null);
     fetchSchedules(project.id);
     fetchProgressUpdates(project.id);
     fetchEvidence(project.id);
@@ -565,7 +619,49 @@ export function App(): React.JSX.Element {
     setProcessingEvidenceId(null);
     setProcessingStatusMap({});
     setTraceActivity(null);
+    setAssistantQuestion('');
+    setAssistantError(null);
+    setAssistantResponse(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
+  };
+
+  // Handle Asking FieldLine Assistant (PASS 18)
+  const handleAskAssistant = async (overrideQuestion?: string) => {
+    if (!selectedProject) return;
+    const queryToAsk = (overrideQuestion || assistantQuestion).trim();
+    if (!queryToAsk) return;
+
+    setAssistantLoading(true);
+    setAssistantError(null);
+    if (overrideQuestion) {
+      setAssistantQuestion(overrideQuestion);
+    }
+
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/assistant/query`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: queryToAsk,
+          asOfDate: intelligenceAsOfDate
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setAssistantResponse(data);
+      } else {
+        const errorMsg = data.error?.message || data.error || 'Failed to query FieldLine assistant';
+        setAssistantError(errorMsg);
+        showNotification('error', errorMsg);
+      }
+    } catch {
+      const netMsg = 'Network error connecting to FieldLine assistant service';
+      setAssistantError(netMsg);
+      showNotification('error', netMsg);
+    } finally {
+      setAssistantLoading(false);
+    }
   };
 
   // Reset Create Form
@@ -2198,6 +2294,203 @@ export function App(): React.JSX.Element {
                   <span>{intelligenceError}</span>
                 </div>
               )}
+
+              {/* FieldLine Assistant Panel (PASS 18) */}
+              <div className="assistant-panel-card" id="assistant-panel">
+                <div className="assistant-header">
+                  <div className="assistant-title-group">
+                    <div className="assistant-icon-badge">
+                      <Bot size={24} color="#6366f1" />
+                    </div>
+                    <div>
+                      <h2 className="assistant-title">Ask FieldLine Assistant</h2>
+                      <p className="assistant-subtitle">
+                        Natural-language queries grounded strictly in verified Project Intelligence facts.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="assistant-guard-badge">
+                    <ShieldCheck size={14} />
+                    Verified Facts &bull; Zero Hallucinations
+                  </span>
+                </div>
+
+                <form
+                  className="assistant-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleAskAssistant();
+                  }}
+                >
+                  <div className="assistant-input-wrapper">
+                    <MessageSquare size={17} className="assistant-input-icon" />
+                    <input
+                      id="assistant-query-input"
+                      type="text"
+                      className="assistant-input"
+                      placeholder="Ask anything (e.g. What is delayed? Why is Foundation B at risk? What changed today?)..."
+                      value={assistantQuestion}
+                      onChange={(e) => setAssistantQuestion(e.target.value)}
+                      disabled={assistantLoading}
+                    />
+                  </div>
+                  <button
+                    id="assistant-ask-btn"
+                    type="submit"
+                    className="assistant-ask-btn"
+                    disabled={assistantLoading || !assistantQuestion.trim()}
+                  >
+                    {assistantLoading ? (
+                      <>
+                        <RefreshCw size={16} className="pulse-dot" />
+                        <span>Evaluating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={16} />
+                        <span>Ask</span>
+                      </>
+                    )}
+                  </button>
+                </form>
+
+                {/* Quick Query Chips */}
+                <div className="assistant-suggestions">
+                  <span className="assistant-suggestions-label">Recent / Suggested:</span>
+                  {[
+                    'What is delayed?',
+                    'Why is Foundation B at risk?',
+                    'Which activities are most behind schedule?',
+                    'What changed today?',
+                    'Which milestones are approaching?',
+                    'Which activities have no recent updates?'
+                  ].map((q, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="assistant-chip"
+                      onClick={() => handleAskAssistant(q)}
+                      disabled={assistantLoading}
+                    >
+                      "{q}"
+                    </button>
+                  ))}
+                </div>
+
+                {/* Error Banner */}
+                {assistantError && (
+                  <div className="notification-banner error" style={{ margin: 0 }}>
+                    <AlertCircle size={16} />
+                    <span>{assistantError}</span>
+                  </div>
+                )}
+
+                {/* Assistant Answer Response */}
+                {assistantResponse && (
+                  <div className="assistant-response-box" id="assistant-response-box">
+                    <div className="assistant-response-meta">
+                      <div className="assistant-meta-tags">
+                        <span className="intent-pill">
+                          Intent: {assistantResponse.intent.intent}
+                        </span>
+
+                        {assistantResponse.grounded ? (
+                          <span className="grounding-pill success">
+                            <CheckCircle2 size={13} />
+                            Grounded ({assistantResponse.factRefs.length} Cited Facts)
+                          </span>
+                        ) : assistantResponse.status === 'unsupported' ? (
+                          <span className="grounding-pill unsupported">
+                            <HelpCircle size={13} />
+                            Unsupported Question
+                          </span>
+                        ) : (
+                          <span className="grounding-pill warning">
+                            <AlertTriangle size={13} />
+                            {assistantResponse.status === 'activity_not_found'
+                              ? 'Activity Not Found'
+                              : assistantResponse.status === 'ambiguous_activity'
+                              ? 'Ambiguous Activity Match'
+                              : 'Insufficient Facts'}
+                          </span>
+                        )}
+
+                        {assistantResponse.resolvedActivity && (
+                          <span className="format-tag" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+                            Target: {assistantResponse.resolvedActivity.name} ({assistantResponse.resolvedActivity.externalId})
+                          </span>
+                        )}
+                      </div>
+
+                      <span className="date-cell" style={{ fontSize: '0.75rem' }}>
+                        Observed as-of {assistantResponse.asOfDate}
+                      </span>
+                    </div>
+
+                    <div className="assistant-answer-body">
+                      {assistantResponse.answer}
+                    </div>
+
+                    {/* Ambiguous Candidates Suggestion Box */}
+                    {assistantResponse.ambiguousCandidates && assistantResponse.ambiguousCandidates.length > 0 && (
+                      <div className="assistant-candidates-box">
+                        <span className="assistant-candidates-title">
+                          Multiple matching activities detected — select one to query:
+                        </span>
+                        <div className="assistant-candidates-list">
+                          {assistantResponse.ambiguousCandidates.map((cand) => (
+                            <button
+                              key={cand.id}
+                              type="button"
+                              className="assistant-candidate-btn"
+                              onClick={() => handleAskAssistant(`What is the status of ${cand.name}?`)}
+                            >
+                              {cand.name} ({cand.externalId})
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Verified Facts & Citations Accordion */}
+                    {assistantResponse.verifiedFacts.length > 0 && (
+                      <div className="assistant-facts-section">
+                        <button
+                          type="button"
+                          className="assistant-facts-toggle"
+                          onClick={() => setShowVerifiedFacts(!showVerifiedFacts)}
+                        >
+                          <span>
+                            Verified Fact Set &amp; Citations ({assistantResponse.verifiedFacts.length})
+                          </span>
+                          {showVerifiedFacts ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                        </button>
+
+                        {showVerifiedFacts && (
+                          <div className="assistant-facts-grid">
+                            {assistantResponse.verifiedFacts.map((fact) => (
+                              <div key={fact.ref} className="assistant-fact-card">
+                                <div className="assistant-fact-card-header">
+                                  <span className="assistant-fact-ref-badge">{fact.ref}</span>
+                                  {fact.externalId && (
+                                    <span className="act-id-cell">{fact.externalId}</span>
+                                  )}
+                                  {fact.category && (
+                                    <span className="format-tag" style={{ fontSize: '0.7rem' }}>
+                                      {fact.category}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="assistant-fact-summary">{fact.summary}</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {loadingIntelligence && !intelligence ? (
                 <div style={{ padding: '3rem', textAlign: 'center' }}>

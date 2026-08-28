@@ -9,7 +9,18 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_PATH: z.string().min(1).default('./database/fieldline.db'),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
-  VITE_PORT: z.coerce.number().int().positive().default(3000)
+  VITE_PORT: z.coerce.number().int().positive().default(3000),
+  AI_PROVIDER: z.enum(['mock', 'gemini']).default('mock'),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash')
+}).superRefine((data, ctx) => {
+  if (data.AI_PROVIDER === 'gemini' && (!data.GEMINI_API_KEY || data.GEMINI_API_KEY.trim().length === 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'GEMINI_API_KEY is required when AI_PROVIDER=gemini',
+      path: ['GEMINI_API_KEY']
+    });
+  }
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

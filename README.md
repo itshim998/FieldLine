@@ -31,7 +31,7 @@ Repository (Persistence Layer)
 SQLite (Local database/fieldline.db)
 ```
 
-### Project Intelligence Query Layer (Pass 17)
+### Project Intelligence & FieldLine Assistant Layer (Pass 17 & 18)
 
 ```text
 Raw project state (Schedules, Activities, ActivityProgress, ProjectEvents)
@@ -40,16 +40,18 @@ Deterministic Snapshot & Risk Classification Engines (Pass 11 & 12)
     ↓
 Project Intelligence Query Layer (Pass 17: GET /api/projects/:projectId/intelligence)
     ↓
-Structured Deterministic Facts (Delayed, At Risk, Completed Today, Behind, Milestones, Stale, Recent Changes)
+Structured Deterministic Facts (Delayed, At Risk, Completed, Behind, Milestones, Stale, Events)
     ↓
-Future Assistant Layer / Operational Dashboard
+FieldLine Assistant Engine (Pass 18: POST /api/projects/:projectId/assistant/query)
+    ↓
+Grounded Manager Answer + Verified Fact References
 ```
 
-> **Key Principle:** Pass 17 produces structured deterministic facts. It does not generate assistant prose or make LLM calls.
+> **Key Invariant:** The LLM is NEVER the source of truth. All metrics, variances, risk classifications, and dates come exclusively from deterministic application logic.
 
 AI Pipeline:
 ```text
-AI Service → AI Adapter → Raw Response → Zod Validation → Service
+AIService → AIProvider (Gemini / Mock) → Raw Response → Zod Schema Validation → Grounded Service Validation
 ```
 > **Non-negotiable principle:** AI code must never directly manipulate SQLite or database state.
 

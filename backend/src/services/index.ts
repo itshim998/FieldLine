@@ -174,3 +174,6 @@ export {
   DEFAULT_RECENT_CHANGES_LIMIT,
   MAX_RECENT_CHANGES_LIMIT
 } from './intelligence/project-intelligence.types.js';
+
+export * from './assistant/index.js';
+

@@ -593,3 +593,36 @@ frontend/
     - **Canonical Endpoint**:
       - `GET /api/projects/:projectId/intelligence`
       - Query params: `asOfDate` (YYYY-MM-DD), `recentDays` (default 7), `approachingDays` (default 14), `limit` (default 50, max 100).
+19. **Pass 18 — FieldLine Assistant**:
+    - **Purpose**: Grounded natural-language query engine allowing project managers to query project health and status in natural language with mathematical fact grounding and zero hallucination risk.
+    - **Architectural Flow**:
+      ```text
+      Manager Question ("What is delayed?", "Why is Foundation B at risk?")
+          ↓
+      Structured Intent Extraction (AssistantIntentService via AIService)
+          ↓
+      Deterministic Entity Resolution (ActivityResolver: externalId → name → location → text)
+          ↓
+      Verified Fact Set Compilation (ProjectIntelligenceService / Snapshot Engine)
+          ↓
+      Verified Fact IDs (delayed:ACT-001, at_risk:ACT-002, event:EVT-003, activity_status:ACT-004)
+          ↓
+      Grounded Answer Generation (Bounded Prompt to LLM / Mock Provider)
+          ↓
+      Strict Fact Reference Verification (Validate cited refs against verified fact set)
+          ↓
+      Grounded Manager Answer + Structured Provenance Facts
+      ```
+    - **Core Invariants & Non-Negotiables**:
+      - **LLM is NEVER the source of truth**: The LLM is only an interpreter and phrasing engine. Project status, percentages, variances, dates, risk reasons, and facts come exclusively from the deterministic application layer.
+      - **Zero Direct SQL / Database Queries**: Assistant services make zero raw SQL or direct SQLite database calls; all data access is mediated through `ProjectIntelligenceService`, `ProgressSnapshotService`, and canonical repositories.
+      - **Strict Fact Verification**: LLM-generated answers citing non-existent fact references are rejected or sanitized.
+      - **Project Isolation**: All resolution, facts, and queries are strictly bound to the authenticated `projectId` in the route. Activities or events belonging to foreign projects can never resolve or leak.
+      - **Deterministic Fallbacks**: Missing entities return `activity_not_found`, ambiguous entities return `ambiguous_activity` with candidate options, and empty fact sets return `insufficient_data` without hallucinating progress.
+    - **AI Providers**:
+      - `MockAIProvider`: Offline deterministic intent parser and answer synthesizer for automated tests and offline evaluation.
+      - `GeminiAIProvider`: Production-grade provider powered by `@google/genai` (SDK model `gemini-3.7-flash`, `GEMINI_API_KEY`), with sensitive API key and auth header error sanitization.
+    - **API Endpoint**:
+      - `POST /api/projects/:projectId/assistant/query`
+      - Request Body: `{ question: string, asOfDate?: string }`
+      - Response: `{ question, intent, resolvedActivity, ambiguousCandidates, answer, factRefs, grounded, status, asOfDate, verifiedFacts }`

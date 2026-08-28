@@ -5,15 +5,28 @@ import { AIRequestOptions } from '../contracts/ai.contract.js';
 import { AIProviderError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
+import { env } from '../../config/env.js';
+import { GeminiAIProvider } from '../providers/gemini-ai.provider.js';
+
 export interface AIService {
   generateText(prompt: string, options?: AIRequestOptions): Promise<string>;
   extractStructured<T>(prompt: string, schema: z.ZodType<T>, options?: AIRequestOptions): Promise<T>;
 }
 
+export function createDefaultAIProvider(): AIProvider {
+  if (env.AI_PROVIDER === 'gemini') {
+    return new GeminiAIProvider({
+      apiKey: env.GEMINI_API_KEY,
+      defaultModel: env.GEMINI_MODEL
+    });
+  }
+  return new MockAIProvider();
+}
+
 export class DefaultAIService implements AIService {
   private provider: AIProvider;
 
-  constructor(provider: AIProvider = new MockAIProvider()) {
+  constructor(provider: AIProvider = createDefaultAIProvider()) {
     this.provider = provider;
   }
 

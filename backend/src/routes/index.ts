@@ -11,6 +11,7 @@ import { riskRouter } from './risk.router.js';
 import { evidenceRouter } from './evidence.router.js';
 import { jobRouter } from './job.router.js';
 import { intelligenceRouter } from './intelligence.router.js';
+import { assistantRouter } from './assistant.router.js';
 
 export const apiRouter = Router();
 
@@ -26,6 +27,8 @@ apiRouter.use(riskRouter);
 apiRouter.use(evidenceRouter);
 apiRouter.use(jobRouter);
 apiRouter.use(intelligenceRouter);
+apiRouter.use(assistantRouter);
+
 
 
 

@@ -24,10 +24,23 @@ export type {
   FieldProgressExtraction
 } from './contracts/field-progress-extraction.contract.js';
 
+export {
+  assistantIntentTypeEnum,
+  assistantIntentSchema,
+  assistantAnswerSchema
+} from './contracts/assistant.contract.js';
+
+export type {
+  AssistantIntentType,
+  AssistantIntent,
+  AssistantAnswer
+} from './contracts/assistant.contract.js';
+
 export type { AIProvider } from './providers/ai-provider.interface.js';
 export { MockAIProvider } from './providers/mock-ai.provider.js';
+export { GeminiAIProvider } from './providers/gemini-ai.provider.js';
 
-export { DefaultAIService, aiService } from './services/ai.service.js';
+export { DefaultAIService, createDefaultAIProvider, aiService } from './services/ai.service.js';
 export type { AIService } from './services/ai.service.js';
 
 export {
@@ -36,4 +49,5 @@ export {
   buildFieldProgressExtractionPrompt,
   MAX_RAW_TEXT_LENGTH
 } from './services/field-progress-extraction.service.js';
+
 
