@@ -31,6 +31,22 @@ Repository (Persistence Layer)
 SQLite (Local database/fieldline.db)
 ```
 
+### Project Intelligence Query Layer (Pass 17)
+
+```text
+Raw project state (Schedules, Activities, ActivityProgress, ProjectEvents)
+    ↓
+Deterministic Snapshot & Risk Classification Engines (Pass 11 & 12)
+    ↓
+Project Intelligence Query Layer (Pass 17: GET /api/projects/:projectId/intelligence)
+    ↓
+Structured Deterministic Facts (Delayed, At Risk, Completed Today, Behind, Milestones, Stale, Recent Changes)
+    ↓
+Future Assistant Layer / Operational Dashboard
+```
+
+> **Key Principle:** Pass 17 produces structured deterministic facts. It does not generate assistant prose or make LLM calls.
+
 AI Pipeline:
 ```text
 AI Service → AI Adapter → Raw Response → Zod Validation → Service

@@ -562,3 +562,34 @@ frontend/
     - **Job Lifecycle Consistency**:
       - Job is marked `completed` only AFTER the durable project-state transaction commits.
       - Job is marked `failed` upon unhandled processing failure after transaction rollback.
+18. **Pass 17 — Project Intelligence Query Layer**:
+    - **Purpose**: Provides a deterministic, structured-fact query layer over existing canonical data to answer core status questions for dashboards and future assistant layers.
+    - **Canonical Flow**:
+      ```text
+      Raw project state (Schedules, Activities, ActivityProgress, ProjectEvents)
+          ↓
+      Deterministic Snapshot & Risk Classification Engines (Pass 11 & 12)
+          ↓
+      Project Intelligence Query Layer (Pass 17: GET /api/projects/:projectId/intelligence)
+          ↓
+      Structured Deterministic Facts
+          ↓
+      Future Assistant Layer / Operational Dashboard
+      ```
+    - **Key Invariants**:
+      - **No New Truth Model**: Reuses `ProgressSnapshotService`, `RiskClassificationService`, `ActivityProgressRepository`, and `SqliteProjectEventRepository`. Does not duplicate progress, variance, overdue, or risk formulas.
+      - **Structured Facts Only**: Explicitly produces structured facts, NOT generated prose. No LLM calls or natural language parsing.
+      - **Deterministic & Wall-Clock Independent**: Evaluates relative to `asOfDate` using calendar-date arithmetic.
+      - **Project Isolation**: All queries are strictly project-scoped. Foreign project facts and events are never leaked.
+      - **Bounded Outputs**: Event queries and fact collections are bounded and deterministically sorted.
+    - **Canonical Query Responses**:
+      1. `delayed`: Activities classified as `DELAYED` by the authoritative risk engine.
+      2. `atRisk`: Activities classified as `AT_RISK` by the authoritative risk engine.
+      3. `completedToday`: Activities with a canonical `ActivityProgress` completion observation on `asOfDate`.
+      4. `behindSchedule`: Activities where `varianceState === 'behind'` in the canonical snapshot.
+      5. `approachingMilestones`: Zero-duration activities (`plannedStart === plannedFinish`) within `[asOfDate, asOfDate + approachingDays]`.
+      6. `staleActivities`: Activities with no progress updates or latest update older than `asOfDate - recentDays`.
+      7. `recentChanges`: Sanitized project event timeline within `[asOfDate - recentDays, asOfDate]`, stripped of sensitive filesystem paths and error stacks.
+    - **Canonical Endpoint**:
+      - `GET /api/projects/:projectId/intelligence`
+      - Query params: `asOfDate` (YYYY-MM-DD), `recentDays` (default 7), `approachingDays` (default 14), `limit` (default 50, max 100).

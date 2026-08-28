@@ -1826,5 +1826,191 @@ body {
   padding: 0.75rem 1rem;
 }
 
+/* ========================================================================= */
+/* PASS 17: PROJECT INTELLIGENCE QUERY LAYER STYLING                        */
+/* ========================================================================= */
 
+.intelligence-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: fadeIn 0.3s ease-in-out;
+}
 
+.intelligence-controls-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.intelligence-inputs-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.intelligence-input-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.intelligence-input-item label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.intelligence-input-item input {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.intelligence-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.85rem;
+}
+
+.intelligence-metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: all 0.2s ease;
+}
+
+.intelligence-metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.intelligence-metric-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.intelligence-metric-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-family: var(--font-mono);
+  color: #ffffff;
+}
+
+.intelligence-metric-card.delayed .intelligence-metric-val {
+  color: var(--accent-rose);
+}
+
+.intelligence-metric-card.at-risk .intelligence-metric-val {
+  color: var(--accent-amber);
+}
+
+.intelligence-metric-card.behind .intelligence-metric-val {
+  color: #fb923c;
+}
+
+.intelligence-metric-card.completed .intelligence-metric-val {
+  color: var(--accent-emerald);
+}
+
+.intelligence-metric-card.milestones .intelligence-metric-val {
+  color: var(--accent-cyan);
+}
+
+.intelligence-metric-card.stale .intelligence-metric-val {
+  color: #c084fc;
+}
+
+.intelligence-metric-card.events .intelligence-metric-val {
+  color: var(--accent-indigo);
+}
+
+.intelligence-sections-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.intelligence-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.intelligence-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.intelligence-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.intelligence-card-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.intelligence-card-count {
+  font-size: 0.725rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.reasons-tags-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.reason-tag-item {
+  font-size: 0.725rem;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+.payload-preview-box {
+  background: rgba(11, 15, 25, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.725rem;
+  color: #93c5fd;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+}

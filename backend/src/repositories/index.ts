@@ -52,5 +52,11 @@ export {
 } from '../jobs/job.repository.js';
 export type { JobRepository } from '../jobs/job.repository.js';
 
-
-
+export {
+  SqliteProjectEventRepository,
+  projectEventRepository
+} from './project-event.repository.js';
+export type {
+  ProjectEventRepository,
+  ProjectEventFilterOptions
+} from './project-event.repository.js';

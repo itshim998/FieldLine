@@ -151,8 +151,26 @@ export type {
   ProcessEvidenceResult
 } from './ingestion/document-ingestion.types.js';
 
-
-
-
-
-
+export {
+  DefaultProjectIntelligenceService,
+  projectIntelligenceService,
+  addDaysToDate
+} from './intelligence/project-intelligence.service.js';
+export type {
+  DelayedActivityFact,
+  AtRiskActivityFact,
+  CompletedActivityFact,
+  BehindScheduleActivityFact,
+  ApproachingMilestoneFact,
+  StaleActivityFact,
+  RecentChangeFact,
+  ProjectIntelligence,
+  ProjectIntelligenceQueryOptions,
+  ProjectIntelligenceService
+} from './intelligence/project-intelligence.types.js';
+export {
+  DEFAULT_RECENT_DAYS,
+  DEFAULT_APPROACHING_DAYS,
+  DEFAULT_RECENT_CHANGES_LIMIT,
+  MAX_RECENT_CHANGES_LIMIT
+} from './intelligence/project-intelligence.types.js';

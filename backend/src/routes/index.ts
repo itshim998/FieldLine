@@ -10,6 +10,7 @@ import { progressSnapshotRouter } from './progress-snapshot.router.js';
 import { riskRouter } from './risk.router.js';
 import { evidenceRouter } from './evidence.router.js';
 import { jobRouter } from './job.router.js';
+import { intelligenceRouter } from './intelligence.router.js';
 
 export const apiRouter = Router();
 
@@ -24,6 +25,7 @@ apiRouter.use(progressSnapshotRouter);
 apiRouter.use(riskRouter);
 apiRouter.use(evidenceRouter);
 apiRouter.use(jobRouter);
+apiRouter.use(intelligenceRouter);
 
 
 

@@ -1,1147 +1,1081 @@
-# FieldLine — PASS 15: In-Process Processing Jobs
+# FieldLine — PASS 17: PROJECT INTELLIGENCE QUERY LAYER
 
-You are implementing **Pass 15 — In-process Processing Jobs** in the existing FieldLine repository.
+Implement **Pass 17 — Project Intelligence Queries** in the existing FieldLine repository.
 
 Approved base:
 
-```text
-babed120a01978c8d39478660255e323250a6dd0
+```text id="base17"
+b4673c3dfa249a727e8580e7e3efc4674d402679
 ```
 
-Current approved state:
+Previous passes are approved:
 
-```text
-PASS 13 — Evidence System ✅
-PASS 14 — Document Ingestion ✅
+```text id="approved17"
+Pass 13 — Evidence + provenance
+Pass 14 — Document ingestion
+Pass 15 — In-process jobs
+Pass 16 — Failure isolation + idempotency
 ```
 
-Do NOT implement Pass 16.
+Do NOT implement Pass 18+.
 
 ---
 
 # 1. Objective
 
-Move expensive document ingestion out of the HTTP request path.
+Build the deterministic information/query layer that a future assistant and dashboard can use.
 
-Current Pass 14 behavior is synchronous:
-
-```text
-POST /evidence/:evidenceId/process
-        ↓
-DocumentIngestionService.processEvidence(...)
-        ↓
-document extraction
-        ↓
-AI extraction
-        ↓
-ProgressUpdate
-        ↓
-Evidence linkage
-        ↓
-ActivityMatchingService
-        ↓
-HTTP response
-```
-
-Pass 15 must change this to:
+The intelligence layer must answer:
 
 ```text
-POST /evidence/:evidenceId/process
-        ↓
-create SQLite processing job
-        ↓
-HTTP 202 Accepted
-        ↓
-same Node process worker
-        ↓
-claim job
-        ↓
-DocumentIngestionService.processEvidence(...)
-        ↓
-completed / failed
+What is delayed?
+
+What is at risk?
+
+What was completed today?
+
+Which activities are behind schedule?
+
+Which milestones are approaching?
+
+Which activities have no recent updates?
+
+What changed recently?
 ```
 
-No separate deployment service is required.
+The output must be **structured facts**, not generated prose.
 
-No separate worker process is required.
-
-No Redis or external queue is allowed.
+The assistant layer comes later.
 
 ---
 
-# 2. Current repository state
+# 2. Core architectural principle
 
-The repository is a local TypeScript/Express/SQLite monolith.
+Do NOT create a new truth model.
 
-Current important architecture:
-
-```text
-frontend React
-    ↓
-Express routes
-    ↓
-validation
-    ↓
-services
-    ↓
-repositories
-    ↓
-SQLite
-```
-
-The current `backend/src/jobs/` directory contains only:
-
-```text
-.gitkeep
-```
-
-Do not assume there is an existing job implementation.
-
-SQLite:
-
-* uses `better-sqlite3`
-* enables foreign keys
-* uses WAL for file-backed DBs
-* already exposes `runInTransaction()`
-* has sequential migrations
-
-Use these existing primitives.
-
-Do not introduce a new persistence technology.
-
----
-
-# 3. Existing Pass 14 processing service
-
-The existing:
-
-```text
-DefaultDocumentIngestionService
-```
-
-already owns the document-processing business operation.
-
-Its current pipeline is:
-
-```text
-Evidence
-↓
-Document extraction
-↓
-NormalizedDocument
-↓
-report date extraction
-↓
-FieldProgressExtractionService
-↓
-ProgressUpdate persistence
-↓
-Evidence → ProgressUpdate linkage
-↓
-ActivityMatchingService
-↓
-suggested matches
-```
-
-Do NOT move this business logic into the worker.
-
-The worker must simply invoke:
-
-```ts
-documentIngestionService.processEvidence(projectId, evidenceId)
-```
-
-The job system is orchestration/infrastructure around this service.
-
----
-
-# 4. Required job state machine
-
-Implement exactly these primary states:
-
-```text
-queued
-processing
-completed
-failed
-```
-
-Transitions:
-
-```text
-queued → processing
-processing → completed
-processing → failed
-```
-
-For stale recovery after process restart:
-
-```text
-processing (stale)
-        ↓
-queued
-```
-
-Do not create additional public job states unless there is a compelling implementation reason.
-
----
-
-# 5. Database migration
-
-Create a new sequential migration after the existing migrations.
-
-Do NOT modify old migration files.
-
-Create a table conceptually:
-
-```sql
-processing_jobs
-```
-
-Recommended columns:
-
-```text
-id
-project_id
-job_type
-status
-payload_json
-result_json
-error_message
-attempt_count
-locked_at
-created_at
-started_at
-completed_at
-updated_at
-```
-
-Constraints:
-
-```text
-project_id REFERENCES projects(id) ON DELETE CASCADE
-
-status CHECK (
-  status IN ('queued', 'processing', 'completed', 'failed')
-)
-
-job_type CHECK (
-  job_type IN ('document_ingestion')
-)
-```
-
-Use appropriate indexes:
-
-```text
-(project_id, created_at)
-(project_id, status, created_at)
-(status, created_at)
-```
-
-Do NOT store raw document content in `processing_jobs`.
-
-Payload for the first job type should contain only:
-
-```json
-{
-  "evidenceId": "..."
-}
-```
-
-Do not introduce arbitrary workflow payloads.
-
----
-
-# 6. Job domain types
-
-Create strongly typed job models.
-
-Conceptually:
-
-```ts
-type ProcessingJobStatus =
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'failed';
-
-type ProcessingJobType =
-  | 'document_ingestion';
-```
-
-A job should expose:
-
-```text
-id
-projectId
-jobType
-status
-payload
-result
-errorMessage
-attemptCount
-lockedAt
-createdAt
-startedAt
-completedAt
-updatedAt
-```
-
-Keep internal DB row mapping separate from domain types.
-
----
-
-# 7. Repository
-
-Create:
-
-```text
-backend/src/jobs/job.repository.ts
-```
-
-using the same repository style as existing repositories.
-
-At minimum support:
-
-```text
-create(...)
-getByIdAndProjectId(...)
-listByProjectId(...)
-findExistingActiveDocumentIngestionJob(...)
-claimNextQueued(...)
-markCompleted(...)
-markFailed(...)
-requeueStaleProcessingJobs(...)
-```
-
-Use project scoping where appropriate.
-
-Do not expose raw SQLite details to the service layer.
-
----
-
-# 8. Queue insertion
-
-Create a job service:
-
-```text
-backend/src/jobs/job.service.ts
-```
-
-Responsibilities:
-
-* validate project
-* validate evidence
-* prevent duplicate active document-processing jobs
-* create queued job
-* emit queue event
-
-For:
-
-```text
-POST /api/projects/:projectId/evidence/:evidenceId/process
-```
-
-do:
-
-```text
-verify Evidence belongs to project
-↓
-check active queued/processing document_ingestion job
-↓
-if one exists:
-    return existing job
-otherwise:
-    create queued job
-```
-
-Do not process the evidence during this HTTP request.
-
-Return:
-
-```text
-202 Accepted
-```
-
----
-
-# 9. Existing process endpoint changes
-
-Keep the existing endpoint:
-
-```text
-POST /api/projects/:projectId/evidence/:evidenceId/process
-```
-
-but change its semantics from synchronous processing to job enqueueing.
-
-Expected conceptual response:
-
-```json
-{
-  "job": {
-    "id": "...",
-    "projectId": "...",
-    "jobType": "document_ingestion",
-    "status": "queued",
-    "createdAt": "..."
-  }
-}
-```
-
-Do not return extraction results from this endpoint anymore.
-
----
-
-# 10. Job status API
-
-Add:
-
-```text
-GET /api/projects/:projectId/jobs/:jobId
-```
-
-Project scope is mandatory.
-
-Expected behavior:
-
-```text
-queued
-    → status only
-
-processing
-    → status + startedAt
-
-completed
-    → status + completedAt + result
-
-failed
-    → status + completedAt + sanitized error message
-```
-
-Do NOT return:
-
-* stack traces
-* filesystem paths
-* arbitrary payload internals
-* sensitive provider errors
-
----
-
-# 11. Optional project job list
-
-Add:
-
-```text
-GET /api/projects/:projectId/jobs?type=document_ingestion
-```
-
-only if it fits existing route conventions cleanly.
-
-It is useful for the frontend and debugging.
-
-Do not make a generic workflow-management UI.
-
----
-
-# 12. Worker
-
-Create a dedicated worker under:
-
-```text
-backend/src/jobs/
-```
-
-For example:
-
-```text
-document-ingestion.worker.ts
-worker-runner.ts
-```
+Pass 17 is a READ/QUERY layer over existing canonical data.
 
 Architecture:
 
 ```text
-WorkerRunner
-   ↓
-JobRepository.claimNextQueued()
-   ↓
-DocumentIngestionWorker
-   ↓
-DocumentIngestionService.processEvidence()
+HTTP
+ ↓
+IntelligenceQueryService
+ ↓
+existing repositories / deterministic services
+ ↓
+structured intelligence response
 ```
 
-The worker must run inside the SAME Node process.
+Reuse the existing:
 
-Use one worker only.
+```text
+ProgressSnapshotService
+RiskClassificationService
+ActivityProgressRepository
+ProgressUpdateRepository
+ActivityRepository
+ProjectEventRepository
+Evidence/provenance services where useful
+```
 
-Do not use worker threads.
-
-Do not spawn child processes.
-
-Do not introduce external queues.
+Do NOT duplicate progress, variance, overdue, or risk formulas.
 
 ---
 
-# 13. Job claiming
+# 3. Existing canonical sources
 
-Claiming a queued job must be safe against accidental double execution.
+## 3.1 Progress snapshot
 
-Even though Pass 15 uses one worker, implement claim semantics in SQLite so the intended state transition is explicit.
-
-A job should only be claimed if:
+The existing:
 
 ```text
-status = 'queued'
+GET /api/projects/:projectId/progress-snapshot
 ```
 
-and claiming should atomically set:
+returns deterministic planned-vs-actual information and accepts an optional `asOfDate`.
+
+The snapshot service:
+
+* validates `asOfDate`
+* gets project activities
+* retrieves latest ActivityProgress as of that date
+* calculates planned progress
+* calculates actual progress
+* calculates variance
+* calculates overdue
+* returns a project summary
+
+Reuse these semantics. Do NOT reimplement them.
+
+The existing calculator defines:
 
 ```text
-status = 'processing'
-started_at = now
-locked_at = now
-attempt_count = attempt_count + 1
-updated_at = now
+plannedProgress
+actualProgress
+progressVariance
+varianceState
+overdue
 ```
 
-The repository should return the claimed job or null.
-
-Do not hold a SQLite transaction open while performing:
-
-* PDF parsing
-* OCR
-* AI calls
-* document extraction
-
-The database transaction is only for job-state transition.
+with deterministic rules.
 
 ---
 
-# 14. Worker execution
+## 3.2 Risk classification
 
-For a claimed job:
+The existing:
 
-1. validate payload
-2. verify evidence still exists
-3. verify evidence belongs to job.projectId
-4. call:
-
-```ts
-documentIngestionService.processEvidence(
-  job.projectId,
-  payload.evidenceId
-)
+```text
+GET /api/projects/:projectId/risk-status
 ```
 
-5. on success:
+provides deterministic project risk classification.
 
-   * serialize a bounded result
-   * mark job completed
-6. on ordinary processing failure:
+Reuse:
 
-   * mark job failed
-   * store sanitized error message
-7. continue worker loop
+```text
+ON_TRACK
+AHEAD
+AT_RISK
+DELAYED
+COMPLETED
+```
 
-A failed job must NOT crash the Node process.
+and existing reason codes.
 
-The worker must continue processing later jobs.
+Do NOT create a second risk engine.
+
+The risk service already consumes the authoritative progress snapshot and applies deterministic classification.
 
 ---
 
-# 15. Result storage
+## 3.3 Activity progress history
 
-For completed jobs, store only useful bounded result metadata.
+Use the existing `ActivityProgressRepository` history.
 
-Do NOT persist massive extracted text or raw OCR output in the jobs table.
+It already supports:
 
-Prefer storing something like:
-
-```json
-{
-  "evidenceId": "...",
-  "progressUpdateId": "...",
-  "matchCount": 2,
-  "sourceType": "xlsx"
-}
+```text
+listByActivityId(...)
+listByProgressUpdateId(...)
+listByProjectId(...)
+getLatestByActivityIdAsOfDate(...)
+findExistingObservation(...)
 ```
 
-The complete underlying records remain available from the existing Evidence, ProgressUpdate and ActivityMatch APIs.
+This is the canonical source for historical activity progress.
+
+Do NOT infer historical truth from Evidence upload timestamps.
 
 ---
 
-# 16. Failure handling
+## 3.4 Progress updates
 
-When the processing service throws:
+Use `ProgressUpdate` for report-level facts.
 
-```text
-queued
-↓
-processing
-↓
-failed
-```
-
-Store:
+Existing domain semantics:
 
 ```text
-error_message
-completed_at
-updated_at
+manual
+voice
+pdf
+xlsx
+image
+text
 ```
 
-Do not retry automatically.
-
-Do not crash the worker.
-
-Do not delete the job.
-
-The failed job should remain inspectable through:
+and:
 
 ```text
-GET /api/projects/:projectId/jobs/:jobId
+received
+processed
+reviewed
 ```
+
+Do not add another report model.
 
 ---
 
-# 17. Stale job recovery
+## 3.5 Project events
 
-On worker startup, recover abandoned jobs.
+Reuse `project_events` as the deterministic change/history stream.
 
-Conceptually:
-
-```text
-processing job
-+
-locked_at is older than configured lease threshold
-        ↓
-requeue
-        ↓
-queued
-```
-
-Add:
+Existing event types include:
 
 ```text
-requeueStaleProcessingJobs()
-```
-
-to the job repository.
-
-The threshold must be configurable.
-
-Do not use an extremely small timeout because OCR/PDF/AI processing can legitimately be slow.
-
-Do not reset every processing job immediately unless the implementation can prove it belongs to a dead worker.
-
-A practical local-worker lease is sufficient for this pass.
-
----
-
-# 18. Worker lifecycle
-
-Current `backend/src/index.ts` does:
-
-```text
-initDatabase()
-createApp()
-app.listen()
-```
-
-and has graceful SIGINT/SIGTERM handling.
-
-Extend it to:
-
-```text
-initDatabase()
-recover stale jobs
-start worker
-create app
-start HTTP server
-```
-
-On shutdown:
-
-```text
-stop accepting new work
-stop worker polling
-allow current job state to settle according to the chosen shutdown policy
-close server
-close database
-```
-
-Do NOT terminate the process while a worker is actively executing in a way that would leave state incorrectly marked as completed.
-
-A clean approach is:
-
-```text
-stop scheduling new jobs
-wait for current worker iteration
-close server
-close DB
-```
-
-The implementation does not need elaborate shutdown orchestration.
-
----
-
-# 19. Worker polling
-
-Use a small configurable polling interval, e.g.:
-
-```text
-250–1000 ms
-```
-
-Do not busy-loop.
-
-Use a timer.
-
-Ensure multiple timers are not accidentally started.
-
-Expose a small lifecycle API:
-
-```text
-start()
-stop()
-isRunning()
-```
-
-Make it testable without starting the real HTTP server.
-
----
-
-# 20. Basic duplicate-active-job prevention
-
-Do NOT implement full Pass 16 idempotency.
-
-However, prevent obvious duplicate concurrent document-ingestion jobs.
-
-For a given:
-
-```text
-projectId
-evidenceId
-jobType = document_ingestion
-```
-
-if an existing job is:
-
-```text
-queued
-OR
-processing
-```
-
-reuse that job rather than creating another.
-
-A completed/failed historical job should NOT automatically block a future explicit process request.
-
-Do not introduce content hashes.
-
-Do not introduce an idempotency-key protocol.
-
----
-
-# 21. Project isolation
-
-All job operations must be project-scoped.
-
-Examples:
-
-```text
-Project A cannot retrieve Project B's job.
-
-Project A cannot enqueue a job for Project B evidence.
-
-Project B cannot claim a Project A job.
-
-Job payload evidenceId must belong to the same project_id.
-
-Cross-project job status access must return 404.
-```
-
-The database should enforce:
-
-```text
-processing_jobs.project_id → projects.id
-```
-
-The service must also verify the Evidence project association before processing.
-
----
-
-# 22. Project events
-
-Reuse existing `project_events`.
-
-Emit:
-
-```text
+project_created
+project_updated
+schedule_imported
+progress_reported
+match_suggested
+match_confirmed
+progress_updated
+delay_detected
+variance_alert
+evidence_uploaded
 processing_job_queued
 processing_job_started
 processing_job_completed
 processing_job_failed
 ```
 
-with:
-
-```text
-entity_type = 'processing_job'
-entity_id = job.id
-```
-
-Payloads should contain bounded metadata only.
-
-Do NOT create a separate `job_events` table.
-
-Do NOT store filesystem paths.
+Return event facts, not summaries generated by an LLM.
 
 ---
 
-# 23. Frontend integration
-
-Current Pass 14 Evidence cards contain:
-
-```text
-Process
-Processing...
-Processed
-Retry Process
-```
-
-Adapt this UI to asynchronous jobs.
-
-New flow:
-
-```text
-click Process
-↓
-POST endpoint
-↓
-receive job id
-↓
-show Processing...
-↓
-poll GET /jobs/:jobId
-↓
-completed
-↓
-refresh evidence/progress/match state
-```
-
-On failure:
-
-```text
-failed
-↓
-show sanitized error
-↓
-allow Process again
-```
-
-Do NOT add WebSockets.
-
-Do NOT add SSE.
-
-Do NOT build a global job dashboard.
-
-Keep the UI localized to the existing Evidence workspace.
-
----
-
-# 24. Testing
-
-Add repository tests for:
-
-```text
-create queued job
-get project-scoped job
-list project jobs
-active duplicate lookup
-claim queued job
-cannot claim already processing job
-mark completed
-mark failed
-requeue stale processing job
-cross-project lookup isolation
-```
-
-Add worker tests for:
-
-```text
-queued job gets processed
-successful processing → completed
-DocumentIngestionService failure → failed
-worker continues after failed job
-malformed job payload → failed
-missing Evidence → failed
-```
-
-Add integration tests for:
-
-```text
-POST /evidence/:evidenceId/process
-→ 202
-→ queued job returned
-```
-
-Then:
-
-```text
-GET /jobs/:jobId
-```
-
-transitions correctly.
-
-Add an end-to-end test:
-
-```text
-Evidence
-↓
-enqueue job
-↓
-worker
-↓
-DocumentIngestionService
-↓
-ProgressUpdate
-↓
-suggested matches
-↓
-job completed
-```
-
-Do not duplicate the Pass 14 extractor tests.
-
-Use mocks/fakes for the worker's document-processing service where appropriate.
-
----
-
-# 25. Recovery test
-
-This is mandatory.
+# 4. Canonical intelligence endpoint
 
 Create:
 
 ```text
-processing job
-locked_at = stale timestamp
+GET /api/projects/:projectId/intelligence
 ```
 
-start recovery.
+This is the canonical Pass 17 read surface.
 
-Verify:
+Query parameters:
 
 ```text
-status becomes queued
+asOfDate        optional YYYY-MM-DD
+recentDays      optional positive integer
+approachingDays optional non-negative integer
 ```
 
-Then run the worker and verify it can process the recovered job.
+Recommended defaults:
+
+```text
+recentDays = 7
+approachingDays = 14
+```
+
+Make these configurable constants, not magic numbers scattered across the code.
+
+Do not accept arbitrary natural-language questions yet.
+
+Do NOT create an LLM query interpreter.
 
 ---
 
-# 26. Failure isolation test
+# 5. Response contract
 
-Create two jobs:
+Create a typed response such as:
 
-```text
-Job A → processing service throws
-Job B → processing service succeeds
+```ts id="resp17"
+interface ProjectIntelligence {
+  projectId: string;
+  asOfDate: string;
+  generatedAt: string;
+
+  delayed: DelayedActivityFact[];
+  atRisk: AtRiskActivityFact[];
+  completedToday: CompletedActivityFact[];
+  behindSchedule: BehindScheduleActivityFact[];
+  approachingMilestones: ApproachingMilestoneFact[];
+  staleActivities: StaleActivityFact[];
+  recentChanges: RecentChangeFact[];
+}
 ```
 
-Run the worker.
+Use the repository's existing domain types where possible.
 
-Verify:
-
-```text
-Job A = failed
-Job B = completed
-worker remains alive
-```
-
-This is the primary Pass 15 value proposition.
+Every fact must contain stable identifiers.
 
 ---
 
-# 27. Concurrency sanity test
+# 6. Delayed activities
 
-Create multiple queued jobs.
+Use existing deterministic risk classification.
 
-Run exactly one worker.
+Return activities whose classification is:
 
-Verify:
-
-```text
-each job is claimed once
-no job remains incorrectly stuck
+```text id="delayed17"
+DELAYED
 ```
 
-Do not create concurrent worker instances.
+Do not calculate "delayed" independently.
+
+Example structured item:
+
+```json
+{
+  "activityId": "...",
+  "externalId": "...",
+  "name": "...",
+  "plannedFinish": "2026-08-20",
+  "actualProgress": 72,
+  "progressVariance": -28,
+  "overdue": true,
+  "classification": "DELAYED",
+  "reasons": [...]
+}
+```
+
+The exact structure may be refined to fit current API conventions.
 
 ---
 
-# 28. Scope boundary
+# 7. At-risk activities
 
-Do NOT implement:
+Return activities whose existing risk classification is:
 
-```text
-automatic retry
-exponential backoff
-dead-letter queues
-content hashing
-duplicate-content detection
-idempotency keys
-distributed workers
-worker threads
-child processes
-Redis
-BullMQ
-RabbitMQ
-Kafka
-external job service
-cloud processing
+```text id="atrisk17"
+AT_RISK
 ```
 
-These are outside Pass 15.
+Include:
 
-Pass 16 will harden failure isolation and idempotency further.
+```text
+activityId
+externalId
+name
+classification
+reasons
+plannedFinish
+actualProgress
+progressVariance
+```
+
+Do not invent a new risk score.
 
 ---
 
-# 29. Important Pass 14 compatibility
+# 8. Behind-schedule activities
 
-Do not break:
+Use the authoritative progress snapshot.
 
-```text
-Evidence
-ProgressUpdate
-FieldProgressExtractionService
-ActivityMatchingService
-ProgressService
+Return:
+
+```text id="behind17"
+varianceState === 'behind'
 ```
 
-The worker must reuse the existing document-processing service.
-
-Do not copy its logic into the worker.
-
-The existing downstream semantics remain:
+Include:
 
 ```text
-AI extraction
-↓
-suggested ActivityMatch
-↓
-human review
-↓
-existing ProgressService
+activityId
+externalId
+name
+plannedProgress
+actualProgress
+progressVariance
+varianceState
+status
+plannedFinish
+overdue
 ```
 
-Do not auto-confirm matches.
+Do not calculate a second notion of "behind".
 
-Do not create ActivityProgress from unconfirmed suggestions.
+The existing snapshot calculator already defines:
+
+```text
+progressVariance = actualProgress - plannedProgress
+```
+
+and:
+
+```text
+behind = progressVariance < -0.01
+```
+
+after rounding.
 
 ---
 
-# 30. Definition of done
+# 9. Completed today
 
-Pass 15 is complete only when:
+Define "today" as:
 
 ```text
-[ ] SQLite processing_jobs table exists through a new migration.
+asOfDate
+```
 
-[ ] Job states are queued / processing / completed / failed.
+not the server wall clock.
 
-[ ] Document ingestion can be enqueued asynchronously.
+Return activities with a canonical ActivityProgress observation representing completion on the requested date.
 
-[ ] Existing process endpoint returns 202 instead of blocking.
+Prefer:
 
-[ ] Job status endpoint exists.
+```text
+status === 'completed'
+```
 
-[ ] Same Node process contains the worker.
+with:
 
-[ ] Worker claims queued jobs atomically.
+```text
+asOfDate === canonical asOfDate
+```
 
-[ ] Worker invokes existing DocumentIngestionService.
+or an explicitly defensible equivalent based on the existing historical model.
 
-[ ] Successful jobs become completed.
+Do NOT treat:
 
-[ ] Ordinary processing failures become failed.
+```text
+Evidence.uploadedAt
+ProgressUpdate.createdAt
+Job.completedAt
+```
 
-[ ] Failed jobs do not crash the Node process.
+as activity completion.
 
-[ ] Worker continues after a failed job.
+The source of truth is ActivityProgress.
 
-[ ] Stale processing jobs can be recovered after restart.
+Include:
 
-[ ] Active duplicate jobs for the same evidence are reused.
-
-[ ] Project isolation is enforced.
-
-[ ] Job lifecycle events are recorded using existing project_events.
-
-[ ] Frontend Process button uses asynchronous job polling.
-
-[ ] Existing Pass 13 provenance remains intact.
-
-[ ] Existing Pass 14 processing semantics remain intact.
-
-[ ] Full regression suite passes.
-
-[ ] New job/worker/integration/recovery tests pass.
-
-[ ] npm run build passes.
-
-[ ] No Pass 16 functionality was implemented.
+```text
+activityId
+externalId
+name
+progressUpdateId
+asOfDate
+actualPercent
+actualFinish
+status
 ```
 
 ---
 
-# 31. Verification
+# 10. Approaching milestones
+
+The existing snapshot calculator defines a milestone as a zero-duration activity:
+
+```text
+plannedStart === plannedFinish
+```
+
+Use that definition.
+
+Return milestones satisfying:
+
+```text
+plannedStart >= asOfDate
+plannedStart <= asOfDate + approachingDays
+```
+
+Do not use calendar time-of-day.
+
+Use canonical `YYYY-MM-DD` semantics.
+
+Include:
+
+```text
+activityId
+externalId
+name
+milestoneDate
+daysUntil
+status
+actualProgress
+```
+
+Sort ascending by:
+
+```text
+milestoneDate
+externalId
+```
+
+for deterministic output.
+
+Do not include already-past milestones in the approaching list.
+
+---
+
+# 11. Activities with no recent updates
+
+Define a stale activity using ActivityProgress history.
+
+For each project activity:
+
+```text
+latest progress observation as of asOfDate
+```
+
+If no historical ActivityProgress exists:
+
+```text
+stale = true
+```
+
+Otherwise:
+
+```text
+stale = latestObservation.asOfDate < asOfDate - recentDays
+```
+
+Use calendar-date arithmetic consistent with the repository's existing date-normalization logic.
+
+Do NOT use:
+
+```text
+new Date() - updatedAt
+```
+
+because historical queries must remain deterministic.
+
+Return:
+
+```text
+activityId
+externalId
+name
+latestUpdateDate
+daysSinceUpdate
+hasAnyUpdate
+```
+
+where:
+
+```text
+latestUpdateDate = null
+```
+
+when no update exists.
+
+Sort oldest/no-update first.
+
+---
+
+# 12. Recent changes
+
+Use `project_events`.
+
+Add a project-scoped event query if the repository does not already provide one.
+
+Conceptually:
+
+```text
+GET recent events
+WHERE project_id = ?
+AND created_at <= now/asOfDate boundary
+ORDER BY created_at DESC
+LIMIT bounded number
+```
+
+However, historical determinism matters.
+
+When `asOfDate` is supplied, recent changes should be bounded relative to that date rather than silently using today's timestamp.
+
+A practical contract is:
+
+```text
+asOfDate = YYYY-MM-DD
+
+recentChanges = events on or before the end of asOfDate
+within a configurable recent event window
+```
+
+If event timestamps are UTC ISO strings, normalize the date boundary carefully.
+
+Do not make natural-language summaries.
+
+Return:
+
+```json
+{
+  "eventId": "...",
+  "eventType": "progress_updated",
+  "entityType": "activity_progress",
+  "entityId": "...",
+  "summary": "...",
+  "createdAt": "...",
+  "payload": {...}
+}
+```
+
+Use existing event payloads.
+
+Do not expose absolute filesystem paths or internal error stacks if an event contains such data.
+
+---
+
+# 13. Determinism
+
+The same database state plus the same query parameters must produce the same logical result.
+
+Be explicit about:
+
+```text
+sorting
+date boundaries
+limits
+default parameters
+null behavior
+```
+
+Do not rely on unspecified SQLite row order.
+
+Every array must have a deterministic ORDER BY.
+
+---
+
+# 14. Project isolation
+
+Every query must be project-scoped.
+
+Examples:
+
+```text id="iso17"
+Project A intelligence must never include Project B activities.
+
+Project A recent events must not include Project B events.
+
+Project A stale activity analysis must only inspect Project A progress.
+
+Cross-project projectId/activity/event identifiers must return no foreign data.
+```
+
+Follow existing project isolation conventions.
+
+Do not introduce globally unscoped intelligence queries.
+
+---
+
+# 15. Service architecture
+
+Create:
+
+```text id="service17"
+backend/src/services/intelligence/
+    project-intelligence.service.ts
+    project-intelligence.types.ts
+```
+
+or the smallest structure consistent with repository conventions.
+
+The service should orchestrate existing deterministic sources.
+
+Conceptual flow:
+
+```text
+ProjectIntelligenceService
+      ↓
+ProgressSnapshotService
+      ↓
+RiskClassificationService
+      ↓
+ActivityProgressRepository
+      ↓
+ProjectEventRepository
+      ↓
+ProjectIntelligence response
+```
+
+Do NOT duplicate the snapshot/risk calculations.
+
+---
+
+# 16. Repository needs
+
+Add only the minimal read methods required.
+
+Potentially:
+
+```text id="repo17"
+ProjectEventRepository.listRecentByProject(...)
+ActivityProgressRepository.listLatestByProjectAsOfDate(...)
+```
+
+if equivalent methods do not already exist.
+
+Do not add a generic SQL reporting engine.
+
+Do not move business logic into repositories.
+
+Repositories retrieve data.
+
+The intelligence service interprets already-defined deterministic domain semantics.
+
+---
+
+# 17. Query limits
+
+Protect the read path.
+
+Use bounded limits such as:
+
+```text
+recentChanges <= 100
+```
+
+and never return unbounded historical event streams from the intelligence endpoint.
+
+The endpoint is intended for dashboard/assistant use, not bulk export.
+
+---
+
+# 18. Structured facts only
+
+DO NOT:
+
+```text
+generate prose
+call an LLM
+summarize changes with AI
+rank facts using an LLM
+guess why an activity is delayed
+invent explanations
+```
+
+The intelligence layer should say:
+
+```text
+activity X
+plannedProgress = 80
+actualProgress = 62
+variance = -18
+classification = AT_RISK
+```
+
+not:
+
+```text
+"Activity X appears to be struggling because..."
+```
+
+Human-readable prose belongs to a later assistant layer.
+
+---
+
+# 19. Optional focused endpoints
+
+Do NOT create seven duplicate route families merely because the seven questions exist.
+
+The canonical endpoint should answer the major questions.
+
+Only add focused endpoints if an existing frontend pattern genuinely needs them.
+
+Prefer:
+
+```text
+GET /api/projects/:projectId/intelligence
+```
+
+over:
+
+```text
+GET /delayed
+GET /at-risk
+GET /completed
+...
+```
+
+The single structured contract will be easier for the future assistant to consume.
+
+---
+
+# 20. Frontend integration
+
+Add the smallest possible integration to the existing project workspace.
+
+Do NOT build the future full assistant UI.
+
+A simple structured intelligence panel is sufficient if it fits the current workspace.
+
+Possible sections:
+
+```text
+Delayed
+At Risk
+Behind Schedule
+Completed Today
+Approaching Milestones
+No Recent Updates
+Recent Changes
+```
+
+Render existing structured facts.
+
+Do not add generated prose.
+
+Do not redesign the whole dashboard.
+
+---
+
+# 21. Tests
+
+Add unit tests for deterministic query rules.
+
+## Delayed
+
+```text id="testdel17"
+[ ] DELAYED activities appear
+[ ] non-DELAYED activities do not
+```
+
+## At risk
+
+```text id="testrisk17"
+[ ] AT_RISK appears
+[ ] ON_TRACK/AHEAD do not
+```
+
+## Behind
+
+```text id="testbehind17"
+[ ] varianceState = behind appears
+[ ] on_plan/ahead do not
+```
+
+## Completed today
+
+```text id="testcomplete17"
+[ ] completed on asOfDate appears
+[ ] completed on another date does not
+[ ] upload timestamp does not affect completion
+```
+
+## Milestones
+
+```text id="testmile17"
+[ ] zero-duration activity within window appears
+[ ] outside window does not
+[ ] past milestone does not
+```
+
+## Stale updates
+
+```text id="teststale17"
+[ ] never-updated activity is stale
+[ ] update within recentDays is not stale
+[ ] update exactly at boundary behaves deterministically
+[ ] old update is stale
+```
+
+## Recent changes
+
+```text id="testchanges17"
+[ ] project events returned
+[ ] other-project events excluded
+[ ] deterministic ordering
+[ ] bounded result size
+[ ] asOfDate boundary respected
+```
+
+## Project isolation
+
+```text id="testiso17"
+[ ] Project A intelligence contains no Project B facts
+[ ] foreign activities cannot leak
+[ ] foreign events cannot leak
+```
+
+## Determinism
+
+For the same fixtures:
+
+```text id="det17"
+getIntelligence(projectId, sameParameters)
+```
+
+called multiple times must produce logically identical arrays and values.
+
+---
+
+# 22. Integration test
+
+Create a realistic project containing:
+
+```text id="fixture17"
+Activity A → delayed
+Activity B → at risk
+Activity C → completed today
+Activity D → behind schedule
+Activity E → approaching milestone
+Activity F → no recent update
+recent project events
+```
+
+Call:
+
+```text id="api17"
+GET /api/projects/:projectId/intelligence
+```
+
+Verify every category is populated correctly.
+
+Then create a second project and verify strict isolation.
+
+---
+
+# 23. Existing regression tests
 
 Run:
 
-```text
+```text id="reg17"
 npm test
 npm run build
 ```
 
-Inspect the final diff carefully for:
+Do not weaken any existing Pass 13–16 tests.
+
+Preserve:
 
 ```text
-synchronous processing still happening in HTTP route
-multiple worker instances
-unsafe job claiming
-lost/stuck jobs
-project isolation failures
-unbounded job result payloads
-stack traces exposed through API
-automatic retry/idempotency scope leakage
-Pass 16+ functionality
+evidence provenance
+document ingestion
+job lifecycle
+content deduplication
+processing idempotency
+transaction rollback
+progress normalization
+snapshot calculations
+risk classification
 ```
 
-Commit:
+---
 
-```text
-feat: implement FieldLine in-process processing jobs
+# 24. Documentation
+
+Update:
+
+```text id="docs17"
+README.md
+docs/ARCHITECTURE.md
 ```
 
-Push to `main`.
-
-Then report:
+to document:
 
 ```text
+Raw project state
+    ↓
+deterministic snapshot/risk engines
+    ↓
+Project Intelligence Query Layer
+    ↓
+structured facts
+    ↓
+future assistant / dashboard
+```
+
+Explicitly state:
+
+```text id="nopro17"
+Pass 17 produces structured deterministic facts.
+
+It does not generate assistant prose.
+```
+
+---
+
+# 25. Scope guard
+
+DO NOT implement:
+
+```text id="scope17"
+LLM question answering
+natural-language query parsing
+assistant conversation
+embeddings
+vector search
+semantic retrieval
+RAG
+notifications
+new risk models
+new variance formulas
+forecasting
+dashboard redesign
+```
+
+Do not create another calculation engine.
+
+Do not modify canonical project truth.
+
+---
+
+# 26. Definition of done
+
+Pass 17 is complete only when:
+
+```text id="done17"
+[ ] Canonical intelligence endpoint exists.
+
+[ ] Delayed activities are queryable.
+
+[ ] At-risk activities are queryable.
+
+[ ] Completed-today activities are queryable.
+
+[ ] Behind-schedule activities are queryable.
+
+[ ] Approaching milestones are queryable.
+
+[ ] Activities with no recent updates are queryable.
+
+[ ] Recent project changes are queryable.
+
+[ ] Results are structured facts, not generated prose.
+
+[ ] Existing snapshot formulas are reused.
+
+[ ] Existing risk classifications are reused.
+
+[ ] Historical progress is queried deterministically.
+
+[ ] asOfDate works consistently across queries.
+
+[ ] Query defaults are explicit.
+
+[ ] Sorting is deterministic.
+
+[ ] Result sizes are bounded.
+
+[ ] Project isolation is enforced.
+
+[ ] Existing Pass 13–16 behavior remains unchanged.
+
+[ ] Frontend uses structured facts without generating new intelligence logic.
+
+[ ] Full test suite passes.
+
+[ ] Build passes.
+
+[ ] No Pass 18+ functionality is implemented.
+```
+
+---
+
+# 27. Final verification
+
+Inspect the final diff specifically for:
+
+```text id="review17"
+duplicated progress formulas
+duplicated risk formulas
+wall-clock-dependent historical queries
+nondeterministic sorting
+cross-project event leakage
+unbounded event queries
+AI/LLM calls
+natural-language parsing
+assistant prose generation
+Pass 18+ scope leakage
+```
+
+Commit exactly:
+
+```text id="commit17"
+feat: implement FieldLine project intelligence queries
+```
+
+Push to:
+
+```text id="main17"
+main
+```
+
+After implementation report:
+
+```text id="report17"
 1. exact files changed
-2. jobs schema
-3. job state machine
-4. worker architecture
-5. API changes
-6. recovery behavior
-7. frontend behavior
-8. tests added
-9. npm test result
-10. npm run build result
-11. commit SHA
-12. remaining limitations
+2. intelligence endpoint contract
+3. definitions used for each query
+4. existing services/repositories reused
+5. frontend integration
+6. tests added
+7. npm test result
+8. npm run build result
+9. commit SHA
+10. known limitations
 ```

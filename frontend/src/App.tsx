@@ -118,6 +118,100 @@ export interface Evidence {
   createdAt: string;
 }
 
+export interface RiskReason {
+  code: string;
+  message: string;
+}
+
+export interface DelayedActivityFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  plannedFinish: string;
+  actualProgress: number;
+  progressVariance: number;
+  overdue: boolean;
+  classification: 'DELAYED';
+  reasons: RiskReason[];
+}
+
+export interface AtRiskActivityFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  classification: 'AT_RISK';
+  reasons: RiskReason[];
+  plannedFinish: string;
+  actualProgress: number;
+  progressVariance: number;
+}
+
+export interface CompletedActivityFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  progressUpdateId: string | null;
+  asOfDate: string;
+  actualPercent: number;
+  actualFinish: string | null;
+  status: string;
+}
+
+export interface BehindScheduleActivityFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  plannedProgress: number;
+  actualProgress: number;
+  progressVariance: number;
+  varianceState: string;
+  status: string;
+  plannedFinish: string;
+  overdue: boolean;
+}
+
+export interface ApproachingMilestoneFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  milestoneDate: string;
+  daysUntil: number;
+  status: string;
+  actualProgress: number;
+}
+
+export interface StaleActivityFact {
+  activityId: string;
+  externalId: string;
+  name: string;
+  latestUpdateDate: string | null;
+  daysSinceUpdate: number | null;
+  hasAnyUpdate: boolean;
+}
+
+export interface RecentChangeFact {
+  eventId: string;
+  eventType: string;
+  entityType: string | null;
+  entityId: string | null;
+  summary: string;
+  createdAt: string;
+  payload: Record<string, unknown> | null;
+}
+
+export interface ProjectIntelligence {
+  projectId: string;
+  asOfDate: string;
+  generatedAt: string;
+  delayed: DelayedActivityFact[];
+  atRisk: AtRiskActivityFact[];
+  completedToday: CompletedActivityFact[];
+  behindSchedule: BehindScheduleActivityFact[];
+  approachingMilestones: ApproachingMilestoneFact[];
+  staleActivities: StaleActivityFact[];
+  recentChanges: RecentChangeFact[];
+}
+
 interface HealthData {
   status: 'ok' | 'degraded' | 'error';
   service: string;
@@ -143,8 +237,19 @@ export function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Workspace View State
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'schedules' | 'progress' | 'evidence'>('overview');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<
+    'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence'
+  >('overview');
 
+  // Project Intelligence State (PASS 17)
+  const [intelligence, setIntelligence] = useState<ProjectIntelligence | null>(null);
+  const [loadingIntelligence, setLoadingIntelligence] = useState<boolean>(false);
+  const [intelligenceError, setIntelligenceError] = useState<string | null>(null);
+  const [intelligenceAsOfDate, setIntelligenceAsOfDate] = useState<string>(
+    new Date().toISOString().slice(0, 10)
+  );
+  const [intelligenceRecentDays, setIntelligenceRecentDays] = useState<number>(7);
+  const [intelligenceApproachingDays, setIntelligenceApproachingDays] = useState<number>(14);
 
   // Schedules & Activities State
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -175,7 +280,9 @@ export function App(): React.JSX.Element {
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [evidenceSuccess, setEvidenceSuccess] = useState<string | null>(null);
   const [processingEvidenceId, setProcessingEvidenceId] = useState<string | null>(null);
-  const [processingStatusMap, setProcessingStatusMap] = useState<Record<string, 'processing' | 'processed' | 'failed'>>({});
+  const [processingStatusMap, setProcessingStatusMap] = useState<
+    Record<string, 'processing' | 'processed' | 'failed'>
+  >({});
 
   // Activity Evidence Traceability Modal State
   const [traceActivity, setTraceActivity] = useState<ScheduleActivity | null>(null);
@@ -326,6 +433,43 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
+  // Fetch Project Intelligence (PASS 17)
+  const fetchIntelligence = useCallback(
+    async (
+      projectId: string,
+      asOfDate?: string,
+      recentDays?: number,
+      approachingDays?: number
+    ) => {
+      setLoadingIntelligence(true);
+      setIntelligenceError(null);
+      try {
+        const params = new URLSearchParams();
+        if (asOfDate) params.set('asOfDate', asOfDate);
+        if (recentDays !== undefined) params.set('recentDays', String(recentDays));
+        if (approachingDays !== undefined)
+          params.set('approachingDays', String(approachingDays));
+
+        const res = await fetch(
+          `/api/projects/${projectId}/intelligence?${params.toString()}`
+        );
+        const data = await res.json();
+        if (res.ok) {
+          setIntelligence(data);
+        } else {
+          setIntelligenceError(
+            data.error?.message || 'Failed to fetch project intelligence facts'
+          );
+        }
+      } catch {
+        setIntelligenceError('Network error connecting to intelligence service');
+      } finally {
+        setLoadingIntelligence(false);
+      }
+    },
+    []
+  );
+
   // Fetch Projects and restore saved selection
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
@@ -349,6 +493,7 @@ export function App(): React.JSX.Element {
           fetchSchedules(found.id);
           fetchProgressUpdates(found.id);
           fetchEvidence(found.id);
+          fetchIntelligence(found.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
         } else {
           localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
           setSelectedProject(null);
@@ -364,7 +509,7 @@ export function App(): React.JSX.Element {
     } finally {
       setLoadingProjects(false);
     }
-  }, [showNotification, fetchSchedules, fetchProgressUpdates, fetchEvidence]);
+  }, [showNotification, fetchSchedules, fetchProgressUpdates, fetchEvidence, fetchIntelligence, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays]);
 
   // Initial load
   useEffect(() => {
@@ -1113,10 +1258,28 @@ export function App(): React.JSX.Element {
                 </span>
               )}
             </button>
-            <button className="workspace-tab future" disabled title="AI insights will be enabled in Pass 8+">
+            <button
+              id="tab-intelligence"
+              className={`workspace-tab ${activeWorkspaceTab === 'intelligence' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveWorkspaceTab('intelligence');
+                if (selectedProject) {
+                  fetchIntelligence(
+                    selectedProject.id,
+                    intelligenceAsOfDate,
+                    intelligenceRecentDays,
+                    intelligenceApproachingDays
+                  );
+                }
+              }}
+            >
               <TrendingUp size={16} />
-              <span>Insights & Variance</span>
-              <span className="tab-future-pill">Pass 8+</span>
+              <span>Project Intelligence</span>
+              {intelligence && (
+                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+                  {intelligence.delayed.length + intelligence.atRisk.length + intelligence.behindSchedule.length} Facts
+                </span>
+              )}
             </button>
           </div>
 
@@ -1960,6 +2123,510 @@ export function App(): React.JSX.Element {
                   </div>
                 )}
               </div>
+            </div>
+          ) : activeWorkspaceTab === 'intelligence' ? (
+            /* Tab 5: Project Intelligence Query Layer (PASS 17) */
+            <div className="intelligence-container">
+              {/* Controls Bar */}
+              <div className="intelligence-controls-bar">
+                <div className="intelligence-inputs-group">
+                  <div className="intelligence-input-item">
+                    <label htmlFor="intel-as-of-date">As-Of Date:</label>
+                    <input
+                      id="intel-as-of-date"
+                      type="date"
+                      className="form-input"
+                      value={intelligenceAsOfDate}
+                      onChange={(e) => setIntelligenceAsOfDate(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="intelligence-input-item">
+                    <label htmlFor="intel-recent-days">Recent Window (Days):</label>
+                    <input
+                      id="intel-recent-days"
+                      type="number"
+                      min="1"
+                      max="365"
+                      className="form-input"
+                      style={{ width: '80px' }}
+                      value={intelligenceRecentDays}
+                      onChange={(e) => setIntelligenceRecentDays(Number(e.target.value) || 1)}
+                    />
+                  </div>
+
+                  <div className="intelligence-input-item">
+                    <label htmlFor="intel-approaching-days">Approaching Window (Days):</label>
+                    <input
+                      id="intel-approaching-days"
+                      type="number"
+                      min="0"
+                      max="365"
+                      className="form-input"
+                      style={{ width: '80px' }}
+                      value={intelligenceApproachingDays}
+                      onChange={(e) => setIntelligenceApproachingDays(Number(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  id="query-intelligence-btn"
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    if (selectedProject) {
+                      fetchIntelligence(
+                        selectedProject.id,
+                        intelligenceAsOfDate,
+                        intelligenceRecentDays,
+                        intelligenceApproachingDays
+                      );
+                    }
+                  }}
+                  disabled={loadingIntelligence}
+                  style={{ gap: '0.4rem' }}
+                >
+                  <RefreshCw size={14} className={loadingIntelligence ? 'pulse-dot' : ''} />
+                  <span>{loadingIntelligence ? 'Evaluating Facts...' : 'Refresh Intelligence'}</span>
+                </button>
+              </div>
+
+              {intelligenceError && (
+                <div className="notification-banner error">
+                  <AlertCircle size={18} />
+                  <span>{intelligenceError}</span>
+                </div>
+              )}
+
+              {loadingIntelligence && !intelligence ? (
+                <div style={{ padding: '3rem', textAlign: 'center' }}>
+                  <RefreshCw size={24} className="pulse-dot" />
+                  <p className="empty-desc" style={{ marginTop: '0.75rem' }}>
+                    Computing deterministic project intelligence queries...
+                  </p>
+                </div>
+              ) : intelligence ? (
+                <>
+                  {/* Summary Metrics Chips */}
+                  <div className="intelligence-metrics-grid">
+                    <div className="intelligence-metric-card delayed">
+                      <span className="intelligence-metric-label">Delayed</span>
+                      <span className="intelligence-metric-val">{intelligence.delayed.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card at-risk">
+                      <span className="intelligence-metric-label">At Risk</span>
+                      <span className="intelligence-metric-val">{intelligence.atRisk.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card behind">
+                      <span className="intelligence-metric-label">Behind Schedule</span>
+                      <span className="intelligence-metric-val">{intelligence.behindSchedule.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card completed">
+                      <span className="intelligence-metric-label">Completed ({intelligence.asOfDate})</span>
+                      <span className="intelligence-metric-val">{intelligence.completedToday.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card milestones">
+                      <span className="intelligence-metric-label">Approaching Milestones</span>
+                      <span className="intelligence-metric-val">{intelligence.approachingMilestones.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card stale">
+                      <span className="intelligence-metric-label">Stale Activities</span>
+                      <span className="intelligence-metric-val">{intelligence.staleActivities.length}</span>
+                    </div>
+
+                    <div className="intelligence-metric-card events">
+                      <span className="intelligence-metric-label">Recent Changes</span>
+                      <span className="intelligence-metric-val">{intelligence.recentChanges.length}</span>
+                    </div>
+                  </div>
+
+                  {/* 7 Structured Fact Sections */}
+                  <div className="intelligence-sections-stack">
+                    {/* Section 1: Delayed Activities */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <AlertTriangle size={18} color="var(--accent-rose)" />
+                          <h3 className="intelligence-card-title">1. Delayed Activities</h3>
+                          <span className="intelligence-card-count">{intelligence.delayed.length}</span>
+                        </div>
+                        <span className="status-badge delayed" style={{ fontSize: '0.75rem' }}>
+                          Objective Overdue (Finish &lt; {intelligence.asOfDate})
+                        </span>
+                      </div>
+
+                      {intelligence.delayed.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          No overdue/delayed activities detected as of {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Planned Finish</th>
+                                <th>Actual Progress</th>
+                                <th>Variance</th>
+                                <th>Classification Reasons</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.delayed.map((d) => (
+                                <tr key={d.activityId}>
+                                  <td><span className="act-id-cell">{d.externalId}</span></td>
+                                  <td><strong>{d.name}</strong></td>
+                                  <td><span className="date-cell">{d.plannedFinish}</span></td>
+                                  <td><span className="qty-cell">{d.actualProgress}%</span></td>
+                                  <td>
+                                    <span style={{ color: 'var(--accent-rose)', fontWeight: 600 }}>
+                                      {d.progressVariance}%
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <div className="reasons-tags-list">
+                                      {d.reasons.map((r, idx) => (
+                                        <span key={idx} className="reason-tag-item">{r.message}</span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 2: At-Risk Activities */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <AlertCircle size={18} color="var(--accent-amber)" />
+                          <h3 className="intelligence-card-title">2. At-Risk Activities</h3>
+                          <span className="intelligence-card-count">{intelligence.atRisk.length}</span>
+                        </div>
+                        <span className="status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', fontSize: '0.75rem' }}>
+                          Variance &le; -10% or Near Finish Window
+                        </span>
+                      </div>
+
+                      {intelligence.atRisk.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          No activities classified as at-risk as of {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Planned Finish</th>
+                                <th>Actual Progress</th>
+                                <th>Variance</th>
+                                <th>Risk Signals</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.atRisk.map((r) => (
+                                <tr key={r.activityId}>
+                                  <td><span className="act-id-cell">{r.externalId}</span></td>
+                                  <td><strong>{r.name}</strong></td>
+                                  <td><span className="date-cell">{r.plannedFinish}</span></td>
+                                  <td><span className="qty-cell">{r.actualProgress}%</span></td>
+                                  <td>
+                                    <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
+                                      {r.progressVariance}%
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <div className="reasons-tags-list">
+                                      {r.reasons.map((reason, idx) => (
+                                        <span key={idx} className="reason-tag-item" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#fcd34d', borderColor: 'rgba(245, 158, 11, 0.25)' }}>
+                                          {reason.message}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 3: Behind Schedule */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <TrendingUp size={18} color="#fb923c" />
+                          <h3 className="intelligence-card-title">3. Behind Schedule Activities</h3>
+                          <span className="intelligence-card-count">{intelligence.behindSchedule.length}</span>
+                        </div>
+                        <span className="status-badge" style={{ background: 'rgba(251, 146, 60, 0.15)', color: '#fb923c', fontSize: '0.75rem' }}>
+                          Variance &lt; -0.01%
+                        </span>
+                      </div>
+
+                      {intelligence.behindSchedule.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          All project activities are on-plan or ahead of planned schedule as of {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Planned %</th>
+                                <th>Actual %</th>
+                                <th>Variance</th>
+                                <th>Execution Status</th>
+                                <th>Planned Finish</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.behindSchedule.map((b) => (
+                                <tr key={b.activityId}>
+                                  <td><span className="act-id-cell">{b.externalId}</span></td>
+                                  <td><strong>{b.name}</strong></td>
+                                  <td><span className="date-cell">{b.plannedProgress}%</span></td>
+                                  <td><span className="qty-cell">{b.actualProgress}%</span></td>
+                                  <td>
+                                    <span style={{ color: '#fb923c', fontWeight: 600 }}>
+                                      {b.progressVariance}%
+                                    </span>
+                                  </td>
+                                  <td><span className="format-tag">{b.status}</span></td>
+                                  <td><span className="date-cell">{b.plannedFinish}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 4: Completed on Selected Date */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <CheckCircle2 size={18} color="var(--accent-emerald)" />
+                          <h3 className="intelligence-card-title">4. Completed on Selected Date</h3>
+                          <span className="intelligence-card-count">{intelligence.completedToday.length}</span>
+                        </div>
+                        <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
+                          Observed as-of {intelligence.asOfDate}
+                        </span>
+                      </div>
+
+                      {intelligence.completedToday.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          No activities recorded completion observations on {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Progress Update ID</th>
+                                <th>Observation Date</th>
+                                <th>Actual Progress</th>
+                                <th>Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.completedToday.map((c) => (
+                                <tr key={c.activityId}>
+                                  <td><span className="act-id-cell">{c.externalId}</span></td>
+                                  <td><strong>{c.name}</strong></td>
+                                  <td><span className="mono" style={{ fontSize: '0.75rem', opacity: 0.8 }}>{c.progressUpdateId || 'Direct'}</span></td>
+                                  <td><span className="date-cell">{c.asOfDate}</span></td>
+                                  <td><span className="qty-cell">{c.actualPercent}%</span></td>
+                                  <td><span className="baseline-tag">{c.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 5: Approaching Milestones */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <Calendar size={18} color="var(--accent-cyan)" />
+                          <h3 className="intelligence-card-title">5. Approaching Milestones</h3>
+                          <span className="intelligence-card-count">{intelligence.approachingMilestones.length}</span>
+                        </div>
+                        <span className="status-badge" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee', fontSize: '0.75rem' }}>
+                          Zero-duration within {intelligenceApproachingDays} days
+                        </span>
+                      </div>
+
+                      {intelligence.approachingMilestones.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          No milestones approaching within the next {intelligenceApproachingDays} days from {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Milestone ID</th>
+                                <th>Name</th>
+                                <th>Milestone Date</th>
+                                <th>Days Until</th>
+                                <th>Progress</th>
+                                <th>Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.approachingMilestones.map((m) => (
+                                <tr key={m.activityId}>
+                                  <td><span className="act-id-cell">{m.externalId}</span></td>
+                                  <td><strong>{m.name}</strong></td>
+                                  <td><span className="date-cell">{m.milestoneDate}</span></td>
+                                  <td>
+                                    <span className="format-tag" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9', fontWeight: 700 }}>
+                                      {m.daysUntil} day{m.daysUntil !== 1 ? 's' : ''}
+                                    </span>
+                                  </td>
+                                  <td><span className="qty-cell">{m.actualProgress}%</span></td>
+                                  <td><span className="format-tag">{m.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 6: Activities With No Recent Updates (Stale) */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <Clock size={18} color="#c084fc" />
+                          <h3 className="intelligence-card-title">6. Stale Activities (No Recent Updates)</h3>
+                          <span className="intelligence-card-count">{intelligence.staleActivities.length}</span>
+                        </div>
+                        <span className="status-badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', fontSize: '0.75rem' }}>
+                          Older than {intelligenceRecentDays} days or never updated
+                        </span>
+                      </div>
+
+                      {intelligence.staleActivities.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          All project activities have progress reports within the last {intelligenceRecentDays} days.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Latest Observation Date</th>
+                                <th>Days Since Update</th>
+                                <th>Monitoring Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.staleActivities.map((s) => (
+                                <tr key={s.activityId}>
+                                  <td><span className="act-id-cell">{s.externalId}</span></td>
+                                  <td><strong>{s.name}</strong></td>
+                                  <td><span className="date-cell">{s.latestUpdateDate || 'None recorded'}</span></td>
+                                  <td>
+                                    <span className="date-cell">
+                                      {s.daysSinceUpdate !== null ? `${s.daysSinceUpdate} days ago` : '—'}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    {s.hasAnyUpdate ? (
+                                      <span className="format-tag" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+                                        Observation Stale
+                                      </span>
+                                    ) : (
+                                      <span className="format-tag" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
+                                        Never Updated
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Section 7: Recent Project Changes */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <FileText size={18} color="var(--accent-indigo)" />
+                          <h3 className="intelligence-card-title">7. Recent Project Changes</h3>
+                          <span className="intelligence-card-count">{intelligence.recentChanges.length}</span>
+                        </div>
+                        <span className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', fontSize: '0.75rem' }}>
+                          Bounded Project Event Stream
+                        </span>
+                      </div>
+
+                      {intelligence.recentChanges.length === 0 ? (
+                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                          No project events recorded in the {intelligenceRecentDays}-day window prior to {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Timestamp</th>
+                                <th>Event Type</th>
+                                <th>Summary</th>
+                                <th>Structured Payload</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.recentChanges.map((evt) => (
+                                <tr key={evt.eventId}>
+                                  <td><span className="date-cell">{evt.createdAt}</span></td>
+                                  <td><span className="format-tag" style={{ color: '#93c5fd' }}>{evt.eventType}</span></td>
+                                  <td><strong>{evt.summary}</strong></td>
+                                  <td style={{ maxWidth: '300px' }}>
+                                    {evt.payload ? (
+                                      <div className="payload-preview-box">
+                                        {JSON.stringify(evt.payload, null, 2)}
+                                      </div>
+                                    ) : (
+                                      <span className="date-cell">—</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           ) : null}
         </div>
