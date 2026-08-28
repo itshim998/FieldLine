@@ -632,6 +632,14 @@ frontend/
       - **High (`high`)**: Score &ge; 0.90 AND top candidate is separated from runner-up by at least 0.15 margin (or no runner-up). Auto-confirms with `status: 'confirmed'`, `reviewState: 'resolved'`, and `reviewedBy: 'system'`.
       - **Medium (`medium`)**: Score &ge; 0.60, OR high score with close runner-up (ambiguous). Routes to `status: 'suggested'`, `reviewState: 'awaiting_review'`.
       - **Low (`low`)**: Score < 0.60 or no candidate above minimum threshold (0.40). Routes to `status: 'suggested'`, `reviewState: 'unresolved'`.
+    - **State Transition Matrix & Historical Immutability**:
+      - `suggested + awaiting_review` &rarr; `confirm` (`confirmed + resolved`) | `reject` (`rejected + resolved`) | `resolve` (`confirmed + resolved`)
+      - `suggested + unresolved` &rarr; `resolve` (`confirmed + resolved + manual`) | `reject` (`rejected + resolved`) | direct `confirm` is rejected with `ValidationError`
+      - `confirmed` &rarr; **Immutable Historical Decision** (cannot be re-confirmed, rejected, or retargeted with `/resolve`)
+      - `rejected` &rarr; **Immutable Historical Decision** (cannot be re-rejected, confirmed, or resolved)
+    - **Atomic State Mutation & Audit Persistence (Transaction Boundary)**:
+      - All review mutations (`confirm`, `reject`, `resolve`) and batch matching persistence (`match_auto_confirmed`, `match_suggested`) execute inside a single SQLite transaction (`db.transaction(...)`).
+      - Best-effort audit logging is strictly prohibited; if audit event insertion fails, the match mutation is rolled back completely.
     - **Human Review Endpoints**:
       - `POST /api/projects/:projectId/activity-matches/:matchId/confirm`: Confirms a suggested match, persisting reviewer identity (`reviewedBy`) and timestamp (`reviewedAt`).
       - `POST /api/projects/:projectId/activity-matches/:matchId/reject`: Rejects a candidate match without deleting the record, preserving full audit history.
@@ -640,8 +648,7 @@ frontend/
     - **Canonical Truth Protection Invariant**:
       - **Non-Negotiable Rule**: Only `status === 'confirmed'` matches are eligible to create canonical `ActivityProgress` records via `ProgressService.normalizeAndRecordProgress`.
       - Suggested (`awaiting_review`) and unresolved (`unresolved`) matches throw `ValidationError` if progress recording is attempted before human review.
-    - **Audit Event Trail**:
-      - Emits structured events to `project_events`: `match_auto_confirmed`, `match_confirmed`, `match_rejected`, `match_resolved`, and `match_suggested`.
     - **Database Migration (`0007_match_review_tiers.ts`)**:
       - Adds `confidence_tier` (`high`, `medium`, `low`) and `review_state` (`unresolved`, `awaiting_review`, `resolved`) columns with indexes `idx_activity_matches_review_state` and `idx_activity_matches_confidence_tier`.
+
 

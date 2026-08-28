@@ -3,7 +3,7 @@ import { ProgressUpdateRepository, progressUpdateRepository as defaultProgressUp
 import { ActivityRepository, activityRepository as defaultActivityRepo } from '../../repositories/activity.repository.js';
 import { ActivityMatchRepository, activityMatchRepository as defaultActivityMatchRepo } from '../../repositories/activity-match.repository.js';
 import { ProjectEventRepository, projectEventRepository as defaultProjectEventRepo } from '../../repositories/project-event.repository.js';
-import { FieldProgressExtraction, FieldProgressItem } from '../../ai/contracts/field-progress-extraction.contract.js';
+import { FieldProgressExtraction } from '../../ai/contracts/field-progress-extraction.contract.js';
 import {
   CandidateMatch,
   FieldFactMatchResult,
@@ -14,7 +14,7 @@ import { scoreActivityCandidate } from './activity-match-scoring.js';
 import { SemanticActivityMatcher, defaultSemanticMatcher } from './semantic-matcher.js';
 import { LLMActivityDisambiguator, defaultLlmActivityDisambiguator } from './llm-disambiguator.js';
 import { classifyMatchConfidence, DEFAULT_MIN_CONFIDENCE_THRESHOLD, DEFAULT_AUTO_CONFIRM_MARGIN, DEFAULT_HIGH_CONFIDENCE_THRESHOLD, DEFAULT_MEDIUM_CONFIDENCE_THRESHOLD } from './match-review-policy.js';
-import { ActivityMatch } from '../../models/domain.types.js';
+import { ActivityMatch, CreateActivityMatchInput, CreateProjectEventInput } from '../../models/domain.types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
@@ -154,6 +154,8 @@ export class ActivityMatchingService {
    * - High confidence unambiguous -> auto-confirmed (status: 'confirmed', reviewedBy: 'system')
    * - Medium confidence / ambiguous -> suggested (status: 'suggested', reviewState: 'awaiting_review')
    * - Low confidence -> unresolved (status: 'suggested', reviewState: 'unresolved')
+   *
+   * All match updates, deletions, and audit events are committed atomically inside a single transaction.
    */
   async matchProgressUpdate(
     projectId: string,
@@ -166,7 +168,6 @@ export class ActivityMatchingService {
     // 1. Verify progress report exists and belongs to the specified project (strict isolation)
     const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
     if (!progressRecord) {
-      // Also verify project exists for appropriate error message
       const project = this.projectRepo.getById(projectId);
       if (!project) {
         throw new NotFoundError(`Project with ID '${projectId}' not found`);
@@ -179,79 +180,77 @@ export class ActivityMatchingService {
     // 2. Compute candidate matches
     const matchResults = await this.computeMatches(projectId, extraction, options);
 
-    // 3. Persist matches if requested
+    // 3. Persist matches and events atomically if requested
     if (persist) {
-      // Clean up only previous suggestions for this report to preserve human-reviewed confirmed/rejected matches
-      this.activityMatchRepo.deleteSuggestedByProgressUpdateId(progressUpdateId, projectId);
-
       const nowIso = new Date().toISOString();
-      const toPersist = matchResults
-        .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)
-        .map(r => {
-          const decision = r.reviewDecision || classifyMatchConfidence(r.bestMatch, r.alternatives);
-          const isAutoConfirm = decision.autoConfirm;
+      const toPersist: CreateActivityMatchInput[] = [];
+      const events: CreateProjectEventInput[] = [];
 
-          return {
-            projectId,
-            progressUpdateId,
-            activityId: r.bestMatch.activityId,
-            confidenceScore: r.bestMatch.confidenceScore,
-            matchMethod: r.bestMatch.matchMethod,
-            matchedText: r.bestMatch.matchedText,
-            rationale: r.bestMatch.rationale,
-            status: isAutoConfirm ? ('confirmed' as const) : ('suggested' as const),
-            confidenceTier: decision.tier,
-            reviewState: decision.reviewState,
-            reviewedBy: isAutoConfirm ? 'system' : null,
-            reviewedAt: isAutoConfirm ? nowIso : null
-          };
+      for (const r of matchResults) {
+        if (!r.bestMatch) continue;
+
+        const decision = r.reviewDecision || classifyMatchConfidence(r.bestMatch, r.alternatives);
+        const isAutoConfirm = decision.autoConfirm;
+        const matchId = crypto.randomUUID();
+
+        toPersist.push({
+          id: matchId,
+          projectId,
+          progressUpdateId,
+          activityId: r.bestMatch.activityId,
+          confidenceScore: r.bestMatch.confidenceScore,
+          matchMethod: r.bestMatch.matchMethod,
+          matchedText: r.bestMatch.matchedText,
+          rationale: r.bestMatch.rationale,
+          status: isAutoConfirm ? ('confirmed' as const) : ('suggested' as const),
+          confidenceTier: decision.tier,
+          reviewState: decision.reviewState,
+          reviewedBy: isAutoConfirm ? 'system' : null,
+          reviewedAt: isAutoConfirm ? nowIso : null
         });
 
-      if (toPersist.length > 0) {
-        const persisted = this.activityMatchRepo.createMany(toPersist);
-        logger.debug(`ActivityMatchingService: Persisted ${persisted.length} matches for report ${progressUpdateId}`);
-
-        // Emit audit events for persisted matches
-        for (const match of persisted) {
-          try {
-            if (match.status === 'confirmed') {
-              this.projectEventRepo.create({
-                projectId,
-                eventType: 'match_auto_confirmed',
-                entityType: 'activity_matches',
-                entityId: match.id,
-                summary: `Activity match automatically confirmed by system for activity '${match.activityId}' (${(match.confidenceScore * 100).toFixed(0)}% confidence)`,
-                payloadJson: JSON.stringify({
-                  matchId: match.id,
-                  progressUpdateId,
-                  activityId: match.activityId,
-                  confidenceScore: match.confidenceScore,
-                  confidenceTier: match.confidenceTier,
-                  reviewSource: 'system'
-                })
-              });
-            } else {
-              this.projectEventRepo.create({
-                projectId,
-                eventType: 'match_suggested',
-                entityType: 'activity_matches',
-                entityId: match.id,
-                summary: `Activity match suggested for activity '${match.activityId}' (${(match.confidenceScore * 100).toFixed(0)}% confidence, ${match.confidenceTier} tier, state: ${match.reviewState})`,
-                payloadJson: JSON.stringify({
-                  matchId: match.id,
-                  progressUpdateId,
-                  activityId: match.activityId,
-                  confidenceScore: match.confidenceScore,
-                  confidenceTier: match.confidenceTier,
-                  reviewState: match.reviewState
-                })
-              });
-            }
-          } catch (err) {
-            logger.debug(`Could not create matching event: ${err instanceof Error ? err.message : String(err)}`);
-          }
+        if (isAutoConfirm) {
+          events.push({
+            projectId,
+            eventType: 'match_auto_confirmed',
+            entityType: 'activity_matches',
+            entityId: matchId,
+            summary: `Activity match automatically confirmed by system for activity '${r.bestMatch.activityId}' (${(r.bestMatch.confidenceScore * 100).toFixed(0)}% confidence)`,
+            payloadJson: JSON.stringify({
+              matchId,
+              progressUpdateId,
+              activityId: r.bestMatch.activityId,
+              confidenceScore: r.bestMatch.confidenceScore,
+              confidenceTier: decision.tier,
+              reviewSource: 'system'
+            })
+          });
+        } else {
+          events.push({
+            projectId,
+            eventType: 'match_suggested',
+            entityType: 'activity_matches',
+            entityId: matchId,
+            summary: `Activity match suggested for activity '${r.bestMatch.activityId}' (${(r.bestMatch.confidenceScore * 100).toFixed(0)}% confidence, ${decision.tier} tier, state: ${decision.reviewState})`,
+            payloadJson: JSON.stringify({
+              matchId,
+              progressUpdateId,
+              activityId: r.bestMatch.activityId,
+              confidenceScore: r.bestMatch.confidenceScore,
+              confidenceTier: decision.tier,
+              reviewState: decision.reviewState
+            })
+          });
         }
       }
+
+      this.activityMatchRepo.persistMatchesAndEventsAtomically({
+        projectId,
+        progressUpdateId,
+        matches: toPersist,
+        events
+      });
+      logger.debug(`ActivityMatchingService: Atomically persisted ${toPersist.length} matches and ${events.length} events for report ${progressUpdateId}`);
     }
 
     return {
@@ -300,7 +299,8 @@ export class ActivityMatchingService {
   }
 
   /**
-   * Human review action: Confirms a suggested match.
+   * Human review action: Confirms a suggested match atomically with its audit event.
+   * Confirmed matches are immutable historical decisions and cannot be re-confirmed, rejected, or retargeted.
    */
   async confirmMatch(
     projectId: string,
@@ -319,55 +319,34 @@ export class ActivityMatchingService {
       );
     }
 
+    if (existingMatch.status === 'confirmed') {
+      throw new ValidationError(
+        `Cannot confirm match '${matchId}'. Confirmed match history is immutable.`
+      );
+    }
     if (existingMatch.status === 'rejected') {
       throw new ValidationError(
-        `Cannot confirm rejected match '${matchId}'. Use resolve to assign an activity.`
+        `Cannot confirm match '${matchId}'. Rejected match history is immutable.`
+      );
+    }
+    if (existingMatch.reviewState === 'unresolved') {
+      throw new ValidationError(
+        `Cannot confirm unresolved match '${matchId}' without selecting an activity. Use resolve to assign a specific activity.`
       );
     }
 
     const nowIso = new Date().toISOString();
-    const updated = this.activityMatchRepo.updateMatchReview({
+    return this.activityMatchRepo.confirmMatchAtomically({
       id: matchId,
       projectId,
-      status: 'confirmed',
-      reviewState: 'resolved',
-      reviewedBy: reviewer || 'human',
-      reviewedAt: nowIso
+      reviewer: reviewer || 'human',
+      nowIso
     });
-
-    if (!updated) {
-      throw new NotFoundError(
-        `Activity match with ID '${matchId}' not found for project '${projectId}'`
-      );
-    }
-
-    // Record audit event
-    try {
-      this.projectEventRepo.create({
-        projectId,
-        eventType: 'match_confirmed',
-        entityType: 'activity_matches',
-        entityId: matchId,
-        summary: `Activity match confirmed by reviewer '${reviewer}' for activity '${updated.activityId}'`,
-        payloadJson: JSON.stringify({
-          matchId,
-          progressUpdateId: updated.progressUpdateId,
-          activityId: updated.activityId,
-          confidenceScore: updated.confidenceScore,
-          confidenceTier: updated.confidenceTier,
-          reviewSource: 'human',
-          reviewer: reviewer || 'human'
-        })
-      });
-    } catch (err) {
-      logger.debug(`Could not create confirm event: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return updated;
   }
 
   /**
-   * Human review action: Rejects a suggested or unresolved match.
+   * Human review action: Rejects a suggested or unresolved match atomically with its audit event.
+   * Rejected matches are immutable historical decisions and cannot be re-rejected, confirmed, or retargeted.
    */
   async rejectMatch(
     projectId: string,
@@ -387,55 +366,35 @@ export class ActivityMatchingService {
       );
     }
 
+    if (existingMatch.status === 'confirmed') {
+      throw new ValidationError(
+        `Cannot reject match '${matchId}'. Confirmed match history is immutable.`
+      );
+    }
+    if (existingMatch.status === 'rejected') {
+      throw new ValidationError(
+        `Cannot reject match '${matchId}'. Rejected match history is immutable.`
+      );
+    }
+
     const nowIso = new Date().toISOString();
     const rationale = reason
       ? `${existingMatch.rationale || ''} [Rejected: ${reason}]`.trim()
       : existingMatch.rationale;
 
-    const updated = this.activityMatchRepo.updateMatchReview({
+    return this.activityMatchRepo.rejectMatchAtomically({
       id: matchId,
       projectId,
-      status: 'rejected',
-      reviewState: 'resolved',
-      reviewedBy: reviewer || 'human',
-      reviewedAt: nowIso,
-      rationale
+      reviewer: reviewer || 'human',
+      rationale,
+      nowIso,
+      reason
     });
-
-    if (!updated) {
-      throw new NotFoundError(
-        `Activity match with ID '${matchId}' not found for project '${projectId}'`
-      );
-    }
-
-    // Record audit event
-    try {
-      this.projectEventRepo.create({
-        projectId,
-        eventType: 'match_rejected',
-        entityType: 'activity_matches',
-        entityId: matchId,
-        summary: `Activity match rejected by reviewer '${reviewer}' for activity '${updated.activityId}'`,
-        payloadJson: JSON.stringify({
-          matchId,
-          progressUpdateId: updated.progressUpdateId,
-          activityId: updated.activityId,
-          confidenceScore: updated.confidenceScore,
-          confidenceTier: updated.confidenceTier,
-          reviewSource: 'human',
-          reviewer: reviewer || 'human',
-          reason: reason ?? null
-        })
-      });
-    } catch (err) {
-      logger.debug(`Could not create reject event: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return updated;
   }
 
   /**
-   * Human review action: Resolves an unresolved or candidate match to a chosen activity.
+   * Human review action: Resolves an unresolved or candidate match to a chosen activity atomically with its audit event.
+   * Once a match is confirmed, its activityId and status become immutable and cannot be retargeted.
    */
   async resolveMatch(
     projectId: string,
@@ -456,7 +415,18 @@ export class ActivityMatchingService {
       );
     }
 
-    // Verify target activity belongs to the same project
+    if (existingMatch.status === 'confirmed') {
+      throw new ValidationError(
+        `Cannot resolve or retarget match '${matchId}'. Confirmed match history is immutable.`
+      );
+    }
+    if (existingMatch.status === 'rejected') {
+      throw new ValidationError(
+        `Cannot resolve match '${matchId}'. Rejected match history is immutable.`
+      );
+    }
+
+    // Verify target activity belongs to the same project (strict cross-project isolation)
     const targetActivity = this.activityRepo.getById(targetActivityId);
     if (!targetActivity || targetActivity.projectId !== projectId) {
       throw new NotFoundError(
@@ -465,56 +435,24 @@ export class ActivityMatchingService {
     }
 
     const nowIso = new Date().toISOString();
-    const originalActivityId = existingMatch.activityId;
     const originalRationale = existingMatch.rationale;
     const rationale = reason
       ? `${originalRationale || ''} [Resolved manually to ${targetActivity.name} (${targetActivity.externalId}): ${reason}]`.trim()
       : `${originalRationale || ''} [Resolved manually to ${targetActivity.name} (${targetActivity.externalId})]`.trim();
 
-    const updated = this.activityMatchRepo.updateMatchReview({
+    return this.activityMatchRepo.resolveMatchAtomically({
       id: matchId,
       projectId,
-      activityId: targetActivityId,
-      status: 'confirmed',
-      reviewState: 'resolved',
-      matchMethod: 'manual',
-      reviewedBy: reviewer || 'human',
-      reviewedAt: nowIso,
-      rationale
+      targetActivityId,
+      targetActivityName: targetActivity.name,
+      targetActivityExternalId: targetActivity.externalId,
+      originalActivityId: existingMatch.activityId,
+      originalRationale,
+      reviewer: reviewer || 'human',
+      rationale,
+      nowIso,
+      reason
     });
-
-    if (!updated) {
-      throw new NotFoundError(
-        `Activity match with ID '${matchId}' not found for project '${projectId}'`
-      );
-    }
-
-    // Record audit event
-    try {
-      this.projectEventRepo.create({
-        projectId,
-        eventType: 'match_resolved',
-        entityType: 'activity_matches',
-        entityId: matchId,
-        summary: `Activity match manually resolved to '${targetActivity.name}' (${targetActivity.externalId}) by reviewer '${reviewer}'`,
-        payloadJson: JSON.stringify({
-          matchId,
-          progressUpdateId: updated.progressUpdateId,
-          activityId: targetActivityId,
-          originalActivityId,
-          confidenceScore: updated.confidenceScore,
-          confidenceTier: updated.confidenceTier,
-          matchMethod: 'manual',
-          reviewSource: 'human',
-          reviewer: reviewer || 'human',
-          reason: reason ?? null
-        })
-      });
-    } catch (err) {
-      logger.debug(`Could not create resolve event: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return updated;
   }
 }
 

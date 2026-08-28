@@ -320,4 +320,166 @@ describe('SqliteActivityMatchRepository', () => {
     // Activity match should be cascade deleted
     expect(matchRepo.getById(match.id)).toBeNull();
   });
+
+  it('should execute confirmMatchAtomically updating match and inserting project event in one transaction', () => {
+    const match = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivityId,
+      confidenceScore: 0.75,
+      matchMethod: 'text_similarity',
+      status: 'suggested',
+      confidenceTier: 'medium',
+      reviewState: 'awaiting_review'
+    });
+
+    const nowIso = new Date().toISOString();
+    const confirmed = matchRepo.confirmMatchAtomically({
+      id: match.id,
+      projectId: testProjectId,
+      reviewer: 'Engineer Alex',
+      nowIso
+    });
+
+    expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.reviewState).toBe('resolved');
+    expect(confirmed.reviewedBy).toBe('Engineer Alex');
+
+    // Verify event in DB
+    const eventRow = db.prepare(`
+      SELECT * FROM project_events WHERE entity_id = ? AND event_type = 'match_confirmed'
+    `).get(match.id) as { summary: string; project_id: string } | undefined;
+    expect(eventRow).toBeDefined();
+    expect(eventRow?.project_id).toBe(testProjectId);
+  });
+
+  it('should execute rejectMatchAtomically updating match and inserting project event in one transaction', () => {
+    const match = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivityId,
+      confidenceScore: 0.75,
+      matchMethod: 'text_similarity',
+      status: 'suggested',
+      confidenceTier: 'medium',
+      reviewState: 'awaiting_review'
+    });
+
+    const nowIso = new Date().toISOString();
+    const rejected = matchRepo.rejectMatchAtomically({
+      id: match.id,
+      projectId: testProjectId,
+      reviewer: 'Lead Auditor',
+      nowIso,
+      rationale: 'Irrelevant item',
+      reason: 'Out of scope'
+    });
+
+    expect(rejected.status).toBe('rejected');
+    expect(rejected.reviewState).toBe('resolved');
+    expect(rejected.reviewedBy).toBe('Lead Auditor');
+
+    const eventRow = db.prepare(`
+      SELECT * FROM project_events WHERE entity_id = ? AND event_type = 'match_rejected'
+    `).get(match.id) as { summary: string; project_id: string } | undefined;
+    expect(eventRow).toBeDefined();
+  });
+
+  it('should execute resolveMatchAtomically retargeting activity, setting manual method and inserting event', () => {
+    const match = matchRepo.create({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      activityId: testActivityId,
+      confidenceScore: 0.45,
+      matchMethod: 'text_similarity',
+      status: 'suggested',
+      confidenceTier: 'low',
+      reviewState: 'unresolved'
+    });
+
+    const nowIso = new Date().toISOString();
+    const resolved = matchRepo.resolveMatchAtomically({
+      id: match.id,
+      projectId: testProjectId,
+      targetActivityId: testActivity2Id,
+      targetActivityName: 'Foundation Concrete',
+      targetActivityExternalId: 'ACT-102',
+      originalActivityId: testActivityId,
+      reviewer: 'Supervisor Sam',
+      rationale: 'Resolved to ACT-102',
+      nowIso
+    });
+
+    expect(resolved.status).toBe('confirmed');
+    expect(resolved.activityId).toBe(testActivity2Id);
+    expect(resolved.matchMethod).toBe('manual');
+    expect(resolved.confidenceScore).toBe(0.45); // original score preserved
+
+    const eventRow = db.prepare(`
+      SELECT * FROM project_events WHERE entity_id = ? AND event_type = 'match_resolved'
+    `).get(match.id) as { summary: string; project_id: string } | undefined;
+    expect(eventRow).toBeDefined();
+  });
+
+  it('should execute persistMatchesAndEventsAtomically in a single atomic transaction', () => {
+    const matchInputs = [
+      {
+        projectId: testProjectId,
+        progressUpdateId: testUpdateId,
+        activityId: testActivityId,
+        confidenceScore: 0.95,
+        matchMethod: 'exact_id' as const,
+        status: 'confirmed' as const,
+        confidenceTier: 'high' as const,
+        reviewState: 'resolved' as const,
+        reviewedBy: 'system',
+        reviewedAt: new Date().toISOString()
+      },
+      {
+        projectId: testProjectId,
+        progressUpdateId: testUpdateId,
+        activityId: testActivity2Id,
+        confidenceScore: 0.72,
+        matchMethod: 'text_similarity' as const,
+        status: 'suggested' as const,
+        confidenceTier: 'medium' as const,
+        reviewState: 'awaiting_review' as const
+      }
+    ];
+
+    const eventInputs = [
+      {
+        projectId: testProjectId,
+        eventType: 'match_auto_confirmed',
+        entityType: 'activity_matches',
+        entityId: 'dummy-1',
+        summary: 'Auto-confirmed'
+      },
+      {
+        projectId: testProjectId,
+        eventType: 'match_suggested',
+        entityType: 'activity_matches',
+        entityId: 'dummy-2',
+        summary: 'Suggested'
+      }
+    ];
+
+    const results = matchRepo.persistMatchesAndEventsAtomically({
+      projectId: testProjectId,
+      progressUpdateId: testUpdateId,
+      matches: matchInputs,
+      events: eventInputs
+    });
+
+    expect(results).toHaveLength(2);
+    const confirmedRow = results.find((r) => r.status === 'confirmed');
+    const suggestedRow = results.find((r) => r.status === 'suggested');
+    expect(confirmedRow).toBeDefined();
+    expect(suggestedRow).toBeDefined();
+
+    const events = db.prepare(`
+      SELECT * FROM project_events WHERE project_id = ? AND event_type IN ('match_auto_confirmed', 'match_suggested')
+    `).all(testProjectId);
+    expect(events).toHaveLength(2);
+  });
 });

@@ -1,8 +1,16 @@
 import { Database as DatabaseType } from 'better-sqlite3';
 import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
-import { ActivityMatch, CreateActivityMatchInput, MatchMethod, MatchStatus, MatchConfidenceTier, MatchReviewState } from '../models/domain.types.js';
-import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
+import {
+  ActivityMatch,
+  CreateActivityMatchInput,
+  CreateProjectEventInput,
+  MatchMethod,
+  MatchStatus,
+  MatchConfidenceTier,
+  MatchReviewState
+} from '../models/domain.types.js';
+import { ConflictError, DatabaseError, NotFoundError, ValidationError } from '../errors/AppError.js';
 
 export interface UpdateMatchReviewInput {
   id: string;
@@ -16,6 +24,43 @@ export interface UpdateMatchReviewInput {
   rationale?: string | null;
 }
 
+export interface ConfirmMatchAtomicInput {
+  id: string;
+  projectId: string;
+  reviewer: string;
+  nowIso: string;
+}
+
+export interface RejectMatchAtomicInput {
+  id: string;
+  projectId: string;
+  reviewer: string;
+  rationale?: string | null;
+  nowIso: string;
+  reason?: string | null;
+}
+
+export interface ResolveMatchAtomicInput {
+  id: string;
+  projectId: string;
+  targetActivityId: string;
+  targetActivityName: string;
+  targetActivityExternalId: string;
+  originalActivityId: string;
+  originalRationale?: string | null;
+  reviewer: string;
+  rationale: string;
+  nowIso: string;
+  reason?: string | null;
+}
+
+export interface PersistMatchesAndEventsAtomicInput {
+  projectId: string;
+  progressUpdateId: string;
+  matches: CreateActivityMatchInput[];
+  events: CreateProjectEventInput[];
+}
+
 export interface ActivityMatchRepository {
   create(input: CreateActivityMatchInput): ActivityMatch;
   createMany(inputs: CreateActivityMatchInput[]): ActivityMatch[];
@@ -24,6 +69,10 @@ export interface ActivityMatchRepository {
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityMatch[];
   listByProjectId(projectId: string): ActivityMatch[];
   updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null;
+  confirmMatchAtomically(input: ConfirmMatchAtomicInput): ActivityMatch;
+  rejectMatchAtomically(input: RejectMatchAtomicInput): ActivityMatch;
+  resolveMatchAtomically(input: ResolveMatchAtomicInput): ActivityMatch;
+  persistMatchesAndEventsAtomically(input: PersistMatchesAndEventsAtomicInput): ActivityMatch[];
   delete(id: string, projectId?: string): boolean;
   deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): number;
   deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number;
@@ -203,11 +252,461 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     return rows.map(mapRowToActivityMatch);
   }
 
+  /**
+   * Atomically confirms a suggested match and records the match_confirmed project event.
+   * Rollback occurs immediately if either the match update or event insertion fails.
+   */
+  confirmMatchAtomically(input: ConfirmMatchAtomicInput): ActivityMatch {
+    const db = this.getDb();
+    const eventId = crypto.randomUUID();
+
+    const getMatchStmt = db.prepare(`
+      SELECT * FROM activity_matches WHERE id = ? AND project_id = ?
+    `);
+
+    const updateMatchStmt = db.prepare(`
+      UPDATE activity_matches
+      SET
+        status = 'confirmed',
+        review_state = 'resolved',
+        reviewed_by = ?,
+        reviewed_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND project_id = ? AND status = 'suggested'
+    `);
+
+    const insertEventStmt = db.prepare(`
+      INSERT INTO project_events (
+        id, project_id, event_type, entity_type, entity_id, summary, payload_json, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const runTx = db.transaction(() => {
+      const existing = getMatchStmt.get(input.id, input.projectId) as ActivityMatchDbRow | undefined;
+      if (!existing) {
+        throw new NotFoundError(
+          `Activity match with ID '${input.id}' not found for project '${input.projectId}'`
+        );
+      }
+
+      if (existing.status === 'confirmed') {
+        throw new ValidationError(
+          `Cannot confirm match '${input.id}'. Confirmed match history is immutable.`
+        );
+      }
+      if (existing.status === 'rejected') {
+        throw new ValidationError(
+          `Cannot confirm match '${input.id}'. Rejected match history is immutable.`
+        );
+      }
+      if (existing.review_state === 'unresolved') {
+        throw new ValidationError(
+          `Cannot confirm unresolved match '${input.id}' without selecting an activity. Use resolve to assign a specific activity.`
+        );
+      }
+
+      const updateResult = updateMatchStmt.run(
+        input.reviewer,
+        input.nowIso,
+        input.id,
+        input.projectId
+      );
+
+      if (updateResult.changes === 0) {
+        throw new ValidationError(
+          `Failed to confirm match '${input.id}': State may have changed concurrently.`
+        );
+      }
+
+      const payload = JSON.stringify({
+        matchId: input.id,
+        progressUpdateId: existing.progress_update_id,
+        activityId: existing.activity_id,
+        confidenceScore: existing.confidence_score,
+        confidenceTier: existing.confidence_tier,
+        reviewSource: 'human',
+        reviewer: input.reviewer
+      });
+
+      insertEventStmt.run(
+        eventId,
+        input.projectId,
+        'match_confirmed',
+        'activity_matches',
+        input.id,
+        `Activity match confirmed by reviewer '${input.reviewer}' for activity '${existing.activity_id}'`,
+        payload,
+        input.nowIso
+      );
+    });
+
+    try {
+      runTx();
+    } catch (err: unknown) {
+      if (err instanceof NotFoundError || err instanceof ValidationError) {
+        throw err;
+      }
+      throw new DatabaseError(
+        `Failed to confirm activity match atomically: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    const updated = this.getByIdAndProjectId(input.id, input.projectId);
+    if (!updated) {
+      throw new DatabaseError(`Failed to retrieve confirmed activity match '${input.id}'`);
+    }
+    return updated;
+  }
+
+  /**
+   * Atomically rejects a candidate match and records the match_rejected project event.
+   * Rollback occurs immediately if either the match update or event insertion fails.
+   */
+  rejectMatchAtomically(input: RejectMatchAtomicInput): ActivityMatch {
+    const db = this.getDb();
+    const eventId = crypto.randomUUID();
+
+    const getMatchStmt = db.prepare(`
+      SELECT * FROM activity_matches WHERE id = ? AND project_id = ?
+    `);
+
+    const updateMatchStmt = db.prepare(`
+      UPDATE activity_matches
+      SET
+        status = 'rejected',
+        review_state = 'resolved',
+        reviewed_by = ?,
+        reviewed_at = ?,
+        rationale = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND project_id = ? AND status = 'suggested'
+    `);
+
+    const insertEventStmt = db.prepare(`
+      INSERT INTO project_events (
+        id, project_id, event_type, entity_type, entity_id, summary, payload_json, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const runTx = db.transaction(() => {
+      const existing = getMatchStmt.get(input.id, input.projectId) as ActivityMatchDbRow | undefined;
+      if (!existing) {
+        throw new NotFoundError(
+          `Activity match with ID '${input.id}' not found for project '${input.projectId}'`
+        );
+      }
+
+      if (existing.status === 'confirmed') {
+        throw new ValidationError(
+          `Cannot reject match '${input.id}'. Confirmed match history is immutable.`
+        );
+      }
+      if (existing.status === 'rejected') {
+        throw new ValidationError(
+          `Cannot reject match '${input.id}'. Rejected match history is immutable.`
+        );
+      }
+
+      const rationale = input.rationale !== undefined ? input.rationale : existing.rationale;
+
+      const updateResult = updateMatchStmt.run(
+        input.reviewer,
+        input.nowIso,
+        rationale,
+        input.id,
+        input.projectId
+      );
+
+      if (updateResult.changes === 0) {
+        throw new ValidationError(
+          `Failed to reject match '${input.id}': State may have changed concurrently.`
+        );
+      }
+
+      const payload = JSON.stringify({
+        matchId: input.id,
+        progressUpdateId: existing.progress_update_id,
+        activityId: existing.activity_id,
+        confidenceScore: existing.confidence_score,
+        confidenceTier: existing.confidence_tier,
+        reviewSource: 'human',
+        reviewer: input.reviewer,
+        reason: input.reason ?? null
+      });
+
+      insertEventStmt.run(
+        eventId,
+        input.projectId,
+        'match_rejected',
+        'activity_matches',
+        input.id,
+        `Activity match rejected by reviewer '${input.reviewer}' for activity '${existing.activity_id}'`,
+        payload,
+        input.nowIso
+      );
+    });
+
+    try {
+      runTx();
+    } catch (err: unknown) {
+      if (err instanceof NotFoundError || err instanceof ValidationError) {
+        throw err;
+      }
+      throw new DatabaseError(
+        `Failed to reject activity match atomically: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    const updated = this.getByIdAndProjectId(input.id, input.projectId);
+    if (!updated) {
+      throw new DatabaseError(`Failed to retrieve rejected activity match '${input.id}'`);
+    }
+    return updated;
+  }
+
+  /**
+   * Atomically resolves an unresolved or candidate match to a chosen activity and records match_resolved.
+   * Rollback occurs immediately if either the match update or event insertion fails.
+   */
+  resolveMatchAtomically(input: ResolveMatchAtomicInput): ActivityMatch {
+    const db = this.getDb();
+    const eventId = crypto.randomUUID();
+
+    const getMatchStmt = db.prepare(`
+      SELECT * FROM activity_matches WHERE id = ? AND project_id = ?
+    `);
+
+    const updateMatchStmt = db.prepare(`
+      UPDATE activity_matches
+      SET
+        activity_id = ?,
+        status = 'confirmed',
+        review_state = 'resolved',
+        match_method = 'manual',
+        reviewed_by = ?,
+        reviewed_at = ?,
+        rationale = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND project_id = ? AND status = 'suggested'
+    `);
+
+    const insertEventStmt = db.prepare(`
+      INSERT INTO project_events (
+        id, project_id, event_type, entity_type, entity_id, summary, payload_json, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const runTx = db.transaction(() => {
+      const existing = getMatchStmt.get(input.id, input.projectId) as ActivityMatchDbRow | undefined;
+      if (!existing) {
+        throw new NotFoundError(
+          `Activity match with ID '${input.id}' not found for project '${input.projectId}'`
+        );
+      }
+
+      if (existing.status === 'confirmed') {
+        throw new ValidationError(
+          `Cannot resolve or retarget match '${input.id}'. Confirmed match history is immutable.`
+        );
+      }
+      if (existing.status === 'rejected') {
+        throw new ValidationError(
+          `Cannot resolve match '${input.id}'. Rejected match history is immutable.`
+        );
+      }
+
+      const updateResult = updateMatchStmt.run(
+        input.targetActivityId,
+        input.reviewer,
+        input.nowIso,
+        input.rationale,
+        input.id,
+        input.projectId
+      );
+
+      if (updateResult.changes === 0) {
+        throw new ValidationError(
+          `Failed to resolve match '${input.id}': State may have changed concurrently.`
+        );
+      }
+
+      const payload = JSON.stringify({
+        matchId: input.id,
+        progressUpdateId: existing.progress_update_id,
+        activityId: input.targetActivityId,
+        originalActivityId: input.originalActivityId,
+        confidenceScore: existing.confidence_score,
+        confidenceTier: existing.confidence_tier,
+        matchMethod: 'manual',
+        reviewSource: 'human',
+        reviewer: input.reviewer,
+        reason: input.reason ?? null
+      });
+
+      insertEventStmt.run(
+        eventId,
+        input.projectId,
+        'match_resolved',
+        'activity_matches',
+        input.id,
+        `Activity match manually resolved to '${input.targetActivityName}' (${input.targetActivityExternalId}) by reviewer '${input.reviewer}'`,
+        payload,
+        input.nowIso
+      );
+    });
+
+    try {
+      runTx();
+    } catch (err: unknown) {
+      if (err instanceof NotFoundError || err instanceof ValidationError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 'SQLITE_CONSTRAINT_TRIGGER') {
+          throw new DatabaseError(
+            `Failed to resolve activity match due to foreign key or cross-project constraint: ${err.message}`
+          );
+        }
+      }
+      throw new DatabaseError(
+        `Failed to resolve activity match atomically: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    const updated = this.getByIdAndProjectId(input.id, input.projectId);
+    if (!updated) {
+      throw new DatabaseError(`Failed to retrieve resolved activity match '${input.id}'`);
+    }
+    return updated;
+  }
+
+  /**
+   * Atomically cleans up old suggested matches, persists new candidate matches (with auto-confirm if applicable),
+   * and creates all corresponding project audit events in a single transaction.
+   */
+  persistMatchesAndEventsAtomically(input: PersistMatchesAndEventsAtomicInput): ActivityMatch[] {
+    const db = this.getDb();
+
+    const deleteStmt = db.prepare(`
+      DELETE FROM activity_matches
+      WHERE progress_update_id = ? AND project_id = ? AND status = 'suggested'
+    `);
+
+    const insertMatchStmt = db.prepare(`
+      INSERT INTO activity_matches (
+        id, project_id, progress_update_id, evidence_id, activity_id,
+        confidence_score, match_method, matched_text, rationale, status,
+        confidence_tier, review_state, reviewed_by, reviewed_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const insertEventStmt = db.prepare(`
+      INSERT INTO project_events (
+        id, project_id, event_type, entity_type, entity_id, summary, payload_json, created_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?
+      )
+    `);
+
+    const insertedIds: string[] = [];
+
+    const runTx = db.transaction(() => {
+      // 1. Clean up only suggested matches for this update
+      deleteStmt.run(input.progressUpdateId, input.projectId);
+
+      // 2. Insert new candidate matches
+      for (const m of input.matches) {
+        const id = m.id || crypto.randomUUID();
+        insertMatchStmt.run(
+          id,
+          m.projectId,
+          m.progressUpdateId,
+          m.evidenceId ?? null,
+          m.activityId,
+          m.confidenceScore,
+          m.matchMethod,
+          m.matchedText ?? null,
+          m.rationale ?? null,
+          m.status || 'suggested',
+          m.confidenceTier ?? null,
+          m.reviewState ?? null,
+          m.reviewedBy ?? null,
+          m.reviewedAt ?? null
+        );
+        insertedIds.push(id);
+      }
+
+      // 3. Insert audit events
+      for (const evt of input.events) {
+        const eventId = evt.id || crypto.randomUUID();
+        insertEventStmt.run(
+          eventId,
+          evt.projectId,
+          evt.eventType,
+          evt.entityType ?? null,
+          evt.entityId ?? null,
+          evt.summary,
+          evt.payloadJson ?? null,
+          new Date().toISOString()
+        );
+      }
+    });
+
+    try {
+      runTx();
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 'SQLITE_CONSTRAINT_TRIGGER') {
+          throw new DatabaseError(
+            `Failed to persist matches and events atomically due to constraint violation: ${err.message}`
+          );
+        }
+      }
+      throw new DatabaseError(
+        `Failed to persist matches and events atomically: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    if (insertedIds.length === 0) {
+      return [];
+    }
+
+    const placeholders = insertedIds.map(() => '?').join(',');
+    const selectStmt = db.prepare(`
+      SELECT * FROM activity_matches
+      WHERE id IN (${placeholders})
+      ORDER BY confidence_score DESC, created_at ASC
+    `);
+    const rows = selectStmt.all(...insertedIds) as ActivityMatchDbRow[];
+    return rows.map(mapRowToActivityMatch);
+  }
+
   updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null {
     const db = this.getDb();
     const existing = this.getByIdAndProjectId(input.id, input.projectId);
     if (!existing) {
       return null;
+    }
+
+    if (existing.status === 'confirmed') {
+      throw new ValidationError(
+        `Cannot update match '${input.id}'. Confirmed match history is immutable.`
+      );
+    }
+    if (existing.status === 'rejected') {
+      throw new ValidationError(
+        `Cannot update match '${input.id}'. Rejected match history is immutable.`
+      );
     }
 
     const updatedActivityId = input.activityId ?? existing.activityId;
@@ -226,11 +725,11 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         reviewed_by = ?,
         reviewed_at = ?,
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND project_id = ?
+      WHERE id = ? AND project_id = ? AND status = 'suggested'
     `);
 
     try {
-      stmt.run(
+      const result = stmt.run(
         updatedActivityId,
         input.status,
         updatedMatchMethod,
@@ -241,7 +740,15 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         input.id,
         input.projectId
       );
+      if (result.changes === 0) {
+        throw new ValidationError(
+          `Failed to update match '${input.id}': State may have changed concurrently.`
+        );
+      }
     } catch (err: unknown) {
+      if (err instanceof ValidationError) {
+        throw err;
+      }
       if (err instanceof Error && 'code' in err) {
         const code = (err as { code: string }).code;
         if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 'SQLITE_CONSTRAINT_TRIGGER') {

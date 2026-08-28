@@ -1,1140 +1,1037 @@
-# FieldLine — PASS 19: HUMAN REVIEW WORKFLOW
+# FieldLine — PASS 19 CORRECTIVE FIX
 
-Implement **Pass 19 — Human Review Workflow** in the existing FieldLine repository.
+Pass 19 is close, but it is **NOT APPROVED yet**.
 
-Approved base:
+The current implementation successfully introduces:
 
-```text id="base19"
-c4011ecdb2671a2c9f234168a6c5fc189dfc3185
-```
+* deterministic confidence tiers
+* high/medium/low review policy
+* automatic high-confidence confirmation
+* human confirm/reject/resolve endpoints
+* project isolation
+* canonical truth protection
+* frontend uncertainty indicators
 
-Do NOT implement Pass 20+.
+However, two integrity problems remain and must be corrected before Pass 19 can be closed.
 
----
+Do **not** start Pass 20.
 
-# 1. Objective
-
-Handle uncertain AI/activity matches safely.
-
-Required policy:
-
-```text
-HIGH confidence
-    ↓
-automatic confirmation
-
-MEDIUM confidence
-    ↓
-suggested match
-    ↓
-human confirms/rejects
-
-LOW confidence
-    ↓
-unresolved
-    ↓
-human chooses activity
-```
-
-Core invariant:
+Current Pass 19 commits include:
 
 ```text
-No ambiguous AI match silently becomes canonical project truth.
+b0b675604eecfcab9c089b4583dcd2296d24f438
+feat: implement FieldLine human review workflow
+
+3b2bd53a700c15accdd8e9403ce9c65dc9c0c34e
+test: expand canonical truth protection test suite
 ```
 
-The human review workflow must be project-scoped, auditable, deterministic, and compatible with the existing ActivityMatchingService and ProgressService.
+Work from the actual current `main`, not from an older local state.
 
 ---
 
-# 2. Current matching architecture
+# 1. BLOCKER — CONFIRMED MATCH HISTORY MUST NOT BE MUTATED
 
-The existing:
+The current repository method:
 
-```text id="match19"
-ActivityMatchingService
+```text
+ActivityMatchRepository.updateMatchReview(...)
 ```
 
-already:
+can modify:
 
-* verifies the project
-* loads project activities
-* scores candidates
-* produces a `bestMatch`
-* produces alternatives
-* optionally uses LLM disambiguation
-* persists matches
-
-Current `CandidateMatch` contains:
-
-```text id="candidate19"
-activityId
-activityExternalId
-activityName
-confidenceScore
-matchMethod
-matchedText
-rationale
-```
-
-Current `FieldFactMatchResult` contains:
-
-```text id="result19"
-fact
-bestMatch
-alternatives
-```
-
-Current `MatchingOptions` contains:
-
-```text id="options19"
-persist
-minConfidenceThreshold
-alternativeScoreMargin
-maxAlternatives
-enableLlmDisambiguation
-```
-
-Reuse this architecture.
-
-Do NOT create another matching engine.
-
----
-
-# 3. Current match persistence semantics
-
-Current domain:
-
-```ts
-type MatchMethod =
-  | 'exact_id'
-  | 'text_similarity'
-  | 'wbs_location'
-  | 'llm_assisted'
-  | 'manual';
-
-type MatchStatus =
-  | 'suggested'
-  | 'confirmed'
-  | 'rejected';
-```
-
-Preserve these human review semantics.
-
-Current `ActivityMatch` stores:
-
-```text id="matchfields19"
-confidenceScore
-matchMethod
-matchedText
-rationale
+```text
+activity_id
 status
-reviewedBy
-reviewedAt
-createdAt
-updatedAt
-```
-
-Do NOT reinterpret `status` as a confidence tier.
-
----
-
-# 4. Introduce a separate confidence/review tier
-
-Pass 19 must distinguish:
-
-```text id="tier19"
-confidence
-```
-
-from:
-
-```text id="status19"
-review state
-```
-
-Introduce a deterministic:
-
-```ts
-type MatchConfidenceTier =
-  | 'high'
-  | 'medium'
-  | 'low';
-```
-
-Do NOT allow an LLM to choose this tier.
-
-It must be derived in deterministic application code from:
-
-```text
-confidenceScore
-runner-up score
-ambiguity margin
-match method
-```
-
-where applicable.
-
----
-
-# 5. Threshold design
-
-Inspect the existing `scoreActivityCandidate()` distribution and current matching tests before selecting thresholds.
-
-Define centralized constants such as:
-
-```text id="threshold19"
-DEFAULT_HIGH_CONFIDENCE_THRESHOLD
-DEFAULT_MEDIUM_CONFIDENCE_THRESHOLD
-DEFAULT_AUTO_CONFIRM_MARGIN
-```
-
-The exact numerical values must be chosen based on the current scoring behavior, not guessed in multiple places.
-
-The final implementation must have one authoritative policy function:
-
-```text id="e4t2j8"
-classifyMatchConfidence(...)
-```
-
-or equivalent.
-
-It must be deterministic and directly unit-testable.
-
----
-
-# 6. Required confidence policy
-
-Conceptually:
-
-```text id="policy19"
-HIGH:
-  score >= HIGH_THRESHOLD
-  AND top candidate is sufficiently separated from runner-up
-
-MEDIUM:
-  score >= MEDIUM_THRESHOLD
-  BUT does not satisfy HIGH/auto-confirm conditions
-
-LOW:
-  score < MEDIUM_THRESHOLD
-```
-
-The exact thresholds should be centralized constants.
-
-Additional hard rules:
-
-### Exact-ID matches
-
-An exact activity ID is the strongest existing match method.
-
-It may qualify for auto-confirmation when it uniquely identifies one project activity.
-
-Still preserve project isolation.
-
-### Ambiguous high scores
-
-Example:
-
-```text
-A = 0.91
-B = 0.90
-```
-
-must NOT automatically confirm A.
-
-Treat it as ambiguous and route it to human review.
-
-### Single strong candidate
-
-Example:
-
-```text
-A = 0.91
-next = none
-```
-
-may auto-confirm if the configured high-confidence policy permits it.
-
----
-
-# 7. Create a central review-policy service
-
-Create a small module, for example:
-
-```text id="policyfile19"
-backend/src/services/matching/match-review-policy.ts
-```
-
-It should expose something like:
-
-```ts
-interface MatchReviewDecision {
-  tier: 'high' | 'medium' | 'low';
-  autoConfirm: boolean;
-  reason: string;
-}
-```
-
-or equivalent.
-
-Inputs should include:
-
-```text
-best candidate
-alternatives
-confidence score
-match method
-```
-
-Outputs should be deterministic.
-
-Do not put this policy inside the router.
-
-Do not put it inside the database repository.
-
----
-
-# 8. High-confidence automatic confirmation
-
-When the review policy determines:
-
-```text id="high19"
-tier = high
-AND
-autoConfirm = true
-```
-
-the match must be persisted as:
-
-```text
-status = confirmed
-reviewedBy = 'system'
-reviewedAt = current timestamp
-```
-
-or an equivalent explicit system-review representation.
-
-Do NOT pretend this was a human review.
-
-Clearly distinguish:
-
-```text
-system confirmed
-```
-
-from:
-
-```text
-human confirmed
-```
-
-If the current domain model needs a deterministic representation, inspect existing audit/review conventions and choose the smallest compatible change.
-
-The project event should make the source explicit.
-
----
-
-# 9. Medium-confidence behavior
-
-For:
-
-```text id="medium19"
-tier = medium
-```
-
-persist:
-
-```text
-status = suggested
-```
-
-with:
-
-```text
-confidenceTier = medium
-```
-
-or equivalent persisted/derivable information.
-
-The user must see:
-
-```text id="displaymedium19"
-Suggested match
-Medium confidence
-```
-
-and the candidate alternatives.
-
-Do NOT auto-confirm.
-
----
-
-# 10. Low-confidence behavior
-
-For:
-
-```text id="low19"
-tier = low
-```
-
-do NOT silently convert the best candidate into project truth.
-
-A low-confidence candidate must be treated as unresolved.
-
-Choose the minimal compatible architecture.
-
-Preferred approach:
-
-```text id="lowmodel19"
-persist candidate match as suggested
-+
-persist confidenceTier = low
-+
-mark reviewState = unresolved
-```
-
-Do not add a destructive or ambiguous interpretation of `suggested`.
-
-The UI must clearly indicate:
-
-```text id="lowdisplay19"
-Unresolved
-Low confidence
-Select activity
-```
-
-The user must be able to choose the correct activity from the project activities.
-
----
-
-# 11. Schema evolution
-
-Inspect the existing database schema before modifying it.
-
-Add the minimum columns required to persist:
-
-```text id="schema19"
-confidence tier
-review resolution state
-```
-
-if those values cannot be deterministically reconstructed.
-
-Do NOT create a separate human-review table unless genuinely necessary.
-
-Prefer extending `activity_matches` because it is already the canonical match-review entity.
-
-Add a new sequential migration.
-
-Do NOT modify previous migration files.
-
-Preserve all existing foreign keys and cross-project triggers.
-
----
-
-# 12. Review states
-
-Preserve the existing status values:
-
-```text id="status19b"
-suggested
-confirmed
-rejected
-```
-
-If an additional `review_state` is needed, define it explicitly and keep it orthogonal.
-
-For example:
-
-```text id="reviewstate19"
-unresolved
-awaiting_review
-resolved
-```
-
-Do not create unnecessary overlapping states.
-
-The final design must make these cases unambiguous:
-
-```text
-high confidence
-→ confirmed
-
-medium confidence
-→ suggested + awaiting human review
-
-low confidence
-→ suggested + unresolved
-```
-
-A rejected match remains rejected.
-
----
-
-# 13. Human review API
-
-Add project-scoped review endpoints.
-
-Recommended:
-
-```text id="api19"
-POST /api/projects/:projectId/activity-matches/:matchId/confirm
-
-POST /api/projects/:projectId/activity-matches/:matchId/reject
-
-POST /api/projects/:projectId/activity-matches/:matchId/resolve
-```
-
-Resolve request:
-
-```json id="resolvebody19"
-{
-  "activityId": "..."
-}
-```
-
-All APIs must verify:
-
-```text id="verify19"
-match belongs to project
-target activity belongs to project
-progress update belongs to project
-```
-
-Cross-project operations must return 404/not-found semantics consistent with the existing application.
-
----
-
-# 14. Confirm semantics
-
-Confirm should:
-
-```text id="confirm19"
-verify match
-verify project
-verify status permits confirmation
-update:
-  status = confirmed
-  reviewedBy = supplied reviewer identity
-  reviewedAt = now
-emit match_confirmed event
-```
-
-Do not let a rejected match be silently resurrected without an explicit rule.
-
-If the current application does not have authenticated user identity, use the existing reviewer field convention and document the limitation.
-
-Do not invent a full authentication system in Pass 19.
-
----
-
-# 15. Reject semantics
-
-Reject should:
-
-```text id="reject19"
-verify match
-verify project
-update:
-  status = rejected
-  reviewedBy
-  reviewedAt
-emit match_rejected event if the event model is extended
-```
-
-Do not delete the match record.
-
-Historical review decisions must remain auditable.
-
-Do not automatically replace it with another candidate.
-
----
-
-# 16. Resolve low-confidence match
-
-For unresolved low-confidence cases:
-
-```text id="resolve19"
-human selects Activity B
-```
-
-The application must:
-
-1. verify Activity B belongs to the same project
-2. verify the match belongs to the same project
-3. update the existing match to the appropriate resolved state
-4. set:
-
-```text
-reviewedBy
-reviewedAt
-matchMethod = 'manual'
-```
-
-5. preserve the original AI confidence/rationale
-6. emit a review event
-
-Do not overwrite the historical confidence score.
-
-The fact that a human resolved it must remain distinguishable from the original AI score.
-
----
-
-# 17. Preserve alternatives
-
-The current matching engine already calculates:
-
-```text id="alts19"
-alternatives: CandidateMatch[]
-```
-
-Use these in the review experience.
-
-For medium/low confidence matches, expose:
-
-```text id="reviewdisplay19"
-best candidate
-confidence score
-confidence tier
-match method
+match_method
 rationale
-alternative candidates
+review_state
+reviewed_by
+reviewed_at
 ```
 
-The user should be able to choose an alternative directly.
+in place.
 
-Do not make the user manually type an activity ID when an existing candidate list is available.
-
-Manual activity selection must still be supported as a safe fallback.
-
----
-
-# 18. No silent project truth
-
-The most important rule:
-
-```text id="truth19"
-suggested ≠ canonical truth
-
-low-confidence ≠ canonical truth
-
-unreviewed ≠ canonical truth
-```
-
-Only:
-
-```text id="confirmed19"
-confirmed match
-```
-
-is eligible for the existing ProgressService.
-
-Do NOT modify ProgressService's existing semantics to treat suggested or low-confidence matches as confirmed.
-
----
-
-# 19. Progress integration
-
-The existing ProgressService remains the canonical mechanism for creating ActivityProgress.
-
-Pass 19 should only make review actions available.
-
-Do not create ActivityProgress in the review router/service.
-
-The safe flow is:
-
-```text id="progress19"
-AI extraction
-↓
-candidate matching
-↓
-confidence policy
-↓
-review
-↓
-confirmed match
-↓
-existing ProgressService
-↓
-ActivityProgress
-```
-
-Do not bypass the existing review/status rules.
-
----
-
-# 20. Project events
-
-Extend the existing project event vocabulary only as necessary.
-
-At minimum, review actions should be auditable.
-
-Useful events:
-
-```text id="events19"
-match_auto_confirmed
-match_confirmed
-match_rejected
-match_resolved
-```
-
-The exact event names should follow the existing event naming convention.
-
-Payload should include bounded metadata:
-
-```text activityId
-matchId
-progressUpdateId
-confidenceScore
-confidenceTier
-review source
-```
-
-Do not store sensitive information.
-
-Do not store raw filesystem paths.
-
----
-
-# 21. Matching output contract
-
-Update `FieldFactMatchResult` / `MatchReportResult` as necessary so the caller can see:
-
-```text id="output19"
-bestMatch
-alternatives
-confidenceTier
-reviewDecision
-```
-
-The API response should make uncertainty explicit.
-
-For example:
-
-```json id="outputexample19"
-{
-  "fact": {...},
-  "bestMatch": {
-    "activityId": "...",
-    "confidenceScore": 0.67,
-    "confidenceTier": "medium",
-    "status": "suggested"
-  },
-  "alternatives": [...]
-}
-```
-
-For a high-confidence exact match:
-
-```json id="highoutput19"
-{
-  "bestMatch": {
-    "confidenceScore": 0.96,
-    "confidenceTier": "high",
-    "status": "confirmed"
-  }
-}
-```
-
-For low confidence:
-
-```json id="lowoutput19"
-{
-  "bestMatch": {
-    "confidenceScore": 0.42,
-    "confidenceTier": "low",
-    "status": "suggested",
-    "reviewState": "unresolved"
-  }
-}
-```
-
-Exact response shape can follow current API conventions.
-
----
-
-# 22. Existing LLM disambiguation
-
-The matching engine already supports:
-
-```text id="llm19"
-enableLlmDisambiguation
-```
-
-and uses `LLMActivityDisambiguator`.
-
-Do NOT allow this model to directly confirm project truth.
-
-LLM disambiguation can reorder/rank candidates only.
-
-The final confidence/review decision remains deterministic application logic.
-
----
-
-# 23. Determinism
-
-Given:
-
-```text id="detinput19"
-same activities
-same extracted fact
-same scoring
-same options
-```
-
-the confidence tier and auto-confirm decision must be deterministic.
-
-Do not let model temperature/randomness determine whether a match becomes confirmed.
-
-If LLM disambiguation is enabled, the final review policy still decides status.
-
----
-
-# 24. Frontend review workflow
-
-Extend the existing progress/matching UI.
-
-Do NOT build a new application shell.
-
-The UI must visually distinguish:
-
-```text id="uistates19"
-✓ Confirmed / Auto-confirmed
-⚠ Suggested / Medium confidence
-? Unresolved / Low confidence
-✕ Rejected
-```
-
-For suggested matches show:
-
-```text
-Confidence
-Candidate
-Rationale
-Alternatives
-Confirm
-Reject
-```
-
-For unresolved matches show:
-
-```text
-Low confidence
-Candidate suggestion
-Alternatives
-Choose activity
-```
-
-The UI must make it difficult to mistake a suggestion for canonical truth.
-
----
-
-# 25. Activity review panel
-
-When a user opens a progress report, show its matches grouped by review state/tier.
+This creates a serious provenance problem.
 
 Example:
 
-```text id="group19"
-Confirmed
-  Foundation B
-
-Needs Review
-  Pier 4 — 72% confidence
-  Alternatives: Pier 3, Pier 5
-
-Unresolved
-  "North foundation wall" — 41% confidence
-  [Choose activity]
+```text
+Match M1
+activityId = Foundation B
+status = confirmed
+        ↓
+ProgressService
+        ↓
+ActivityProgress references M1 / Foundation B
+        ↓
+later /resolve M1
+        ↓
+activityId = Foundation C
 ```
 
-Do not hide low-confidence matches.
+Now the historical match says Foundation C while the canonical progress was created for Foundation B.
 
-Uncertainty is part of the product.
+That must never happen.
+
+The same problem exists if an already-confirmed match can later be rejected.
+
+## Required invariant
+
+Once a match is confirmed or rejected, its historical decision must not be silently rewritten.
+
+Required state rules:
+
+```text
+suggested + awaiting_review
+    → confirm
+    → reject
+
+suggested + unresolved
+    → resolve
+    → reject
+
+confirmed
+    → immutable historical decision
+
+rejected
+    → immutable historical decision
+```
+
+A confirmed match MUST NOT be retargeted with `/resolve`.
+
+A confirmed match MUST NOT be retroactively rejected.
+
+A rejected match MUST NOT be silently confirmed.
 
 ---
 
-# 26. Activity-level indication
+# 2. Review operations must enforce legal state transitions
 
-When a confirmed match results in canonical ActivityProgress through the existing ProgressService, the activity can show its normal progress state.
+Do not rely only on frontend behavior.
 
-But:
+The backend service must enforce the transition matrix.
 
-```text id="do-not19"
-suggested
-low-confidence
-unresolved
+Define a central transition policy, for example:
+
+```text
+suggested + awaiting_review
+    → confirmed
+    → rejected
+
+suggested + unresolved
+    → confirmed via explicit resolve only
+    → rejected
+
+confirmed
+    → no further mutation
+
+rejected
+    → no further mutation
 ```
 
-must not be shown as if it were confirmed project progress.
+The exact names may differ based on the current model, but the semantics must be equivalent.
 
-This distinction must remain visible in the UI.
+Invalid transitions must raise a deterministic `ValidationError`.
+
+Examples:
+
+```text
+confirm(confirmed)
+→ reject
+
+reject(confirmed)
+→ reject
+
+resolve(confirmed, differentActivity)
+→ reject
+
+confirm(rejected)
+→ reject
+
+resolve(rejected)
+→ reject
+```
+
+Do not create silent no-ops.
 
 ---
 
-# 27. Tests — confidence policy
+# 3. Do NOT rewrite historical ActivityMatch records
 
-Add unit tests for:
+When a low-confidence match is manually resolved:
 
-```text id="policytests19"
-[ ] high isolated score → auto-confirm
-[ ] high score but close runner-up → NOT auto-confirm
-[ ] medium score → suggested
-[ ] low score → unresolved
-[ ] exact ID behavior
-[ ] boundary threshold values
-[ ] deterministic output
+Current candidate:
+
+```text
+activityId = weak/initial candidate
+confidenceScore = 0.41
+matchMethod = text_similarity
 ```
 
-Use explicit numeric fixtures.
+Human chooses:
 
-Do not test only happy paths.
+```text
+activityId = ACT-203
+```
+
+It is acceptable to transition that unresolved record to a human-resolved confirmed state **only if it has not yet become canonical progress and the record is clearly still a review candidate**.
+
+But once a match has become a confirmed historical decision that may already be referenced by ActivityProgress, it must not be retargeted.
+
+Before implementing this, inspect how `ActivityProgress` references matches in the current schema and repository.
+
+Prefer the smallest change that guarantees historical consistency.
+
+If the current model cannot guarantee this cleanly, introduce an immutable review-resolution record or create a new manual match record rather than rewriting an existing confirmed record.
+
+Do not introduce unnecessary architectural complexity.
 
 ---
 
-# 28. Tests — review actions
+# 4. Review actions and audit events MUST be atomic
 
-Add:
+Current review operations do this conceptually:
 
-```text id="reviewtests19"
-[ ] confirm suggested match
-[ ] reject suggested match
-[ ] resolve low-confidence match
-[ ] choose alternative candidate
-[ ] reviewedBy persisted
-[ ] reviewedAt persisted
-[ ] review event recorded
-[ ] rejected match remains auditable
-[ ] cross-project match confirmation rejected
-[ ] cross-project activity resolution rejected
+```text
+UPDATE activity_matches
+        ↓
+try create project event
+        ↓
+catch error
+        ↓
+log and continue
+```
+
+This is unacceptable for an auditable review system.
+
+A successful review action must never exist without its corresponding audit event.
+
+The same applies to automatic confirmation and match suggestion events where those events represent the state transition being recorded.
+
+---
+
+# 5. Required transaction boundary
+
+For each state-changing review operation:
+
+```text
+BEGIN TRANSACTION
+
+1. verify target row/project/state
+2. update activity_matches
+3. insert corresponding project_event
+
+COMMIT
+```
+
+If step 2 or step 3 fails:
+
+```text
+ROLLBACK
+```
+
+The API must return an error and the match must remain in its previous state.
+
+Do NOT swallow project-event persistence errors.
+
+Do NOT merely log them.
+
+Do NOT return success after an audit write failure.
+
+---
+
+# 6. Atomic operations required
+
+At minimum:
+
+```text
+auto-confirm
+human confirm
+human reject
+human resolve
+```
+
+must have atomic state + audit persistence.
+
+For example:
+
+```text
+auto-confirm:
+  match.status → confirmed
+  match.reviewState → resolved
+  match.reviewedBy → system
+  match.reviewedAt → timestamp
+  projectEvent → match_auto_confirmed
+
+ALL IN ONE TRANSACTION
+```
+
+Human confirmation:
+
+```text
+match.status → confirmed
+match.reviewState → resolved
+reviewer metadata
+projectEvent → match_confirmed
+
+ALL IN ONE TRANSACTION
+```
+
+Rejection:
+
+```text
+match.status → rejected
+match.reviewState → resolved
+reviewer metadata
+reason
+projectEvent → match_rejected
+
+ALL IN ONE TRANSACTION
+```
+
+Manual resolution:
+
+```text
+target activity
+matchMethod → manual
+status → confirmed
+reviewState → resolved
+reviewer metadata
+projectEvent → match_resolved
+
+ALL IN ONE TRANSACTION
 ```
 
 ---
 
-# 29. Tests — canonical truth protection
+# 7. Do not use best-effort audit logging
 
-Mandatory test:
+Remove patterns equivalent to:
 
-```text id="truthprotect19"
-low-confidence match
-↓
-no ActivityProgress
+```ts
+try {
+  projectEventRepo.create(...)
+} catch {
+  logger.debug(...)
+}
+```
+
+for mandatory review/audit events.
+
+Audit persistence is part of the state change.
+
+An audit failure is a state-change failure.
+
+---
+
+# 8. Repository/service design
+
+Prefer a repository method that performs the state transition and audit insertion in the same SQLite transaction rather than making the service perform two independent writes.
+
+For example:
+
+```ts
+updateMatchReviewWithEvent(...)
+```
+
+or:
+
+```ts
+confirmMatchAtomically(...)
+rejectMatchAtomically(...)
+resolveMatchAtomically(...)
+```
+
+Choose the smallest clean abstraction consistent with the existing repository architecture.
+
+Do not introduce a generic transaction framework.
+
+Reuse the existing SQLite transaction utilities if the repository already has them.
+
+---
+
+# 9. Automatic confirmation must also be protected
+
+Current `matchProgressUpdate()` creates confirmed records for high-confidence matches.
+
+The transition:
+
+```text
+candidate
+→ confirmed
 ```
 
 and:
 
-```text id="truthprotect19b"
-medium suggested match
-↓
-no ActivityProgress until confirmation
+```text
+match_auto_confirmed event
 ```
 
-Then:
+must be transactionally consistent.
 
-```text id="truthprotect19c"
-human confirms
-↓
-existing ProgressService
-↓
-ActivityProgress created
+If the event insertion fails:
+
+```text
+NO confirmed match should remain persisted.
 ```
 
-Do not implement a second progress path for this test.
+Likewise, if the match insertion itself fails:
+
+```text
+NO audit event should remain.
+```
+
+The two writes must commit or rollback together.
 
 ---
 
-# 30. Tests — automatic confirmation
+# 10. Suggested-event persistence
 
-Create realistic examples:
-
-### Safe
+For medium/low candidates, the repository currently emits:
 
 ```text
-top = 0.95
-second = 0.41
-method = exact_id
+match_suggested
 ```
 
-→ automatically confirmed.
+as a separate operation.
 
-### Ambiguous
+Ensure the persisted review candidate and its required audit event cannot become inconsistent.
+
+At minimum:
 
 ```text
-top = 0.91
-second = 0.90
+suggested match persisted
++
+match_suggested event persisted
 ```
 
-→ NOT automatically confirmed.
-
-### Medium
-
-```text
-top = 0.72
-second = 0.50
-```
-
-→ suggested.
-
-### Low
-
-```text
-top = 0.44
-second = 0.41
-```
-
-→ unresolved.
-
-Use the actual configured thresholds.
+must be atomic when the event is considered part of the required audit trail.
 
 ---
 
-# 31. Tests — project isolation
+# 11. Preserve project isolation
 
-Verify:
+Every atomic review operation must continue enforcing:
 
-```text id="isol19"
-Project A match cannot be confirmed through Project B.
+```text
+match.project_id === requested projectId
+```
 
-Project A match cannot resolve to Project B activity.
+and when resolving:
 
-Project A match cannot expose Project B alternatives.
+```text
+targetActivity.project_id === requested projectId
+```
 
-Project A review events cannot appear in Project B.
+Also ensure:
+
+```text
+progressUpdate.project_id === requested projectId
+```
+
+where relevant.
+
+Cross-project attempts must behave exactly like existing project-scoped APIs.
+
+Do not leak whether another project's match/activity exists.
+
+---
+
+# 12. Reviewer metadata
+
+Preserve the distinction:
+
+```text
+system
+```
+
+versus:
+
+```text
+human reviewer
+```
+
+Automatic confirmation must remain identifiable as system-driven.
+
+Human confirmation must record the reviewer.
+
+Manual resolution must record:
+
+```text
+reviewedBy
+reviewedAt
+matchMethod = manual
+```
+
+Do not replace the original AI confidence score.
+
+The original AI score/rationale remains historical evidence for why the match originally reached review.
+
+---
+
+# 13. Preserve original confidence information
+
+When a human resolves:
+
+```text
+score = 0.42
+```
+
+do NOT rewrite it to:
+
+```text
+score = 1.0
+```
+
+The correct semantic model is:
+
+```text
+AI confidence = 0.42
+human decision = confirmed
+review method = manual
+```
+
+This distinction must remain visible.
+
+---
+
+# 14. Required state-transition tests
+
+Add explicit unit/service tests for every invalid transition:
+
+```text
+[ ] confirmed → confirm rejected
+[ ] confirmed → reject rejected
+[ ] confirmed → resolve rejected
+
+[ ] rejected → confirm rejected
+[ ] rejected → resolve rejected
+[ ] rejected → reject rejected or deterministic idempotent behavior if explicitly designed
+
+[ ] awaiting_review → confirm accepted
+[ ] awaiting_review → reject accepted
+
+[ ] unresolved → resolve accepted
+[ ] unresolved → reject accepted
+```
+
+Choose one explicit behavior for repeated reject/confirm operations and test it.
+
+Do not leave the behavior implicit.
+
+---
+
+# 15. REQUIRED IMMUTABILITY TEST
+
+This is mandatory.
+
+Create:
+
+```text
+Match M1
+activity = Foundation B
+status = confirmed
+```
+
+Create canonical progress from M1.
+
+Then attempt:
+
+```text
+resolve M1 → Foundation C
+```
+
+The operation MUST fail.
+
+Then verify:
+
+```text
+M1.activityId === Foundation B
+```
+
+and:
+
+```text
+ActivityProgress still points to Foundation B
+```
+
+No historical data may be changed.
+
+---
+
+# 16. REQUIRED AUDIT-FAILURE TEST
+
+Simulate:
+
+```text
+match state update succeeds
+project event insertion throws
+```
+
+The expected result:
+
+```text
+API fails
+match state rolls back
+reviewedBy remains unchanged
+reviewedAt remains unchanged
+project event does not exist
+```
+
+Repeat for:
+
+```text
+confirm
+reject
+resolve
+```
+
+and at least one automatic-confirmation path.
+
+This test is critical.
+
+Do not fake the test by simply mocking the whole service method.
+
+Force the actual repository transaction boundary to fail.
+
+---
+
+# 17. REQUIRED COMMIT-FAILURE TEST
+
+Verify the inverse:
+
+```text
+match insert/update fails
+```
+
+and confirm that:
+
+```text
+no audit event exists
+```
+
+This ensures the transaction is truly atomic in both directions.
+
+---
+
+# 18. Concurrency / duplicate review behavior
+
+Inspect the existing SQLite behavior and current test conventions.
+
+Prevent two simultaneous reviewers from producing invalid transitions.
+
+Example:
+
+```text
+Reviewer A:
+confirm M1
+
+Reviewer B:
+reject M1
+```
+
+Only one legal transition should win.
+
+The second operation must observe the new state and fail deterministically or behave according to the explicit transition policy.
+
+It must never result in:
+
+```text
+status = rejected
++
+status = confirmed
+```
+
+being inconsistently represented.
+
+Use SQLite transaction/conditional-update semantics where appropriate.
+
+---
+
+# 19. Do not create duplicate canonical truth
+
+After human confirmation:
+
+```text
+existing ActivityProgress
+```
+
+must not be duplicated simply because the review endpoint is called twice.
+
+Inspect current ProgressService idempotency semantics from Pass 16 and preserve them.
+
+The review endpoint should not directly implement a second progress-creation mechanism.
+
+---
+
+# 20. Preserve the existing frontend
+
+Do not redesign the UI.
+
+Keep the four states:
+
+```text
+Confirmed
+Needs Review
+Unresolved
+Rejected
+```
+
+But make sure UI actions are disabled/removed for states that are no longer legally mutable.
+
+For a confirmed match:
+
+```text
+no Resolve button
+no Reject button
+```
+
+For a rejected match:
+
+```text
+no Confirm button
+no Resolve button
+```
+
+For awaiting review:
+
+```text
+Confirm
+Reject
+Resolve/alternative choice where appropriate
+```
+
+For unresolved:
+
+```text
+Resolve
+Reject
+```
+
+The backend remains authoritative even if the frontend somehow sends an invalid request.
+
+---
+
+# 21. Existing rematching behavior
+
+There is already logic intended to preserve reviewed matches during rematching.
+
+Do NOT regress this.
+
+Inspect:
+
+```text
+deleteSuggestedByProgressUpdateId(...)
+```
+
+and all existing rematching tests.
+
+Ensure the new state model does not cause:
+
+```text
+human-reviewed confirmed match
+```
+
+to be deleted or rewritten during a later matching pass.
+
+Preserve the existing behavior where human-reviewed records survive rematching.
+
+---
+
+# 22. Migration safety
+
+Do not modify migration `0007` if the schema has already been released.
+
+If schema changes are required:
+
+```text
+create migration 0008
+```
+
+with proper forward migration behavior.
+
+Existing records must remain valid.
+
+Backfilled:
+
+```text
+confidenceTier
+reviewState
+```
+
+must remain consistent with their historical status.
+
+---
+
+# 23. Tests for project isolation
+
+Ensure:
+
+```text
+[ ] Project A cannot confirm Project B match
+[ ] Project A cannot reject Project B match
+[ ] Project A cannot resolve Project B match
+[ ] Project A cannot resolve to Project B activity
+[ ] Project B audit events do not appear in Project A queries
+```
+
+Use the same 404/not-found security semantics already established in FieldLine.
+
+---
+
+# 24. Tests for audit ordering / transactionality
+
+After every successful operation:
+
+```text
+database state
++
+audit event
+```
+
+must both exist.
+
+After every forced failure:
+
+```text
+database state unchanged
++
+no partial audit event
+```
+
+must hold.
+
+Use direct database assertions rather than only inspecting returned service objects.
+
+---
+
+# 25. Preserve canonical truth protection
+
+The existing invariant remains:
+
+```text
+suggested / awaiting_review
+    → NOT canonical
+
+suggested / unresolved
+    → NOT canonical
+
+rejected
+    → NOT canonical
+
+confirmed
+    → eligible for existing ProgressService
+```
+
+Do not weaken this.
+
+The only way uncertain AI output becomes canonical remains an explicit approved transition:
+
+```text
+high + unambiguous
+    → system confirmed
+
+medium/low
+    → human review
+    → confirmed
 ```
 
 ---
 
-# 32. Existing regression suite
+# 26. Required regression scenarios
+
+Build end-to-end tests for:
+
+### Scenario A — Medium-confidence confirmation
+
+```text
+AI
+→ medium
+→ suggested
+→ human confirm
+→ confirmed
+→ canonical ProgressService
+```
+
+### Scenario B — Low-confidence resolution
+
+```text
+AI
+→ low
+→ unresolved
+→ human selects alternative
+→ manual confirmed
+→ canonical ProgressService
+```
+
+### Scenario C — Rejection
+
+```text
+AI
+→ suggested
+→ human reject
+→ rejected
+→ no ActivityProgress
+```
+
+### Scenario D — Ambiguous high score
+
+```text
+0.91 vs 0.90
+→ NOT auto-confirmed
+→ awaiting review
+```
+
+### Scenario E — Isolated high confidence
+
+```text
+0.95
+with sufficient separation
+→ auto-confirmed
+```
+
+### Scenario F — Historical immutability
+
+```text
+confirmed
+→ used for ActivityProgress
+→ attempted retarget
+→ rejected
+→ all historical links unchanged
+```
+
+### Scenario G — Audit failure rollback
+
+```text
+review update
++
+forced audit failure
+→ everything rolled back
+```
+
+---
+
+# 27. No unnecessary redesign
+
+Do not introduce:
+
+```text
+authentication system
+RBAC
+notifications
+email
+multi-user accounts
+new matching algorithm
+new confidence model
+new ProgressService
+new dashboard
+Pass 20 job changes
+assistant changes
+```
+
+This is a **Pass 19 corrective fix only**.
+
+---
+
+# 28. Final verification
 
 Run:
 
-```text id="run19"
+```bash
 npm test
 npm run build
 ```
 
-Preserve all existing:
+The full existing suite must remain green.
 
-```text id="preserve19"
-Pass 13 evidence tests
-Pass 14 ingestion tests
-Pass 15 job tests
-Pass 16 idempotency tests
-Pass 17 intelligence tests
-Pass 18 assistant grounding tests
+Do not merely report the total test count.
+
+Show specifically that the new tests exercise:
+
+```text
+immutable confirmed matches
+illegal state transitions
+transaction rollback
+audit failure
+concurrency
+cross-project isolation
+canonical truth protection
 ```
 
-Do not weaken existing match/progress semantics.
+Inspect the diff for:
 
----
-
-# 33. Documentation
-
-Update:
-
-```text id="docs19"
-README.md
-docs/ARCHITECTURE.md
-```
-
-Document:
-
-```text id="docflow19"
-AI extraction
-↓
-candidate scoring
-↓
-confidence policy
-↓
-high → auto-confirmed
-medium → suggested
-low → unresolved
-↓
-human review
-↓
-confirmed
-↓
-canonical ProgressService
-```
-
-Explicitly state:
-
-```text id="truthdoc19"
-Only confirmed matches may become canonical progress.
-
-AI uncertainty is never silently promoted to project truth.
+```text
+in-place rewriting of confirmed activity IDs
+confirmed → rejected mutation
+rejected → confirmed mutation
+best-effort audit logging
+state update outside transaction
+audit event outside transaction
+duplicate progress creation
+rematching deleting reviewed matches
 ```
 
 ---
 
-# 34. Scope guard
+# 29. Definition of done
 
-DO NOT implement:
+Pass 19 is approved only when all of these are true:
 
-```text id="scope19"
-new authentication system
-multi-user permissions
-notifications
-email review requests
-chat assistant changes
-new LLM matching architecture
-automatic retries
-background job redesign
-new progress engine
-new risk engine
-dashboard redesign
-```
+```text
+[ ] Confidence tier remains deterministic.
 
-Pass 19 is the human review/control layer.
+[ ] High + unambiguous can auto-confirm.
 
----
+[ ] High + ambiguous cannot auto-confirm.
 
-# 35. Definition of done
+[ ] Medium becomes suggested / awaiting review.
 
-Pass 19 is complete only when:
+[ ] Low becomes unresolved.
 
-```text id="done19"
-[ ] Deterministic confidence tiers exist.
+[ ] Human confirm works only from legal review states.
 
-[ ] High-confidence unambiguous matches can auto-confirm.
+[ ] Human reject works only from legal review states.
 
-[ ] High-confidence ambiguous matches do not auto-confirm.
+[ ] Low-confidence resolve works only from legal review states.
 
-[ ] Medium-confidence matches become suggested.
+[ ] Confirmed historical matches cannot be retargeted.
 
-[ ] Low-confidence matches become explicitly unresolved.
+[ ] Confirmed historical matches cannot be retroactively rejected.
 
-[ ] Human users can confirm suggestions.
+[ ] Rejected matches cannot be silently confirmed.
 
-[ ] Human users can reject suggestions.
+[ ] Historical AI confidence remains preserved.
 
-[ ] Human users can resolve low-confidence matches.
+[ ] Human resolution records manual review provenance.
 
-[ ] Human users can choose an alternative candidate.
+[ ] Match mutation and required audit event are atomic.
 
-[ ] Reviewer identity/time is recorded.
+[ ] Auto-confirm and audit event are atomic.
 
-[ ] Review actions are auditable.
+[ ] Audit failures roll back the state transition.
 
-[ ] Only confirmed matches can enter canonical ProgressService.
+[ ] Invalid transitions are deterministic.
 
-[ ] Suggested matches cannot silently create ActivityProgress.
+[ ] Concurrent conflicting reviews cannot corrupt state.
 
-[ ] Low-confidence matches cannot silently create ActivityProgress.
+[ ] Existing ProgressService remains the only canonical progress path.
 
-[ ] LLM disambiguation cannot directly create canonical truth.
+[ ] Existing ActivityProgress remains historically consistent.
 
-[ ] Project isolation is preserved.
+[ ] Existing rematching preservation remains intact.
 
-[ ] Existing match confidence scores remain auditable.
-
-[ ] Existing Pass 13–18 behavior remains intact.
+[ ] Project isolation remains intact.
 
 [ ] Frontend clearly communicates uncertainty.
 
-[ ] Full regression suite passes.
+[ ] Frontend does not present illegal actions for terminal states.
 
-[ ] New review/confidence/security tests pass.
+[ ] All existing Pass 13–18 tests remain green.
+
+[ ] New Pass 19 corrective tests pass.
+
+[ ] npm test passes.
 
 [ ] npm run build passes.
 
@@ -1143,51 +1040,39 @@ Pass 19 is complete only when:
 
 ---
 
-# 36. Final verification
+# 30. Commit
 
-Inspect the final diff for:
+Commit:
 
-```text id="review19"
-confidence logic duplicated in multiple places
-LLM-controlled confirmation
-suggested matches becoming ActivityProgress
-low-confidence matches masquerading as confirmed
-ambiguous high-score auto-confirmation
-lost review history
-cross-project review leakage
-destructive mutation of historical matches
-Pass 20+ scope leakage
-```
-
-Run:
-
-```bash id="verify19"
-npm test
-npm run build
-```
-
-Commit exactly:
-
-```text id="commit19"
-feat: implement FieldLine human review workflow
+```text
+fix: harden FieldLine review state integrity
 ```
 
 Push to `main`.
 
 Report:
 
-```text id="report19"
+```text
 1. exact files changed
-2. confidence-tier policy
-3. auto-confirm policy
-4. medium-review behavior
-5. low-confidence resolution behavior
-6. review APIs
-7. frontend review experience
-8. project isolation behavior
-9. tests added
-10. npm test result
-11. npm run build result
-12. commit SHA
-13. known limitations
+2. state-transition model
+3. historical immutability mechanism
+4. transaction boundary
+5. audit-event atomicity
+6. concurrency handling
+7. project-isolation behavior
+8. tests added
+9. npm test result
+10. npm run build result
+11. commit SHA
+12. remaining limitations
+```
+
+Do not mark Pass 19 complete until the two core invariants are demonstrably true:
+
+```text
+CONFIRMED HISTORY CANNOT BE REWRITTEN
+
+and
+
+REVIEW STATE + AUDIT EVENT COMMIT OR ROLLBACK TOGETHER
 ```

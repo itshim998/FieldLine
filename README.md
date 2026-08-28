@@ -186,11 +186,11 @@ Example response:
 - [x] **PASS 12 — Delay and Risk Engine** *(Completed)*
 - [x] **PASS 13 — Evidence System** *(Completed)*
 - [x] **PASS 14 — Document Ingestion** *(Completed)*
-- [ ] **PASS 15 — In-process Processing Jobs**
-- [ ] **PASS 16 — Failure Isolation and Idempotency**
-- [ ] **PASS 17 — Project Intelligence Queries**
-- [ ] **PASS 18 — FieldLine Assistant**
-- [ ] **PASS 19 — Human Review Workflow**
+- [x] **PASS 15 — In-process Processing Jobs** *(Completed)*
+- [x] **PASS 16 — Failure Isolation and Idempotency** *(Completed)*
+- [x] **PASS 17 — Project Intelligence Queries** *(Completed)*
+- [x] **PASS 18 — FieldLine Assistant** *(Completed)*
+- [x] **PASS 19 — Human Review Workflow** *(Completed)*
 - [ ] **PASS 20 — Dashboard**
 - [ ] **PASS 21 — Activity Detail View**
 - [ ] **PASS 22 — Voice Input**
