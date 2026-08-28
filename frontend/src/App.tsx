@@ -243,13 +243,22 @@ export interface ResolvedActivityInfo {
   location: string | null;
 }
 
+export interface AssistantClaim {
+  type: 'metric' | 'classification' | 'status' | 'date' | 'variance' | 'reason' | 'activity_identity';
+  factRef: string;
+  field: string;
+  value: string | number | boolean;
+  text: string;
+  factRefs?: string[];
+}
+
 export interface AssistantQueryResponse {
   question: string;
   intent: AssistantIntent;
   resolvedActivity: ResolvedActivityInfo | null;
   ambiguousCandidates: ResolvedActivityInfo[] | null;
   answer: string;
-  claims?: { text: string; factRefs: string[] }[];
+  claims?: AssistantClaim[];
   factRefs: string[];
   grounded: boolean;
   status: 'success' | 'activity_not_found' | 'ambiguous_activity' | 'insufficient_data' | 'unsupported';

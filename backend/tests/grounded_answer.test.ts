@@ -8,7 +8,7 @@ import { ProjectRepository } from '../src/repositories/project.repository.js';
 import { AIProviderError } from '../src/errors/AppError.js';
 import { ProjectIntelligenceService } from '../src/services/intelligence/project-intelligence.types.js';
 
-describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Corrective)', () => {
+describe('Field-Level Deterministic Grounding Validation (Pass 18 Final Correction)', () => {
   const projectId = '11111111-1111-1111-1111-111111111111';
 
   const mockProject = {
@@ -46,6 +46,7 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
           name: 'Foundation B',
           plannedFinish: '2026-08-20',
           actualProgress: 62,
+          plannedProgress: 80,
           progressVariance: -18,
           classification: 'AT_RISK',
           reasons: [{ code: 'NEGATIVE_PROGRESS_VARIANCE', message: 'behind planned progress' }]
@@ -89,15 +90,17 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     })
   } as unknown as AssistantIntentService;
 
-  it('Section 10: Unsupported causal claim test (MUST NOT be accepted)', async () => {
-    // Fact contains variance info but no staffing info. Model returns unsupported "contractor is understaffed" claim.
+  it('valid metric claim accepted (actualProgress = 62)', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B is at risk because the contractor is understaffed.',
-            factRefs: ['at_risk:FOUNDATION-B']
+            type: 'metric',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'actualProgress',
+            value: 62,
+            text: 'Foundation B is 62% complete.'
           }
         ]
       })
@@ -112,57 +115,301 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
       fakeProjectRepo
     );
 
-    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
-      AIProviderError
-    );
-    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
-      /unsupported workforce \/ labor \/ staffing causes/i
-    );
-  });
-
-  it('Section 11: Valid grounded claim test (MUST be accepted)', async () => {
-    const fakeAIService: AIService = {
-      generateText: vi.fn(),
-      extractStructured: vi.fn().mockResolvedValue({
-        claims: [
-          {
-            text: 'Foundation B is 62% complete against 80% planned.',
-            factRefs: ['at_risk:FOUNDATION-B']
-          },
-          {
-            text: 'It is therefore 18 percentage points behind plan.',
-            factRefs: ['at_risk:FOUNDATION-B']
-          }
-        ]
-      })
-    };
-
-    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
-    const service = new AssistantService(
-      fakeAIService,
-      fakeIntentService,
-      new DeterministicActivityResolver(fakeActivityRepo as any),
-      factBuilder,
-      fakeProjectRepo
-    );
-
-    const res = await service.answerQuestion(projectId, 'Why is Foundation B at risk?');
+    const res = await service.answerQuestion(projectId, 'What is the status of Foundation B?');
     expect(res.grounded).toBe(true);
     expect(res.status).toBe('success');
     expect(res.factRefs).toEqual(['at_risk:FOUNDATION-B']);
-    expect(res.claims?.length).toBe(2);
-    expect(res.answer).toContain('Foundation B is 62% complete against 80% planned.');
-    expect(res.answer).toContain('18 percentage points behind plan.');
+    expect(res.claims?.length).toBe(1);
+    expect(res.answer).toBe('Foundation B is 62% complete.');
   });
 
-  it('Section 12: Missing-reference test (MUST be rejected without auto-fill)', async () => {
+  it('valid variance claim accepted (progressVariance = -18)', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B is 62% complete.',
-            factRefs: []
+            type: 'variance',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'progressVariance',
+            value: -18,
+            text: 'Foundation B is 18 percentage points behind plan.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(projectId, 'What is the variance of Foundation B?');
+    expect(res.grounded).toBe(true);
+    expect(res.answer).toBe('Foundation B is 18 percentage points behind plan.');
+  });
+
+  it('valid classification claim accepted (classification = AT_RISK)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'classification',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'classification',
+            value: 'AT_RISK',
+            text: 'Foundation B is at risk.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(projectId, 'Why is Foundation B classified at risk?');
+    expect(res.grounded).toBe(true);
+    expect(res.answer).toBe('Foundation B is at risk.');
+  });
+
+  it('valid date claim accepted (plannedFinish = 2026-08-20)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'date',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'plannedFinish',
+            value: '2026-08-20',
+            text: "Foundation B's planned finish is August 20."
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(projectId, 'When was Foundation B planned to finish?');
+    expect(res.grounded).toBe(true);
+    expect(res.answer).toBe("Foundation B's planned finish is August 20.");
+  });
+
+  it('valid reason claim accepted (reason.code = NEGATIVE_PROGRESS_VARIANCE)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'reason',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'reason.code',
+            value: 'NEGATIVE_PROGRESS_VARIANCE',
+            text: 'Foundation B is at risk because it is behind planned progress.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(projectId, 'Why is Foundation B at risk?');
+    expect(res.grounded).toBe(true);
+    expect(res.answer).toBe('Foundation B is at risk because it is behind planned progress.');
+  });
+
+  it('wrong value rejected (actualProgress = 75 vs authoritative 62)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'metric',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'actualProgress',
+            value: 75,
+            text: 'Foundation B is 75% complete.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'What is the progress?')).rejects.toThrow(
+      AIProviderError
+    );
+    await expect(service.answerQuestion(projectId, 'What is the progress?')).rejects.toThrow(
+      /does not match authoritative fact value/i
+    );
+  });
+
+  it('nonexistent / invented forecast field rejected (field: forecastFinish)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'date',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'forecastFinish',
+            value: '2026-09-10',
+            text: 'Foundation B will finish on September 10.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'When will Foundation B finish?')).rejects.toThrow(
+      AIProviderError
+    );
+    await expect(service.answerQuestion(projectId, 'When will Foundation B finish?')).rejects.toThrow(
+      /unallowed or nonexistent field/i
+    );
+  });
+
+  it('invented duration rejected (field: delayedWeeks)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'metric',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'delayedWeeks',
+            value: 3,
+            text: 'Foundation B has been delayed for three weeks.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'How long is Foundation B delayed?')).rejects.toThrow(
+      AIProviderError
+    );
+  });
+
+  it('invented priority rejected (field: priority)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'status',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'priority',
+            value: 'highest',
+            text: 'Foundation B is the highest-priority project issue.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'Is Foundation B highest priority?')).rejects.toThrow(
+      AIProviderError
+    );
+  });
+
+  it('wrong activity identity rejected (activityName = Foundation C vs Foundation B)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'activity_identity',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'activityName',
+            value: 'Foundation C',
+            text: 'Foundation C is at risk.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'What is at risk?')).rejects.toThrow(
+      AIProviderError
+    );
+  });
+
+  it('unsupported cause rejected (reason.code = UNDERSTAFFED vs NEGATIVE_PROGRESS_VARIANCE)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'reason',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'reason.code',
+            value: 'UNDERSTAFFED',
+            text: 'The contractor is understaffed.'
           }
         ]
       })
@@ -182,14 +429,17 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     );
   });
 
-  it('Section 13: Unknown-reference test (MUST be rejected)', async () => {
+  it('unknown factRef rejected', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B is 62% complete.',
-            factRefs: ['fake-ref']
+            type: 'metric',
+            factRef: 'fake-ref-999',
+            field: 'actualProgress',
+            value: 62,
+            text: 'Foundation B is 62% complete.'
           }
         ]
       })
@@ -204,26 +454,60 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
       fakeProjectRepo
     );
 
-    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
+    await expect(service.answerQuestion(projectId, 'What is the status?')).rejects.toThrow(
       AIProviderError
     );
-    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
-      /unverified fact references/i
+    await expect(service.answerQuestion(projectId, 'What is the status?')).rejects.toThrow(
+      /unverified fact reference/i
     );
   });
 
-  it('Section 14: Multiple claims test (MUST be accepted)', async () => {
+  it('missing factRef rejected', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B is 62% complete.',
-            factRefs: ['at_risk:FOUNDATION-B']
+            type: 'metric',
+            factRef: '',
+            field: 'actualProgress',
+            value: 62,
+            text: 'Foundation B is 62% complete.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'What is the status?')).rejects.toThrow();
+  });
+
+  it('multiple valid claims accepted and concatenated into final answer', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'metric',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'actualProgress',
+            value: 62,
+            text: 'Foundation B is 62% complete.'
           },
           {
-            text: 'Planned progress is 80%.',
-            factRefs: ['at_risk:FOUNDATION-B']
+            type: 'variance',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'progressVariance',
+            value: -18,
+            text: 'It is 18 percentage points behind plan.'
           }
         ]
       })
@@ -242,9 +526,47 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     expect(res.grounded).toBe(true);
     expect(res.claims?.length).toBe(2);
     expect(res.factRefs).toEqual(['at_risk:FOUNDATION-B']);
+    expect(res.answer).toBe('Foundation B is 62% complete. It is 18 percentage points behind plan.');
   });
 
-  it('Section 15: Empty verified fact set test (bypasses LLM, returns deterministic response)', async () => {
+  it('Section 17: Complete answer grounding test with valid claim + invalid forecast claim MUST reject entire response', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'metric',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'actualProgress',
+            value: 62,
+            text: 'Foundation B is 62% complete.'
+          },
+          {
+            type: 'date',
+            factRef: 'at_risk:FOUNDATION-B',
+            field: 'forecastFinish',
+            value: '2026-09-10',
+            text: 'Foundation B will finish on September 10.'
+          }
+        ]
+      })
+    };
+
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    await expect(service.answerQuestion(projectId, 'When will Foundation B finish?')).rejects.toThrow(
+      AIProviderError
+    );
+  });
+
+  it('empty verified fact set test (bypasses LLM, returns deterministic response)', async () => {
     const emptyIntelligenceService: ProjectIntelligenceService = {
       getIntelligence: vi.fn().mockReturnValue({
         projectId,

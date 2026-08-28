@@ -207,8 +207,11 @@ describe('Assistant Security & Tenant Isolation Tests (Pass 18)', () => {
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Alpha Tunnel Boring is delayed.',
-            factRefs: ['delayed:ACT-A1']
+            type: 'classification',
+            factRef: 'delayed:ACT-A1',
+            field: 'classification',
+            value: 'DELAYED',
+            text: 'Alpha Tunnel Boring is delayed.'
           }
         ]
       })
@@ -275,8 +278,11 @@ describe('Assistant Security & Tenant Isolation Tests (Pass 18)', () => {
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Alpha Tunnel Boring is delayed because the contractor is understaffed.',
-            factRefs: ['delayed:ACT-A1']
+            type: 'reason',
+            factRef: 'delayed:ACT-A1',
+            field: 'reason.code',
+            value: 'UNDERSTAFFED',
+            text: 'Alpha Tunnel Boring is delayed because the contractor is understaffed.'
           }
         ]
       })

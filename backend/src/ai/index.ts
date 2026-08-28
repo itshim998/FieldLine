@@ -27,6 +27,7 @@ export type {
 export {
   assistantIntentTypeEnum,
   assistantIntentSchema,
+  assistantClaimTypeEnum,
   assistantClaimSchema,
   assistantAnswerSchema
 } from './contracts/assistant.contract.js';
@@ -34,6 +35,7 @@ export {
 export type {
   AssistantIntentType,
   AssistantIntent,
+  AssistantClaimType,
   AssistantClaim,
   AssistantAnswer
 } from './contracts/assistant.contract.js';

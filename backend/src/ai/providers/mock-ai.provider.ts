@@ -69,13 +69,16 @@ export class MockAIProvider implements AIProvider {
       return defaultFieldProgressPayload;
     }
 
-    // Default valid assistant grounded answer payload (Pass 18 Corrective)
+    // Default valid assistant grounded answer payload (Pass 18 Final Grounding Correction)
     const defaultAssistantAnswerPayload = {
       answer: 'Mock grounded assistant answer.',
       claims: [
         {
-          text: 'Mock grounded assistant answer.',
-          factRefs: ['mock-ref']
+          type: 'metric',
+          factRef: 'mock-ref',
+          field: 'actualProgress',
+          value: 60,
+          text: 'Mock grounded assistant answer.'
         }
       ]
     };

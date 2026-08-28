@@ -37,39 +37,162 @@ import {
 import { NotFoundError, ValidationError, AIProviderError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
-interface SpeculativePattern {
-  name: string;
-  pattern: RegExp;
-  keywords: string[];
+export const ALLOWED_AUTHORITATIVE_FIELDS = new Set<string>([
+  'activityId',
+  'externalId',
+  'activityName',
+  'name',
+  'location',
+  'plannedStart',
+  'plannedFinish',
+  'actualProgress',
+  'plannedProgress',
+  'actualPercent',
+  'progressVariance',
+  'varianceState',
+  'overdue',
+  'classification',
+  'status',
+  'actualFinish',
+  'milestoneDate',
+  'daysUntil',
+  'latestUpdateDate',
+  'daysSinceUpdate',
+  'hasAnyUpdate',
+  'reason.code',
+  'reason.message',
+  'reasons',
+  'eventType',
+  'eventId',
+  'createdAt',
+  'progressUpdateId',
+  'asOfDate'
+]);
+
+export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): unknown {
+  if (!ALLOWED_AUTHORITATIVE_FIELDS.has(field)) {
+    return undefined;
+  }
+
+  const data = (fact.data || {}) as Record<string, any>;
+  const snap = (data.snapshot || {}) as Record<string, any>;
+
+  switch (field) {
+    case 'activityId':
+      return fact.activityId ?? data.activityId;
+    case 'externalId':
+      return fact.externalId ?? data.externalId;
+    case 'activityName':
+    case 'name':
+      return fact.activityName ?? data.name ?? data.activityName;
+    case 'location':
+      return data.location;
+    case 'progressUpdateId':
+      return fact.progressUpdateId ?? data.progressUpdateId;
+    case 'actualProgress':
+      return data.actualProgress ?? data.actualPercent ?? snap.actualProgress;
+    case 'actualPercent':
+      return data.actualPercent ?? data.actualProgress ?? snap.actualProgress;
+    case 'plannedProgress':
+      return data.plannedProgress ?? snap.plannedProgress;
+    case 'progressVariance':
+      return data.progressVariance ?? snap.progressVariance;
+    case 'varianceState':
+      return data.varianceState ?? snap.varianceState;
+    case 'classification':
+      return data.classification;
+    case 'status':
+      return data.status ?? snap.status;
+    case 'overdue':
+      return data.overdue ?? snap.overdue;
+    case 'plannedStart':
+      return data.plannedStart ?? snap.plannedStart;
+    case 'plannedFinish':
+      return data.plannedFinish ?? snap.plannedFinish;
+    case 'actualFinish':
+      return data.actualFinish;
+    case 'milestoneDate':
+      return data.milestoneDate;
+    case 'daysUntil':
+      return data.daysUntil;
+    case 'latestUpdateDate':
+      return data.latestUpdateDate;
+    case 'daysSinceUpdate':
+      return data.daysSinceUpdate;
+    case 'hasAnyUpdate':
+      return data.hasAnyUpdate;
+    case 'asOfDate':
+      return data.asOfDate;
+    case 'eventId':
+      return data.eventId;
+    case 'eventType':
+      return data.eventType;
+    case 'createdAt':
+      return data.createdAt;
+    case 'reason.code':
+      if (Array.isArray(data.reasons)) {
+        return data.reasons.map((r: any) => (typeof r === 'object' ? r.code : String(r)));
+      }
+      return undefined;
+    case 'reason.message':
+    case 'reasons':
+      if (Array.isArray(data.reasons)) {
+        return data.reasons.map((r: any) => (typeof r === 'object' ? r.message : String(r)));
+      }
+      return undefined;
+    default:
+      return undefined;
+  }
 }
 
-const UNSUPPORTED_SPECULATIVE_PATTERNS: SpeculativePattern[] = [
-  {
-    name: 'workforce / labor / staffing',
-    pattern: /\b(understaff(?:ed|ing)?|shortage of (?:workers|staff|labor|manpower)|labor shortage|staff shortage|insufficient (?:workers|staff|labor|manpower)|lack of (?:workers|staff|labor|manpower)|manpower shortage|strike|strikes|worker dispute)\b/i,
-    keywords: ['staff', 'worker', 'labor', 'manpower', 'strike', 'workforce', 'understaff']
-  },
-  {
-    name: 'materials / supply chain',
-    pattern: /\b(material shortage|lack of materials|supply chain (?:issue|delay|disruption|problem)|delayed (?:shipment|delivery)|supplier (?:delay|issue|problem)|out of stock|steel shortage|concrete shortage)\b/i,
-    keywords: ['material', 'supply chain', 'supplier', 'shipment', 'delivery', 'concrete shortage', 'steel shortage']
-  },
-  {
-    name: 'weather / environmental',
-    pattern: /\b(severe weather|bad weather|heavy rain(?:storm)?|storm|flooding|flood|extreme (?:heat|cold|temperature)|snowstorm|typhoon|hurricane|inclement weather)\b/i,
-    keywords: ['weather', 'rain', 'storm', 'flood', 'snow', 'wind', 'typhoon', 'hurricane']
-  },
-  {
-    name: 'equipment / machinery failure',
-    pattern: /\b(equipment failure|equipment breakdown|machinery (?:failure|breakdown)|machine (?:failure|breakdown)|crane (?:failure|breakdown)|mechanical (?:failure|breakdown)|broken (?:equipment|machinery))\b/i,
-    keywords: ['equipment', 'machinery', 'breakdown', 'crane', 'mechanical failure']
-  },
-  {
-    name: 'legal / disputes / financial',
-    pattern: /\b(contractor dispute|legal dispute|lawsuit|permit delay|permits pending|budget cut|funding (?:delay|shortage|issue)|bankruptcy|insolvency|contractor negligence|contractor (?:problem|issue)s?)\b/i,
-    keywords: ['dispute', 'lawsuit', 'permit', 'budget', 'funding', 'bankruptcy', 'negligence']
+export function verifyClaimValueMatch(
+  claimValue: string | number | boolean,
+  authoritativeValue: unknown
+): boolean {
+  if (authoritativeValue === undefined || authoritativeValue === null) {
+    return false;
   }
-];
+
+  // Array of reason codes / messages
+  if (Array.isArray(authoritativeValue)) {
+    return authoritativeValue.some((item) => {
+      if (typeof item === 'object' && item !== null) {
+        const codeMatch =
+          String((item as any).code || '').toLowerCase() ===
+          String(claimValue).trim().toLowerCase();
+        const msgMatch =
+          String((item as any).message || '').toLowerCase() ===
+          String(claimValue).trim().toLowerCase();
+        return codeMatch || msgMatch;
+      }
+      return String(item).trim().toLowerCase() === String(claimValue).trim().toLowerCase();
+    });
+  }
+
+  // Exact number comparison
+  if (typeof authoritativeValue === 'number') {
+    const claimNum = typeof claimValue === 'number' ? claimValue : Number(claimValue);
+    if (!isNaN(claimNum)) {
+      return authoritativeValue === claimNum;
+    }
+  }
+
+  // Boolean comparison
+  if (typeof authoritativeValue === 'boolean') {
+    if (typeof claimValue === 'boolean') {
+      return authoritativeValue === claimValue;
+    }
+    if (String(claimValue).toLowerCase() === 'true' && authoritativeValue === true) return true;
+    if (String(claimValue).toLowerCase() === 'false' && authoritativeValue === false) return true;
+    return false;
+  }
+
+  // String comparison (trimmed, case-insensitive)
+  return (
+    String(authoritativeValue).trim().toLowerCase() ===
+    String(claimValue).trim().toLowerCase()
+  );
+}
 
 export function buildGroundedAnswerPrompt(
   question: string,
@@ -86,27 +209,29 @@ export function buildGroundedAnswerPrompt(
     '',
     'GROUNDING RULES & CONSTRAINTS:',
     '1. You are NOT the source of truth. The VERIFIED FACTS below are the ONLY project facts available.',
-    '2. You MUST answer ONLY from the supplied VERIFIED FACTS.',
-    '3. Return a list of factual claims. Every factual claim MUST cite one or more supplied fact references in its "factRefs" array.',
-    '4. Preserve numeric values (percentages, variances, days) exactly as given in the facts.',
-    '5. Preserve calendar dates exactly as given in the facts.',
-    '6. Preserve activity names and external IDs exactly as given.',
-    '7. Never create or invent a fact reference. Only cite references copied directly from the supplied VERIFIED FACTS.',
-    '8. Never cite a fact that does not support the claim.',
-    '9. You must NOT invent project facts, percentages, dates, causes, or activity identities.',
-    '10. You must NOT infer unsupported contractor, labor/staffing shortages, weather, material shortages, or equipment failure causes unless explicitly stated in the verified facts.',
-    '11. If the VERIFIED FACTS do not establish a requested explanation (such as root causes), explicitly state that available project data does not establish the cause.',
-    '12. You must NOT perform new project calculations or recalculate variances.',
+    '2. You may ONLY make factual claims using fields explicitly supplied by the verified facts.',
+    '3. For every factual claim in your response:',
+    '   a. Specify "factRef" (copied exactly from a supplied VERIFIED FACT reference string).',
+    '   b. Specify "type" ("metric" | "classification" | "status" | "date" | "variance" | "reason" | "activity_identity").',
+    '   c. Specify "field" (an allowed authoritative field from the fact, e.g. actualProgress, plannedProgress, progressVariance, classification, plannedFinish, reason.code, activityName, etc.).',
+    '   d. Specify "value" (the exact authoritative value copied from the fact).',
+    '   e. Write "text" (concise, natural-language text expressing that verified claim).',
+    '4. Never invent a value. Never infer a value that is not explicitly represented in the facts.',
+    '5. Never create a new date, percentage, status, cause, forecast, duration, priority, identity, or event.',
+    '6. If the verified facts do not contain the requested information, state clearly that available project data is insufficient.',
+    '7. Never cite a fact that does not support the claim.',
     '',
     'Return ONLY a valid JSON object matching this schema:',
     '{',
     '  "claims": [',
     '    {',
-    '      "text": "Specific factual claim directly supported by cited facts",',
-    '      "factRefs": ["ref1", "ref2"]',
+    '      "type": "metric",',
+    '      "factRef": "at_risk:FOUNDATION-B",',
+    '      "field": "actualProgress",',
+    '      "value": 62,',
+    '      "text": "Foundation B is 62% complete."',
     '    }',
-    '  ],',
-    '  "answer": "Concise, professional grounded answer assembled exclusively from the validated claims"',
+    '  ]',
     '}',
     '',
     '--- MANAGER QUESTION ---',
@@ -299,7 +424,7 @@ export class AssistantService {
       assistantAnswerSchema
     );
 
-    // 10. Strict Claim-Level Fact Reference & Grounding Validation (Pass 18 Corrective)
+    // 10. Strict Field-Level Claim Validation (Pass 18 Final Grounding Correction)
     if (!rawAnswer.claims || !Array.isArray(rawAnswer.claims) || rawAnswer.claims.length === 0) {
       throw new AIProviderError(
         'Grounded answer validation failed: model produced zero factual claims'
@@ -320,45 +445,62 @@ export class AssistantService {
         );
       }
 
-      if (!claim.factRefs || !Array.isArray(claim.factRefs) || claim.factRefs.length === 0) {
+      // Resolve factRef
+      const targetFactRef = claim.factRef || (claim.factRefs && claim.factRefs[0]);
+      if (!targetFactRef || typeof targetFactRef !== 'string' || targetFactRef.trim().length === 0) {
         throw new AIProviderError(
-          `Grounded answer validation failed: factual claim "${claim.text}" has no fact references`
+          `Grounded answer validation failed: factual claim "${claim.text}" has no fact reference`
         );
       }
 
-      const citedFactsForClaim: VerifiedFact[] = [];
-      for (const ref of claim.factRefs) {
-        const fact = validFactsMap.get(ref);
-        if (!fact) {
-          logger.warn(`Assistant answer cited unknown fact reference: ${ref}`);
-          throw new AIProviderError(
-            `Grounded answer validation failed: response cited unverified fact references: ${ref}`
-          );
-        }
-        citedFactsForClaim.push(fact);
-        citedFactRefsSet.add(ref);
+      const fact = validFactsMap.get(targetFactRef);
+      if (!fact) {
+        logger.warn(`Assistant answer cited unknown fact reference: ${targetFactRef}`);
+        throw new AIProviderError(
+          `Grounded answer validation failed: response cited unverified fact reference: ${targetFactRef}`
+        );
       }
 
-      // Check for unsupported speculative causes (e.g. understaffed, weather, equipment, material)
-      const factualCorpus = citedFactsForClaim
-        .map((f) => `${f.summary} ${f.activityName || ''} ${f.category} ${JSON.stringify(f.data)}`)
-        .join(' ')
-        .toLowerCase();
-
-      for (const spec of UNSUPPORTED_SPECULATIVE_PATTERNS) {
-        if (spec.pattern.test(claim.text)) {
-          const isCorpusSupported = spec.keywords.some((kw) =>
-            factualCorpus.includes(kw.toLowerCase())
-          );
-          if (!isCorpusSupported) {
-            logger.warn(
-              `Assistant claim asserts unsupported ${spec.name} speculation without fact backing: "${claim.text}"`
-            );
+      citedFactRefsSet.add(targetFactRef);
+      if (claim.factRefs && Array.isArray(claim.factRefs)) {
+        for (const ref of claim.factRefs) {
+          if (!validFactsMap.has(ref)) {
             throw new AIProviderError(
-              `Grounded answer validation failed: claim asserts unsupported ${spec.name} causes not present in cited verified facts: "${claim.text}"`
+              `Grounded answer validation failed: response cited unverified fact reference: ${ref}`
             );
           }
+          citedFactRefsSet.add(ref);
         }
+      }
+
+      // Check field is in allowed authoritative field set
+      if (!claim.field || typeof claim.field !== 'string' || !ALLOWED_AUTHORITATIVE_FIELDS.has(claim.field)) {
+        logger.warn(`Assistant claim references unallowed field: ${claim.field}`);
+        throw new AIProviderError(
+          `Grounded answer validation failed: claim references unallowed or nonexistent field "${claim.field}"`
+        );
+      }
+
+      // Extract authoritative value from fact
+      const authoritativeValue = getAuthoritativeFactValue(fact, claim.field);
+      if (authoritativeValue === undefined) {
+        logger.warn(
+          `Authoritative field "${claim.field}" does not exist in fact "${targetFactRef}"`
+        );
+        throw new AIProviderError(
+          `Grounded answer validation failed: field "${claim.field}" does not exist in authoritative fact "${targetFactRef}"`
+        );
+      }
+
+      // Verify claim.value matches authoritative fact value
+      const isMatch = verifyClaimValueMatch(claim.value, authoritativeValue);
+      if (!isMatch) {
+        logger.warn(
+          `Claim value "${claim.value}" does not match fact value "${JSON.stringify(authoritativeValue)}" for field "${claim.field}"`
+        );
+        throw new AIProviderError(
+          `Grounded answer validation failed: claim value "${claim.value}" does not match authoritative fact value "${JSON.stringify(authoritativeValue)}" for field "${claim.field}" on fact "${targetFactRef}"`
+        );
       }
     }
 
