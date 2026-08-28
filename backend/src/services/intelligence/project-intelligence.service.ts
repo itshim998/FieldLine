@@ -217,7 +217,7 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
           a.activityId.localeCompare(b.activityId)
       );
 
-    // 7. Query 3: Completed today (asOfDate)
+    // 7. Query 3: Completed today (where activity's actualFinish === canonicalAsOfDate)
     const completedToday: CompletedActivityFact[] = [];
     for (const act of activities) {
       const obs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
@@ -225,11 +225,16 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
         projectId,
         canonicalAsOfDate
       );
-      if (
-        obs &&
-        obs.asOfDate === canonicalAsOfDate &&
-        (obs.status === 'completed' || obs.actualPercent >= 100)
-      ) {
+      // Semantic rule for completedToday:
+      // 1. Observation exists as of canonicalAsOfDate
+      // 2. Observation represents completion (status === 'completed' or actualPercent >= 100)
+      // 3. actualFinish is explicitly defined on the observation and matches canonicalAsOfDate
+      // (If actualFinish is missing/null, fallback is to exclude it rather than guessing)
+      const isCompleted =
+        Boolean(obs) && (obs!.status === 'completed' || obs!.actualPercent >= 100);
+      const finishDate = obs?.actualFinish ? obs.actualFinish.slice(0, 10) : null;
+
+      if (obs && isCompleted && finishDate === canonicalAsOfDate) {
         completedToday.push({
           activityId: act.id,
           externalId: act.externalId,

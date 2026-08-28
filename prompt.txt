@@ -1,1081 +1,213 @@
-# FieldLine — PASS 17: PROJECT INTELLIGENCE QUERY LAYER
+# FieldLine — PASS 17 CORRECTIVE FIX
 
-Implement **Pass 17 — Project Intelligence Queries** in the existing FieldLine repository.
-
-Approved base:
-
-```text id="base17"
-b4673c3dfa249a727e8580e7e3efc4674d402679
-```
-
-Previous passes are approved:
-
-```text id="approved17"
-Pass 13 — Evidence + provenance
-Pass 14 — Document ingestion
-Pass 15 — In-process jobs
-Pass 16 — Failure isolation + idempotency
-```
-
-Do NOT implement Pass 18+.
-
----
-
-# 1. Objective
-
-Build the deterministic information/query layer that a future assistant and dashboard can use.
-
-The intelligence layer must answer:
+The latest Pass 17 commit:
 
 ```text
-What is delayed?
-
-What is at risk?
-
-What was completed today?
-
-Which activities are behind schedule?
-
-Which milestones are approaching?
-
-Which activities have no recent updates?
-
-What changed recently?
+57af930ac2f23190dc3c2591e1f8f8d8f75b7505
 ```
 
-The output must be **structured facts**, not generated prose.
+was independently reviewed.
 
-The assistant layer comes later.
+Most of Pass 17 is correct.
 
----
+There is one semantic blocker:
 
-# 2. Core architectural principle
+# BLOCKER — `completedToday` is not actually “completed today”
 
-Do NOT create a new truth model.
+Current implementation uses:
 
-Pass 17 is a READ/QUERY layer over existing canonical data.
+```ts
+obs &&
+obs.asOfDate === canonicalAsOfDate &&
+(obs.status === 'completed' || obs.actualPercent >= 100)
+```
 
-Architecture:
+This can incorrectly report an activity as completed today merely because its latest observation on the requested date still shows 100% / completed.
+
+Example:
 
 ```text
-HTTP
- ↓
-IntelligenceQueryService
- ↓
-existing repositories / deterministic services
- ↓
-structured intelligence response
+Activity completed:
+2026-08-20
+
+Another observation:
+2026-08-28
+actualPercent = 100
+status = completed
+actualFinish = 2026-08-20
 ```
 
-Reuse the existing:
+The current implementation would classify this as:
 
 ```text
-ProgressSnapshotService
-RiskClassificationService
-ActivityProgressRepository
-ProgressUpdateRepository
-ActivityRepository
-ProjectEventRepository
-Evidence/provenance services where useful
+completedToday on 2026-08-28
 ```
 
-Do NOT duplicate progress, variance, overdue, or risk formulas.
+which is false.
 
----
+## Required semantic rule
 
-# 3. Existing canonical sources
+“Completed today” must mean that the activity's deterministic completion date is the requested `asOfDate`.
 
-## 3.1 Progress snapshot
+Use the canonical ActivityProgress fields already available in the repository.
 
-The existing:
+Preferred rule:
 
 ```text
-GET /api/projects/:projectId/progress-snapshot
+activity progress observation exists
+AND
+observation represents completion
+AND
+actualFinish === canonicalAsOfDate
 ```
 
-returns deterministic planned-vs-actual information and accepts an optional `asOfDate`.
-
-The snapshot service:
-
-* validates `asOfDate`
-* gets project activities
-* retrieves latest ActivityProgress as of that date
-* calculates planned progress
-* calculates actual progress
-* calculates variance
-* calculates overdue
-* returns a project summary
-
-Reuse these semantics. Do NOT reimplement them.
-
-The existing calculator defines:
+Do not classify an activity as completed today merely because:
 
 ```text
-plannedProgress
-actualProgress
-progressVariance
-varianceState
-overdue
+observation.asOfDate === canonicalAsOfDate
 ```
 
-with deterministic rules.
+when its actual completion date is earlier.
 
----
-
-## 3.2 Risk classification
-
-The existing:
-
-```text
-GET /api/projects/:projectId/risk-status
-```
-
-provides deterministic project risk classification.
-
-Reuse:
-
-```text
-ON_TRACK
-AHEAD
-AT_RISK
-DELAYED
-COMPLETED
-```
-
-and existing reason codes.
-
-Do NOT create a second risk engine.
-
-The risk service already consumes the authoritative progress snapshot and applies deterministic classification.
-
----
-
-## 3.3 Activity progress history
-
-Use the existing `ActivityProgressRepository` history.
-
-It already supports:
-
-```text
-listByActivityId(...)
-listByProgressUpdateId(...)
-listByProjectId(...)
-getLatestByActivityIdAsOfDate(...)
-findExistingObservation(...)
-```
-
-This is the canonical source for historical activity progress.
-
-Do NOT infer historical truth from Evidence upload timestamps.
-
----
-
-## 3.4 Progress updates
-
-Use `ProgressUpdate` for report-level facts.
-
-Existing domain semantics:
-
-```text
-manual
-voice
-pdf
-xlsx
-image
-text
-```
-
-and:
-
-```text
-received
-processed
-reviewed
-```
-
-Do not add another report model.
-
----
-
-## 3.5 Project events
-
-Reuse `project_events` as the deterministic change/history stream.
-
-Existing event types include:
-
-```text
-project_created
-project_updated
-schedule_imported
-progress_reported
-match_suggested
-match_confirmed
-progress_updated
-delay_detected
-variance_alert
-evidence_uploaded
-processing_job_queued
-processing_job_started
-processing_job_completed
-processing_job_failed
-```
-
-Return event facts, not summaries generated by an LLM.
-
----
-
-# 4. Canonical intelligence endpoint
-
-Create:
-
-```text
-GET /api/projects/:projectId/intelligence
-```
-
-This is the canonical Pass 17 read surface.
-
-Query parameters:
-
-```text
-asOfDate        optional YYYY-MM-DD
-recentDays      optional positive integer
-approachingDays optional non-negative integer
-```
-
-Recommended defaults:
-
-```text
-recentDays = 7
-approachingDays = 14
-```
-
-Make these configurable constants, not magic numbers scattered across the code.
-
-Do not accept arbitrary natural-language questions yet.
-
-Do NOT create an LLM query interpreter.
-
----
-
-# 5. Response contract
-
-Create a typed response such as:
-
-```ts id="resp17"
-interface ProjectIntelligence {
-  projectId: string;
-  asOfDate: string;
-  generatedAt: string;
-
-  delayed: DelayedActivityFact[];
-  atRisk: AtRiskActivityFact[];
-  completedToday: CompletedActivityFact[];
-  behindSchedule: BehindScheduleActivityFact[];
-  approachingMilestones: ApproachingMilestoneFact[];
-  staleActivities: StaleActivityFact[];
-  recentChanges: RecentChangeFact[];
-}
-```
-
-Use the repository's existing domain types where possible.
-
-Every fact must contain stable identifiers.
-
----
-
-# 6. Delayed activities
-
-Use existing deterministic risk classification.
-
-Return activities whose classification is:
-
-```text id="delayed17"
-DELAYED
-```
-
-Do not calculate "delayed" independently.
-
-Example structured item:
-
-```json
-{
-  "activityId": "...",
-  "externalId": "...",
-  "name": "...",
-  "plannedFinish": "2026-08-20",
-  "actualProgress": 72,
-  "progressVariance": -28,
-  "overdue": true,
-  "classification": "DELAYED",
-  "reasons": [...]
-}
-```
-
-The exact structure may be refined to fit current API conventions.
-
----
-
-# 7. At-risk activities
-
-Return activities whose existing risk classification is:
-
-```text id="atrisk17"
-AT_RISK
-```
-
-Include:
-
-```text
-activityId
-externalId
-name
-classification
-reasons
-plannedFinish
-actualProgress
-progressVariance
-```
-
-Do not invent a new risk score.
-
----
-
-# 8. Behind-schedule activities
-
-Use the authoritative progress snapshot.
-
-Return:
-
-```text id="behind17"
-varianceState === 'behind'
-```
-
-Include:
-
-```text
-activityId
-externalId
-name
-plannedProgress
-actualProgress
-progressVariance
-varianceState
-status
-plannedFinish
-overdue
-```
-
-Do not calculate a second notion of "behind".
-
-The existing snapshot calculator already defines:
-
-```text
-progressVariance = actualProgress - plannedProgress
-```
-
-and:
-
-```text
-behind = progressVariance < -0.01
-```
-
-after rounding.
-
----
-
-# 9. Completed today
-
-Define "today" as:
-
-```text
-asOfDate
-```
-
-not the server wall clock.
-
-Return activities with a canonical ActivityProgress observation representing completion on the requested date.
-
-Prefer:
-
-```text
-status === 'completed'
-```
-
-with:
-
-```text
-asOfDate === canonical asOfDate
-```
-
-or an explicitly defensible equivalent based on the existing historical model.
-
-Do NOT treat:
+Also do not use:
 
 ```text
 Evidence.uploadedAt
 ProgressUpdate.createdAt
-Job.completedAt
+processing job completedAt
 ```
 
-as activity completion.
+as activity completion dates.
 
-The source of truth is ActivityProgress.
+ActivityProgress remains the source of truth.
 
-Include:
+# Edge cases
+
+Test:
+
+### Completion today
 
 ```text
-activityId
-externalId
-name
-progressUpdateId
-asOfDate
-actualPercent
-actualFinish
-status
+actualFinish = 2026-08-28
+asOfDate = 2026-08-28
+status = completed
+actualPercent = 100
 ```
 
----
+→ MUST appear in `completedToday`.
 
-# 10. Approaching milestones
-
-The existing snapshot calculator defines a milestone as a zero-duration activity:
+### Completed earlier, observed today
 
 ```text
-plannedStart === plannedFinish
+actualFinish = 2026-08-20
+asOfDate = 2026-08-28
+status = completed
+actualPercent = 100
 ```
 
-Use that definition.
+→ MUST NOT appear in `completedToday`.
 
-Return milestones satisfying:
+### No actualFinish but 100%
+
+Do NOT invent a completion date.
+
+Define and document the fallback behavior explicitly.
+
+Prefer excluding it from `completedToday` unless the existing canonical progress semantics establish another deterministic completion-date signal.
+
+### Historical query
+
+For:
 
 ```text
-plannedStart >= asOfDate
-plannedStart <= asOfDate + approachingDays
+asOfDate = 2026-08-20
 ```
 
-Do not use calendar time-of-day.
-
-Use canonical `YYYY-MM-DD` semantics.
-
-Include:
+an activity with:
 
 ```text
-activityId
-externalId
-name
-milestoneDate
-daysUntil
-status
-actualProgress
+actualFinish = 2026-08-20
 ```
 
-Sort ascending by:
+must appear.
+
+An activity with:
 
 ```text
-milestoneDate
-externalId
+actualFinish = 2026-08-21
 ```
 
-for deterministic output.
+must not appear because that completion was in the future relative to the snapshot.
 
-Do not include already-past milestones in the approaching list.
+# Required regression tests
 
----
-
-# 11. Activities with no recent updates
-
-Define a stale activity using ActivityProgress history.
-
-For each project activity:
+Add tests to `project_intelligence_service.test.ts` covering:
 
 ```text
-latest progress observation as of asOfDate
+[ ] completed today appears
+[ ] completed earlier but observed today does not appear
+[ ] future completion does not appear for historical snapshot
+[ ] completion date is used rather than observation date
+[ ] upload timestamp cannot create completedToday
+[ ] job completion timestamp cannot create completedToday
 ```
 
-If no historical ActivityProgress exists:
+Preserve all existing Pass 17 tests.
+
+# Do NOT change
+
+Do not modify:
 
 ```text
-stale = true
-```
-
-Otherwise:
-
-```text
-stale = latestObservation.asOfDate < asOfDate - recentDays
-```
-
-Use calendar-date arithmetic consistent with the repository's existing date-normalization logic.
-
-Do NOT use:
-
-```text
-new Date() - updatedAt
-```
-
-because historical queries must remain deterministic.
-
-Return:
-
-```text
-activityId
-externalId
-name
-latestUpdateDate
-daysSinceUpdate
-hasAnyUpdate
-```
-
-where:
-
-```text
-latestUpdateDate = null
-```
-
-when no update exists.
-
-Sort oldest/no-update first.
-
----
-
-# 12. Recent changes
-
-Use `project_events`.
-
-Add a project-scoped event query if the repository does not already provide one.
-
-Conceptually:
-
-```text
-GET recent events
-WHERE project_id = ?
-AND created_at <= now/asOfDate boundary
-ORDER BY created_at DESC
-LIMIT bounded number
-```
-
-However, historical determinism matters.
-
-When `asOfDate` is supplied, recent changes should be bounded relative to that date rather than silently using today's timestamp.
-
-A practical contract is:
-
-```text
-asOfDate = YYYY-MM-DD
-
-recentChanges = events on or before the end of asOfDate
-within a configurable recent event window
-```
-
-If event timestamps are UTC ISO strings, normalize the date boundary carefully.
-
-Do not make natural-language summaries.
-
-Return:
-
-```json
-{
-  "eventId": "...",
-  "eventType": "progress_updated",
-  "entityType": "activity_progress",
-  "entityId": "...",
-  "summary": "...",
-  "createdAt": "...",
-  "payload": {...}
-}
-```
-
-Use existing event payloads.
-
-Do not expose absolute filesystem paths or internal error stacks if an event contains such data.
-
----
-
-# 13. Determinism
-
-The same database state plus the same query parameters must produce the same logical result.
-
-Be explicit about:
-
-```text
-sorting
-date boundaries
-limits
-default parameters
-null behavior
-```
-
-Do not rely on unspecified SQLite row order.
-
-Every array must have a deterministic ORDER BY.
-
----
-
-# 14. Project isolation
-
-Every query must be project-scoped.
-
-Examples:
-
-```text id="iso17"
-Project A intelligence must never include Project B activities.
-
-Project A recent events must not include Project B events.
-
-Project A stale activity analysis must only inspect Project A progress.
-
-Cross-project projectId/activity/event identifiers must return no foreign data.
-```
-
-Follow existing project isolation conventions.
-
-Do not introduce globally unscoped intelligence queries.
-
----
-
-# 15. Service architecture
-
-Create:
-
-```text id="service17"
-backend/src/services/intelligence/
-    project-intelligence.service.ts
-    project-intelligence.types.ts
-```
-
-or the smallest structure consistent with repository conventions.
-
-The service should orchestrate existing deterministic sources.
-
-Conceptual flow:
-
-```text
-ProjectIntelligenceService
-      ↓
 ProgressSnapshotService
-      ↓
 RiskClassificationService
-      ↓
-ActivityProgressRepository
-      ↓
-ProjectEventRepository
-      ↓
-ProjectIntelligence response
+ActivityProgress semantics
+Pass 13–16 behavior
+milestone definition
+stale-activity definition
+recent-change definition
 ```
 
-Do NOT duplicate the snapshot/risk calculations.
+Do not introduce another completion engine.
 
----
+Do not add LLM logic.
 
-# 16. Repository needs
+Do not start Pass 18.
 
-Add only the minimal read methods required.
-
-Potentially:
-
-```text id="repo17"
-ProjectEventRepository.listRecentByProject(...)
-ActivityProgressRepository.listLatestByProjectAsOfDate(...)
-```
-
-if equivalent methods do not already exist.
-
-Do not add a generic SQL reporting engine.
-
-Do not move business logic into repositories.
-
-Repositories retrieve data.
-
-The intelligence service interprets already-defined deterministic domain semantics.
-
----
-
-# 17. Query limits
-
-Protect the read path.
-
-Use bounded limits such as:
-
-```text
-recentChanges <= 100
-```
-
-and never return unbounded historical event streams from the intelligence endpoint.
-
-The endpoint is intended for dashboard/assistant use, not bulk export.
-
----
-
-# 18. Structured facts only
-
-DO NOT:
-
-```text
-generate prose
-call an LLM
-summarize changes with AI
-rank facts using an LLM
-guess why an activity is delayed
-invent explanations
-```
-
-The intelligence layer should say:
-
-```text
-activity X
-plannedProgress = 80
-actualProgress = 62
-variance = -18
-classification = AT_RISK
-```
-
-not:
-
-```text
-"Activity X appears to be struggling because..."
-```
-
-Human-readable prose belongs to a later assistant layer.
-
----
-
-# 19. Optional focused endpoints
-
-Do NOT create seven duplicate route families merely because the seven questions exist.
-
-The canonical endpoint should answer the major questions.
-
-Only add focused endpoints if an existing frontend pattern genuinely needs them.
-
-Prefer:
-
-```text
-GET /api/projects/:projectId/intelligence
-```
-
-over:
-
-```text
-GET /delayed
-GET /at-risk
-GET /completed
-...
-```
-
-The single structured contract will be easier for the future assistant to consume.
-
----
-
-# 20. Frontend integration
-
-Add the smallest possible integration to the existing project workspace.
-
-Do NOT build the future full assistant UI.
-
-A simple structured intelligence panel is sufficient if it fits the current workspace.
-
-Possible sections:
-
-```text
-Delayed
-At Risk
-Behind Schedule
-Completed Today
-Approaching Milestones
-No Recent Updates
-Recent Changes
-```
-
-Render existing structured facts.
-
-Do not add generated prose.
-
-Do not redesign the whole dashboard.
-
----
-
-# 21. Tests
-
-Add unit tests for deterministic query rules.
-
-## Delayed
-
-```text id="testdel17"
-[ ] DELAYED activities appear
-[ ] non-DELAYED activities do not
-```
-
-## At risk
-
-```text id="testrisk17"
-[ ] AT_RISK appears
-[ ] ON_TRACK/AHEAD do not
-```
-
-## Behind
-
-```text id="testbehind17"
-[ ] varianceState = behind appears
-[ ] on_plan/ahead do not
-```
-
-## Completed today
-
-```text id="testcomplete17"
-[ ] completed on asOfDate appears
-[ ] completed on another date does not
-[ ] upload timestamp does not affect completion
-```
-
-## Milestones
-
-```text id="testmile17"
-[ ] zero-duration activity within window appears
-[ ] outside window does not
-[ ] past milestone does not
-```
-
-## Stale updates
-
-```text id="teststale17"
-[ ] never-updated activity is stale
-[ ] update within recentDays is not stale
-[ ] update exactly at boundary behaves deterministically
-[ ] old update is stale
-```
-
-## Recent changes
-
-```text id="testchanges17"
-[ ] project events returned
-[ ] other-project events excluded
-[ ] deterministic ordering
-[ ] bounded result size
-[ ] asOfDate boundary respected
-```
-
-## Project isolation
-
-```text id="testiso17"
-[ ] Project A intelligence contains no Project B facts
-[ ] foreign activities cannot leak
-[ ] foreign events cannot leak
-```
-
-## Determinism
-
-For the same fixtures:
-
-```text id="det17"
-getIntelligence(projectId, sameParameters)
-```
-
-called multiple times must produce logically identical arrays and values.
-
----
-
-# 22. Integration test
-
-Create a realistic project containing:
-
-```text id="fixture17"
-Activity A → delayed
-Activity B → at risk
-Activity C → completed today
-Activity D → behind schedule
-Activity E → approaching milestone
-Activity F → no recent update
-recent project events
-```
-
-Call:
-
-```text id="api17"
-GET /api/projects/:projectId/intelligence
-```
-
-Verify every category is populated correctly.
-
-Then create a second project and verify strict isolation.
-
----
-
-# 23. Existing regression tests
+# Verification
 
 Run:
 
-```text id="reg17"
+```text
 npm test
 npm run build
 ```
 
-Do not weaken any existing Pass 13–16 tests.
-
-Preserve:
+Inspect the diff for:
 
 ```text
-evidence provenance
-document ingestion
-job lifecycle
-content deduplication
-processing idempotency
-transaction rollback
-progress normalization
-snapshot calculations
-risk classification
-```
-
----
-
-# 24. Documentation
-
-Update:
-
-```text id="docs17"
-README.md
-docs/ARCHITECTURE.md
-```
-
-to document:
-
-```text
-Raw project state
-    ↓
-deterministic snapshot/risk engines
-    ↓
-Project Intelligence Query Layer
-    ↓
-structured facts
-    ↓
-future assistant / dashboard
-```
-
-Explicitly state:
-
-```text id="nopro17"
-Pass 17 produces structured deterministic facts.
-
-It does not generate assistant prose.
-```
-
----
-
-# 25. Scope guard
-
-DO NOT implement:
-
-```text id="scope17"
-LLM question answering
-natural-language query parsing
-assistant conversation
-embeddings
-vector search
-semantic retrieval
-RAG
-notifications
-new risk models
-new variance formulas
-forecasting
-dashboard redesign
-```
-
-Do not create another calculation engine.
-
-Do not modify canonical project truth.
-
----
-
-# 26. Definition of done
-
-Pass 17 is complete only when:
-
-```text id="done17"
-[ ] Canonical intelligence endpoint exists.
-
-[ ] Delayed activities are queryable.
-
-[ ] At-risk activities are queryable.
-
-[ ] Completed-today activities are queryable.
-
-[ ] Behind-schedule activities are queryable.
-
-[ ] Approaching milestones are queryable.
-
-[ ] Activities with no recent updates are queryable.
-
-[ ] Recent project changes are queryable.
-
-[ ] Results are structured facts, not generated prose.
-
-[ ] Existing snapshot formulas are reused.
-
-[ ] Existing risk classifications are reused.
-
-[ ] Historical progress is queried deterministically.
-
-[ ] asOfDate works consistently across queries.
-
-[ ] Query defaults are explicit.
-
-[ ] Sorting is deterministic.
-
-[ ] Result sizes are bounded.
-
-[ ] Project isolation is enforced.
-
-[ ] Existing Pass 13–16 behavior remains unchanged.
-
-[ ] Frontend uses structured facts without generating new intelligence logic.
-
-[ ] Full test suite passes.
-
-[ ] Build passes.
-
-[ ] No Pass 18+ functionality is implemented.
-```
-
----
-
-# 27. Final verification
-
-Inspect the final diff specifically for:
-
-```text id="review17"
-duplicated progress formulas
-duplicated risk formulas
-wall-clock-dependent historical queries
-nondeterministic sorting
-cross-project event leakage
-unbounded event queries
-AI/LLM calls
-natural-language parsing
-assistant prose generation
+duplicate completion logic
+wall-clock dependence
+changes to canonical ActivityProgress semantics
 Pass 18+ scope leakage
 ```
 
-Commit exactly:
+Commit:
 
-```text id="commit17"
-feat: implement FieldLine project intelligence queries
+```text
+fix: correct FieldLine completed-today intelligence
 ```
 
-Push to:
+Push to `main`.
 
-```text id="main17"
-main
-```
+Report:
 
-After implementation report:
-
-```text id="report17"
+```text
 1. exact files changed
-2. intelligence endpoint contract
-3. definitions used for each query
-4. existing services/repositories reused
-5. frontend integration
-6. tests added
-7. npm test result
-8. npm run build result
-9. commit SHA
-10. known limitations
+2. corrected completedToday semantics
+3. tests added
+4. npm test result
+5. npm run build result
+6. commit SHA
+7. remaining limitations
 ```

@@ -191,50 +191,164 @@ describe('ProjectIntelligenceService (Deterministic Structured Fact Queries)', (
   });
 
   describe('3. Completed Today Query', () => {
-    it('should return activities completed on canonical asOfDate and exclude other dates', () => {
-      // Act 1: completed on 2026-08-15
+    it('should return activities completed today (actualFinish === canonicalAsOfDate)', () => {
+      // Act 1: completed on 2026-08-28 (actualFinish = 2026-08-28)
       const act1 = activityRepo.create({
         projectId: projectAId,
         scheduleId: scheduleAId,
         externalId: 'ACT-DONE-TODAY',
         name: 'Finished Today',
         plannedStart: '2026-08-01',
-        plannedFinish: '2026-08-15'
+        plannedFinish: '2026-08-28'
       });
       progressRepo.create({
         projectId: projectAId,
         activityId: act1.id,
         actualPercent: 100,
         status: 'completed',
-        asOfDate: '2026-08-15'
+        actualFinish: '2026-08-28',
+        asOfDate: '2026-08-28'
       });
 
-      // Act 2: completed on 2026-08-10 (earlier date)
-      const act2 = activityRepo.create({
-        projectId: projectAId,
-        scheduleId: scheduleAId,
-        externalId: 'ACT-DONE-PAST',
-        name: 'Finished in Past',
-        plannedStart: '2026-08-01',
-        plannedFinish: '2026-08-10'
-      });
-      progressRepo.create({
-        projectId: projectAId,
-        activityId: act2.id,
-        actualPercent: 100,
-        status: 'completed',
-        asOfDate: '2026-08-10'
-      });
-
-      // Query asOfDate = 2026-08-15
       const intel = intelligenceService.getIntelligence(projectAId, {
-        asOfDate: '2026-08-15'
+        asOfDate: '2026-08-28'
       });
 
       expect(intel.completedToday).toHaveLength(1);
       expect(intel.completedToday[0].externalId).toBe('ACT-DONE-TODAY');
+      expect(intel.completedToday[0].actualFinish).toBe('2026-08-28');
       expect(intel.completedToday[0].actualPercent).toBe(100);
-      expect(intel.completedToday[0].asOfDate).toBe('2026-08-15');
+      expect(intel.completedToday[0].status).toBe('completed');
+    });
+
+    it('should NOT return activities completed earlier even if observed today (completed earlier, observed today)', () => {
+      // Act: completed on 2026-08-20, but latest observation as of 2026-08-28 shows completion
+      const act = activityRepo.create({
+        projectId: projectAId,
+        scheduleId: scheduleAId,
+        externalId: 'ACT-DONE-EARLIER',
+        name: 'Finished Earlier',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-20'
+      });
+      progressRepo.create({
+        projectId: projectAId,
+        activityId: act.id,
+        actualPercent: 100,
+        status: 'completed',
+        actualFinish: '2026-08-20',
+        asOfDate: '2026-08-28'
+      });
+
+      // Querying for 2026-08-28 must NOT include act because it completed on 2026-08-20
+      const intelToday = intelligenceService.getIntelligence(projectAId, {
+        asOfDate: '2026-08-28'
+      });
+      expect(intelToday.completedToday).toHaveLength(0);
+
+      // Querying for 2026-08-20 (historical snapshot with matching observation)
+      // If we record observation as-of 2026-08-20
+      progressRepo.create({
+        projectId: projectAId,
+        activityId: act.id,
+        actualPercent: 100,
+        status: 'completed',
+        actualFinish: '2026-08-20',
+        asOfDate: '2026-08-20'
+      });
+      const intelHistorical = intelligenceService.getIntelligence(projectAId, {
+        asOfDate: '2026-08-20'
+      });
+      expect(intelHistorical.completedToday).toHaveLength(1);
+      expect(intelHistorical.completedToday[0].externalId).toBe('ACT-DONE-EARLIER');
+    });
+
+    it('should NOT return future completion for historical snapshot', () => {
+      const act = activityRepo.create({
+        projectId: projectAId,
+        scheduleId: scheduleAId,
+        externalId: 'ACT-FUTURE-COMP',
+        name: 'Future Completion',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-25'
+      });
+      progressRepo.create({
+        projectId: projectAId,
+        activityId: act.id,
+        actualPercent: 100,
+        status: 'completed',
+        actualFinish: '2026-08-25',
+        asOfDate: '2026-08-25'
+      });
+
+      // Query historical snapshot as of 2026-08-20 (before completion)
+      const intel = intelligenceService.getIntelligence(projectAId, {
+        asOfDate: '2026-08-20'
+      });
+      expect(intel.completedToday).toHaveLength(0);
+    });
+
+    it('should exclude activities with 100% progress but no actualFinish date (fallback behavior)', () => {
+      const act = activityRepo.create({
+        projectId: projectAId,
+        scheduleId: scheduleAId,
+        externalId: 'ACT-NO-FINISH-DATE',
+        name: 'No Actual Finish Date',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-28'
+      });
+      progressRepo.create({
+        projectId: projectAId,
+        activityId: act.id,
+        actualPercent: 100,
+        status: 'completed',
+        actualFinish: null,
+        asOfDate: '2026-08-28'
+      });
+
+      const intel = intelligenceService.getIntelligence(projectAId, {
+        asOfDate: '2026-08-28'
+      });
+      // Excluded because actualFinish date is missing and we do not invent a completion date
+      expect(intel.completedToday).toHaveLength(0);
+    });
+
+    it('should ensure evidence upload and job completion timestamps cannot create completedToday', () => {
+      const act = activityRepo.create({
+        projectId: projectAId,
+        scheduleId: scheduleAId,
+        externalId: 'ACT-IN-PROGRESS',
+        name: 'In Progress Activity',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-30'
+      });
+      // Activity is in_progress (50%)
+      progressRepo.create({
+        projectId: projectAId,
+        activityId: act.id,
+        actualPercent: 50,
+        status: 'in_progress',
+        asOfDate: '2026-08-28'
+      });
+
+      // Evidence uploaded on 2026-08-28
+      db.prepare(`
+        INSERT INTO evidence (id, project_id, file_name, file_path, file_type, uploaded_at, created_at)
+        VALUES ('ev-test-1', ?, 'site_photo.jpg', '/uploads/photo.jpg', 'image', '2026-08-28T10:00:00.000Z', '2026-08-28T10:00:00.000Z')
+      `).run(projectAId);
+
+      // Job completed on 2026-08-28
+      db.prepare(`
+        INSERT INTO processing_jobs (id, project_id, job_type, status, payload_json, created_at, updated_at, completed_at)
+        VALUES ('job-test-1', ?, 'document_ingestion', 'completed', '{}', '2026-08-28T10:00:00.000Z', '2026-08-28T10:05:00.000Z', '2026-08-28T10:05:00.000Z')
+      `).run(projectAId);
+
+      const intel = intelligenceService.getIntelligence(projectAId, {
+        asOfDate: '2026-08-28'
+      });
+
+      // Must NOT appear in completedToday despite evidence and job completion on this date
+      expect(intel.completedToday).toHaveLength(0);
     });
   });
 
