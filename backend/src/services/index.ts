@@ -177,3 +177,25 @@ export {
 
 export * from './assistant/index.js';
 
+export {
+  DefaultProjectDashboardService,
+  projectDashboardService,
+  DEFAULT_DASHBOARD_RECENT_LIMIT,
+  MAX_DASHBOARD_RECENT_LIMIT
+} from './dashboard/project-dashboard.service.js';
+export type {
+  ProjectSummary,
+  ProjectHealthSummary,
+  ActivityStatusSummary,
+  DashboardMilestoneItem,
+  DashboardMilestoneSection,
+  DashboardUnresolvedMatchItem,
+  DashboardAttentionSummary,
+  DashboardMatchItem,
+  DashboardProgressObservationItem,
+  DashboardEvidenceItem,
+  DashboardRecentUpdateItem,
+  ProjectDashboard,
+  ProjectDashboardQueryOptions,
+  ProjectDashboardService
+} from './dashboard/dashboard.types.js';

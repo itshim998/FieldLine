@@ -33,8 +33,10 @@ import {
   HelpCircle,
   ChevronDown,
   ChevronUp,
-  MessageSquare
+  MessageSquare,
+  LayoutDashboard
 } from 'lucide-react';
+import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 
@@ -1451,11 +1453,12 @@ export function App(): React.JSX.Element {
           {/* Navigation Sub-Tabs */}
           <div className="workspace-tabs">
             <button
+              id="tab-overview"
               className={`workspace-tab ${activeWorkspaceTab === 'overview' ? 'active' : ''}`}
               onClick={() => setActiveWorkspaceTab('overview')}
             >
-              <FolderGit2 size={16} />
-              <span>Project Overview</span>
+              <LayoutDashboard size={16} />
+              <span>Project Dashboard</span>
             </button>
             <button
               id="tab-schedules"
@@ -1534,82 +1537,39 @@ export function App(): React.JSX.Element {
 
           {/* Tab Content */}
           {activeWorkspaceTab === 'overview' ? (
-            /* Tab 1: Project Overview Content */
-            <div className="workspace-content">
-              {/* Metadata Grid */}
-              <div className="meta-grid">
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <Activity size={14} color="var(--accent-blue)" />
-                    Lifecycle Status
-                  </span>
-                  <div style={{ marginTop: '0.2rem' }}>
-                    <span className={`status-badge ${selectedProject.status}`} style={{ fontSize: '0.85rem' }}>
-                      {selectedProject.status}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <FolderGit2 size={14} color="var(--accent-cyan)" />
-                    Unique Project Code
-                  </span>
-                  <span className="meta-card-value mono">{selectedProject.code}</span>
-                </div>
-
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <Calendar size={14} color="var(--accent-emerald)" />
-                    Planned Start Date
-                  </span>
-                  <span className="meta-card-value">
-                    {selectedProject.startDate ? selectedProject.startDate.slice(0, 10) : 'Not set'}
-                  </span>
-                </div>
-
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <Calendar size={14} color="var(--accent-amber)" />
-                    Target Completion Date
-                  </span>
-                  <span className="meta-card-value">
-                    {selectedProject.targetEndDate ? selectedProject.targetEndDate.slice(0, 10) : 'Not set'}
-                  </span>
-                </div>
-
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <Clock size={14} color="var(--accent-indigo)" />
-                    Created Timestamp
-                  </span>
-                  <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
-                    {new Date(selectedProject.createdAt).toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="meta-card">
-                  <span className="meta-card-label">
-                    <Clock size={14} color="var(--accent-purple)" />
-                    Last Updated
-                  </span>
-                  <span className="meta-card-value" style={{ fontSize: '0.9rem' }}>
-                    {new Date(selectedProject.updatedAt).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              {/* Scope Card */}
-              <div className="pass3-scope-card">
-                <div className="pass3-scope-header">
-                  <ShieldCheck size={18} />
-                  <span>FieldLine Pass 7 Active Project Workspace</span>
-                </div>
-                <p className="pass3-scope-text">
-                  This infrastructure project is fully registered in local SQLite persistence. Use the <strong>Schedules & Activities</strong> tab to import baseline schedules in <strong>.csv</strong> or <strong>.xlsx</strong> format, or switch to <strong>Progress Updates</strong> to record and persist raw manual field reports with verified data integrity.
-                </p>
-              </div>
-            </div>
+            /* Tab 1: Pass 20 Primary Project Dashboard View */
+            <ProjectDashboardView
+              projectId={selectedProject.id}
+              onNavigateTab={(tab, extra) => {
+                setActiveWorkspaceTab(tab);
+                if (tab === 'progress' && selectedProject) {
+                  fetchProgressUpdates(selectedProject.id);
+                  if (extra?.updateId) {
+                    setExpandedReportMatches((prev) => ({ ...prev, [extra.updateId!]: true }));
+                    fetchReportMatches(selectedProject.id, extra.updateId);
+                  }
+                } else if (tab === 'schedules' && selectedProject) {
+                  if (schedules.length > 0) {
+                    fetchActivities(selectedProject.id, selectedSchedule?.id || schedules[0].id);
+                  }
+                } else if (tab === 'intelligence' && selectedProject) {
+                  fetchIntelligence(
+                    selectedProject.id,
+                    intelligenceAsOfDate,
+                    intelligenceRecentDays,
+                    intelligenceApproachingDays
+                  );
+                } else if (tab === 'evidence' && selectedProject) {
+                  fetchEvidence(selectedProject.id);
+                }
+              }}
+              onTraceEvidence={() => {
+                setActiveWorkspaceTab('evidence');
+                if (selectedProject) {
+                  fetchEvidence(selectedProject.id);
+                }
+              }}
+            />
           ) : activeWorkspaceTab === 'schedules' ? (
             /* Tab 2: Schedules & Importer Content (PASS 4) */
             <div className="schedules-container">

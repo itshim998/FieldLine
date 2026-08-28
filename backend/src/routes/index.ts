@@ -12,6 +12,7 @@ import { evidenceRouter } from './evidence.router.js';
 import { jobRouter } from './job.router.js';
 import { intelligenceRouter } from './intelligence.router.js';
 import { assistantRouter } from './assistant.router.js';
+import { dashboardRouter } from './dashboard.router.js';
 
 export const apiRouter = Router();
 
@@ -28,6 +29,7 @@ apiRouter.use(evidenceRouter);
 apiRouter.use(jobRouter);
 apiRouter.use(intelligenceRouter);
 apiRouter.use(assistantRouter);
+apiRouter.use(dashboardRouter);
 
 
 

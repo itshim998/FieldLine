@@ -1,1078 +1,871 @@
-# FieldLine — PASS 19 CORRECTIVE FIX
+# FieldLine — PASS 20: PRIMARY PROJECT DASHBOARD
 
-Pass 19 is close, but it is **NOT APPROVED yet**.
+Implement **Pass 20 — Dashboard** in the existing FieldLine repository.
 
-The current implementation successfully introduces:
+Approved base is the current `main` after Pass 19.
 
-* deterministic confidence tiers
-* high/medium/low review policy
-* automatic high-confidence confirmation
-* human confirm/reject/resolve endpoints
-* project isolation
-* canonical truth protection
-* frontend uncertainty indicators
+Before editing, inspect the actual repository HEAD and current implementation.
 
-However, two integrity problems remain and must be corrected before Pass 19 can be closed.
-
-Do **not** start Pass 20.
-
-Current Pass 19 commits include:
-
-```text
-b0b675604eecfcab9c089b4583dcd2296d24f438
-feat: implement FieldLine human review workflow
-
-3b2bd53a700c15accdd8e9403ce9c65dc9c0c34e
-test: expand canonical truth protection test suite
-```
-
-Work from the actual current `main`, not from an older local state.
+Do NOT implement Pass 21+.
 
 ---
 
-# 1. BLOCKER — CONFIRMED MATCH HISTORY MUST NOT BE MUTATED
+# 1. Objective
 
-The current repository method:
+Build the primary presentation interface so a manager/judge can understand the project's current state within seconds.
 
-```text
-ActivityMatchRepository.updateMatchReview(...)
+The dashboard must show:
+
+```text id="obj20"
+Project health
+Activity status
+Recent updates
+Milestones
+Evidence/provenance
+Review uncertainty where relevant
 ```
 
-can modify:
+The dashboard is a PRESENTATION layer.
 
-```text
-activity_id
-status
-match_method
-rationale
-review_state
-reviewed_by
-reviewed_at
+It must NOT become a second source of project truth.
+
+---
+
+# 2. Existing canonical sources
+
+Reuse the existing APIs/services.
+
+Important existing sources include:
+
+```text id="sources20a"
+ProgressSnapshotService
+RiskClassificationService
+ProjectIntelligenceService
+ProgressUpdateRepository / APIs
+ActivityMatch / review APIs
+Evidence APIs
 ```
 
-in place.
+The existing Project Intelligence endpoint is:
 
-This creates a serious provenance problem.
+```http
+GET /api/projects/:projectId/intelligence
+```
+
+and already exposes:
+
+```text id="7facts20"
+delayed
+atRisk
+completedToday
+behindSchedule
+approachingMilestones
+staleActivities
+recentChanges
+```
+
+Reuse it.
+
+Do NOT recreate these calculations in React.
+
+Do NOT introduce separate formulas for risk, variance, delay, milestone timing or staleness.
+
+---
+
+# 3. Dashboard architecture
+
+Preferred architecture:
+
+```text id="arch20"
+Existing canonical data
+      ↓
+Dashboard composition
+      ↓
+Presentation components
+```
+
+Do NOT make the dashboard itself responsible for domain truth.
+
+Do NOT create:
+
+```text id="nobiz20"
+new risk engine
+new progress engine
+new milestone engine
+new stale-update engine
+new matching engine
+```
+
+---
+
+# 4. Decide whether a dashboard endpoint is necessary
+
+First inspect current frontend API usage.
+
+Preferred:
+
+```text id="api20a"
+reuse existing endpoints
+```
+
+If the dashboard requires too many separate project-scoped HTTP requests and a thin aggregation endpoint materially improves correctness/performance, add:
+
+```http
+GET /api/projects/:projectId/dashboard
+```
+
+but ONLY as a composition endpoint.
+
+Its implementation may call/reuse existing domain services.
+
+It must NOT duplicate business rules.
+
+If added, define typed response DTOs and project isolation.
+
+---
+
+# 5. Dashboard response
+
+The dashboard needs a compact project overview.
+
+Conceptually:
+
+```ts id="dashdto20"
+interface ProjectDashboard {
+  project: ProjectSummary;
+  health: ProjectHealthSummary;
+  activityStatus: ActivityStatusSummary;
+  recentUpdates: DashboardRecentUpdate[];
+  milestones: DashboardMilestoneSection;
+  attention: DashboardAttentionSummary;
+}
+```
+
+Reuse existing DTOs where practical.
+
+Do not duplicate the entire project database model.
+
+---
+
+# 6. Project Health section
+
+Top-of-dashboard section:
+
+```text id="health20"
+Project Health
+```
+
+Show:
+
+```text
+Overall Progress
+Planned Progress
+Variance
+Health / Risk Classification
+```
+
+Use the existing progress snapshot and risk classification.
 
 Example:
 
 ```text
-Match M1
-activityId = Foundation B
-status = confirmed
-        ↓
-ProgressService
-        ↓
-ActivityProgress references M1 / Foundation B
-        ↓
-later /resolve M1
-        ↓
-activityId = Foundation C
+62% Actual
+74% Planned
+-12 pts
+AT RISK
 ```
 
-Now the historical match says Foundation C while the canonical progress was created for Foundation B.
-
-That must never happen.
-
-The same problem exists if an already-confirmed match can later be rejected.
-
-## Required invariant
-
-Once a match is confirmed or rejected, its historical decision must not be silently rewritten.
-
-Required state rules:
+Do NOT invent another score such as:
 
 ```text
-suggested + awaiting_review
-    → confirm
-    → reject
-
-suggested + unresolved
-    → resolve
-    → reject
-
-confirmed
-    → immutable historical decision
-
-rejected
-    → immutable historical decision
+Health = 73
 ```
 
-A confirmed match MUST NOT be retargeted with `/resolve`.
+unless that metric already exists in the repository.
 
-A confirmed match MUST NOT be retroactively rejected.
-
-A rejected match MUST NOT be silently confirmed.
+Use canonical terminology.
 
 ---
 
-# 2. Review operations must enforce legal state transitions
+# 7. Activity Status section
 
-Do not rely only on frontend behavior.
+Display counts for:
 
-The backend service must enforce the transition matrix.
-
-Define a central transition policy, for example:
-
-```text
-suggested + awaiting_review
-    → confirmed
-    → rejected
-
-suggested + unresolved
-    → confirmed via explicit resolve only
-    → rejected
-
-confirmed
-    → no further mutation
-
-rejected
-    → no further mutation
+```text id="status20"
+ON_TRACK
+AHEAD
+AT_RISK
+DELAYED
+COMPLETED
 ```
 
-The exact names may differ based on the current model, but the semantics must be equivalent.
+Use the existing deterministic risk classification output.
 
-Invalid transitions must raise a deterministic `ValidationError`.
+Do not recalculate the classifications in frontend code.
 
-Examples:
+Clicking a status should allow navigation/filtering to the relevant existing activity/progress view.
 
-```text
-confirm(confirmed)
-→ reject
-
-reject(confirmed)
-→ reject
-
-resolve(confirmed, differentActivity)
-→ reject
-
-confirm(rejected)
-→ reject
-
-resolve(rejected)
-→ reject
-```
-
-Do not create silent no-ops.
+Do not create the future Activity Detail View in this pass.
 
 ---
 
-# 3. Do NOT rewrite historical ActivityMatch records
+# 8. Attention summary
 
-When a low-confidence match is manually resolved:
+Create a compact "Needs Attention" section using existing facts:
 
-Current candidate:
-
-```text
-activityId = weak/initial candidate
-confidenceScore = 0.41
-matchMethod = text_similarity
+```text id="attention20"
+Delayed: N
+At Risk: N
+Stale Updates: N
+Unresolved Matches: N
 ```
 
-Human chooses:
+Use:
 
-```text
-activityId = ACT-203
+```text id="6mrssx"
+ProjectIntelligence.delayed
+ProjectIntelligence.atRisk
+ProjectIntelligence.staleActivities
 ```
 
-It is acceptable to transition that unresolved record to a human-resolved confirmed state **only if it has not yet become canonical progress and the record is clearly still a review candidate**.
+For unresolved matches, use existing Pass 19 review-state data.
 
-But once a match has become a confirmed historical decision that may already be referenced by ActivityProgress, it must not be retargeted.
+Do not invent another attention/risk score.
 
-Before implementing this, inspect how `ActivityProgress` references matches in the current schema and repository.
-
-Prefer the smallest change that guarantees historical consistency.
-
-If the current model cannot guarantee this cleanly, introduce an immutable review-resolution record or create a new manual match record rather than rewriting an existing confirmed record.
-
-Do not introduce unnecessary architectural complexity.
+Clicking an item should navigate to the existing relevant workspace/view.
 
 ---
 
-# 4. Review actions and audit events MUST be atomic
+# 9. Recent Updates
 
-Current review operations do this conceptually:
+Create a chronological dashboard section:
 
-```text
-UPDATE activity_matches
-        ↓
-try create project event
-        ↓
-catch error
-        ↓
-log and continue
+```text id="recent20"
+Recent Updates
 ```
 
-This is unacceptable for an auditable review system.
+Each item should show at minimum:
 
-A successful review action must never exist without its corresponding audit event.
+```text
+date/time
+activity
+reported progress/status
+source
+```
 
-The same applies to automatic confirmation and match suggestion events where those events represent the state transition being recorded.
+Source examples:
+
+```text
+manual
+xlsx
+pdf
+image
+text
+voice
+```
+
+Use canonical ProgressUpdate and ActivityProgress data.
+
+Do NOT infer activity completion from:
+
+```text
+Evidence.uploadedAt
+job.completedAt
+frontend timestamp
+```
+
+Activity progress remains authoritative.
 
 ---
 
-# 5. Required transaction boundary
+# 10. Recent update ordering
 
-For each state-changing review operation:
+Use deterministic ordering.
 
-```text
-BEGIN TRANSACTION
+Newest first.
 
-1. verify target row/project/state
-2. update activity_matches
-3. insert corresponding project_event
+Tie-break deterministically when timestamps are equal.
 
-COMMIT
+Do not rely on arbitrary SQLite row order.
+
+Use bounded results.
+
+A reasonable default is:
+
+```text id="recentlimit20"
+10 most recent meaningful updates
 ```
 
-If step 2 or step 3 fails:
+or another clearly documented limit consistent with existing APIs.
 
-```text
-ROLLBACK
-```
-
-The API must return an error and the match must remain in its previous state.
-
-Do NOT swallow project-event persistence errors.
-
-Do NOT merely log them.
-
-Do NOT return success after an audit write failure.
+Do not load unlimited history into the dashboard.
 
 ---
 
-# 6. Atomic operations required
+# 11. Milestones section
 
-At minimum:
+Show:
 
-```text
-auto-confirm
-human confirm
-human reject
-human resolve
+```text id="milestone20"
+Upcoming Milestones
 ```
 
-must have atomic state + audit persistence.
-
-For example:
+and:
 
 ```text
-auto-confirm:
-  match.status → confirmed
-  match.reviewState → resolved
-  match.reviewedBy → system
-  match.reviewedAt → timestamp
-  projectEvent → match_auto_confirmed
-
-ALL IN ONE TRANSACTION
+Recently Completed / Late Milestones
 ```
 
-Human confirmation:
+Use the same milestone definition already used by Project Intelligence:
 
-```text
-match.status → confirmed
-match.reviewState → resolved
-reviewer metadata
-projectEvent → match_confirmed
-
-ALL IN ONE TRANSACTION
+```text id="milestone_definition20"
+plannedStart === plannedFinish
 ```
 
-Rejection:
+Do not create another milestone calculation.
 
-```text
-match.status → rejected
-match.reviewState → resolved
-reviewer metadata
-reason
-projectEvent → match_rejected
+For upcoming milestones, reuse:
 
-ALL IN ONE TRANSACTION
+```text id="reusemilestone20"
+ProjectIntelligence.approachingMilestones
 ```
 
-Manual resolution:
-
-```text
-target activity
-matchMethod → manual
-status → confirmed
-reviewState → resolved
-reviewer metadata
-projectEvent → match_resolved
-
-ALL IN ONE TRANSACTION
-```
+with an appropriate UI limit.
 
 ---
 
-# 7. Do not use best-effort audit logging
+# 12. Completed / late milestones
 
-Remove patterns equivalent to:
+For completed milestones, inspect existing ActivityProgress / risk data.
 
-```ts
-try {
-  projectEventRepo.create(...)
-} catch {
-  logger.debug(...)
-}
-```
+A milestone should not be called "completed" merely because its date passed.
 
-for mandatory review/audit events.
+Use canonical ActivityProgress status / actual finish where available.
 
-Audit persistence is part of the state change.
+For a late milestone, use existing authoritative progress/risk fields.
 
-An audit failure is a state-change failure.
+Do NOT create a new late-milestone formula.
+
+If the current repository cannot establish "completed late" unambiguously, expose only what the canonical data supports rather than guessing.
 
 ---
 
-# 8. Repository/service design
+# 13. Evidence-backed navigation
 
-Prefer a repository method that performs the state transition and audit insertion in the same SQLite transaction rather than making the service perform two independent writes.
+The dashboard should allow users to get to the source evidence behind a result.
 
-For example:
+For update/activity cards where provenance exists, provide:
 
-```ts
-updateMatchReviewWithEvent(...)
+```text id="evidence20"
+View Evidence
 ```
 
 or:
 
-```ts
-confirmMatchAtomically(...)
-rejectMatchAtomically(...)
-resolveMatchAtomically(...)
+```text
+Trace Evidence
 ```
 
-Choose the smallest clean abstraction consistent with the existing repository architecture.
+Use existing Evidence APIs and identifiers.
 
-Do not introduce a generic transaction framework.
+Do NOT display filesystem paths.
 
-Reuse the existing SQLite transaction utilities if the repository already has them.
+Do NOT duplicate Evidence storage.
+
+Do NOT build a second Evidence inventory.
+
+The existing Evidence workspace remains authoritative for full evidence management.
 
 ---
 
-# 9. Automatic confirmation must also be protected
+# 14. Progress update click behavior
 
-Current `matchProgressUpdate()` creates confirmed records for high-confidence matches.
+Clicking a recent update should navigate/open the existing progress history/review surface.
 
-The transition:
-
-```text
-candidate
-→ confirmed
-```
-
-and:
-
-```text
-match_auto_confirmed event
-```
-
-must be transactionally consistent.
-
-If the event insertion fails:
-
-```text
-NO confirmed match should remain persisted.
-```
-
-Likewise, if the match insertion itself fails:
-
-```text
-NO audit event should remain.
-```
-
-The two writes must commit or rollback together.
-
----
-
-# 10. Suggested-event persistence
-
-For medium/low candidates, the repository currently emits:
-
-```text
-match_suggested
-```
-
-as a separate operation.
-
-Ensure the persisted review candidate and its required audit event cannot become inconsistent.
-
-At minimum:
-
-```text
-suggested match persisted
-+
-match_suggested event persisted
-```
-
-must be atomic when the event is considered part of the required audit trail.
-
----
-
-# 11. Preserve project isolation
-
-Every atomic review operation must continue enforcing:
-
-```text
-match.project_id === requested projectId
-```
-
-and when resolving:
-
-```text
-targetActivity.project_id === requested projectId
-```
-
-Also ensure:
-
-```text
-progressUpdate.project_id === requested projectId
-```
-
-where relevant.
-
-Cross-project attempts must behave exactly like existing project-scoped APIs.
-
-Do not leak whether another project's match/activity exists.
-
----
-
-# 12. Reviewer metadata
-
-Preserve the distinction:
-
-```text
-system
-```
-
-versus:
-
-```text
-human reviewer
-```
-
-Automatic confirmation must remain identifiable as system-driven.
-
-Human confirmation must record the reviewer.
-
-Manual resolution must record:
-
-```text
-reviewedBy
-reviewedAt
-matchMethod = manual
-```
-
-Do not replace the original AI confidence score.
-
-The original AI score/rationale remains historical evidence for why the match originally reached review.
-
----
-
-# 13. Preserve original confidence information
-
-When a human resolves:
-
-```text
-score = 0.42
-```
-
-do NOT rewrite it to:
-
-```text
-score = 1.0
-```
-
-The correct semantic model is:
-
-```text
-AI confidence = 0.42
-human decision = confirmed
-review method = manual
-```
-
-This distinction must remain visible.
-
----
-
-# 14. Required state-transition tests
-
-Add explicit unit/service tests for every invalid transition:
-
-```text
-[ ] confirmed → confirm rejected
-[ ] confirmed → reject rejected
-[ ] confirmed → resolve rejected
-
-[ ] rejected → confirm rejected
-[ ] rejected → resolve rejected
-[ ] rejected → reject rejected or deterministic idempotent behavior if explicitly designed
-
-[ ] awaiting_review → confirm accepted
-[ ] awaiting_review → reject accepted
-
-[ ] unresolved → resolve accepted
-[ ] unresolved → reject accepted
-```
-
-Choose one explicit behavior for repeated reject/confirm operations and test it.
-
-Do not leave the behavior implicit.
-
----
-
-# 15. REQUIRED IMMUTABILITY TEST
-
-This is mandatory.
-
-Create:
-
-```text
-Match M1
-activity = Foundation B
-status = confirmed
-```
-
-Create canonical progress from M1.
-
-Then attempt:
-
-```text
-resolve M1 → Foundation C
-```
-
-The operation MUST fail.
-
-Then verify:
-
-```text
-M1.activityId === Foundation B
-```
-
-and:
-
-```text
-ActivityProgress still points to Foundation B
-```
-
-No historical data may be changed.
-
----
-
-# 16. REQUIRED AUDIT-FAILURE TEST
-
-Simulate:
-
-```text
-match state update succeeds
-project event insertion throws
-```
-
-The expected result:
-
-```text
-API fails
-match state rolls back
-reviewedBy remains unchanged
-reviewedAt remains unchanged
-project event does not exist
-```
-
-Repeat for:
-
-```text
-confirm
-reject
-resolve
-```
-
-and at least one automatic-confirmation path.
-
-This test is critical.
-
-Do not fake the test by simply mocking the whole service method.
-
-Force the actual repository transaction boundary to fail.
-
----
-
-# 17. REQUIRED COMMIT-FAILURE TEST
-
-Verify the inverse:
-
-```text
-match insert/update fails
-```
-
-and confirm that:
-
-```text
-no audit event exists
-```
-
-This ensures the transaction is truly atomic in both directions.
-
----
-
-# 18. Concurrency / duplicate review behavior
-
-Inspect the existing SQLite behavior and current test conventions.
-
-Prevent two simultaneous reviewers from producing invalid transitions.
-
-Example:
-
-```text
-Reviewer A:
-confirm M1
-
-Reviewer B:
-reject M1
-```
-
-Only one legal transition should win.
-
-The second operation must observe the new state and fail deterministically or behave according to the explicit transition policy.
-
-It must never result in:
-
-```text
-status = rejected
-+
-status = confirmed
-```
-
-being inconsistently represented.
-
-Use SQLite transaction/conditional-update semantics where appropriate.
-
----
-
-# 19. Do not create duplicate canonical truth
-
-After human confirmation:
-
-```text
-existing ActivityProgress
-```
-
-must not be duplicated simply because the review endpoint is called twice.
-
-Inspect current ProgressService idempotency semantics from Pass 16 and preserve them.
-
-The review endpoint should not directly implement a second progress-creation mechanism.
-
----
-
-# 20. Preserve the existing frontend
-
-Do not redesign the UI.
-
-Keep the four states:
+Where match review is applicable:
 
 ```text
 Confirmed
-Needs Review
+Suggested
 Unresolved
 Rejected
 ```
 
-But make sure UI actions are disabled/removed for states that are no longer legally mutable.
+must remain visually distinguishable.
 
-For a confirmed match:
-
-```text
-no Resolve button
-no Reject button
-```
-
-For a rejected match:
-
-```text
-no Confirm button
-no Resolve button
-```
-
-For awaiting review:
-
-```text
-Confirm
-Reject
-Resolve/alternative choice where appropriate
-```
-
-For unresolved:
-
-```text
-Resolve
-Reject
-```
-
-The backend remains authoritative even if the frontend somehow sends an invalid request.
+Do not create new review semantics in the dashboard.
 
 ---
 
-# 21. Existing rematching behavior
+# 15. Review uncertainty on dashboard
 
-There is already logic intended to preserve reviewed matches during rematching.
+Surface unresolved work clearly.
 
-Do NOT regress this.
-
-Inspect:
+For example:
 
 ```text
-deleteSuggestedByProgressUpdateId(...)
+Needs Review
+Foundation B
+Medium confidence — Suggested
+
+Unresolved
+"North wall"
+Low confidence — Unresolved
 ```
 
-and all existing rematching tests.
+Do NOT present suggested/unresolved matches as normal canonical progress.
 
-Ensure the new state model does not cause:
+Only confirmed matches represent canonical truth.
 
-```text
-human-reviewed confirmed match
-```
-
-to be deleted or rewritten during a later matching pass.
-
-Preserve the existing behavior where human-reviewed records survive rematching.
+This is inherited directly from Pass 19.
 
 ---
 
-# 22. Migration safety
+# 16. Visual hierarchy
 
-Do not modify migration `0007` if the schema has already been released.
-
-If schema changes are required:
+The first viewport should answer:
 
 ```text
-create migration 0008
+How healthy is the project?
+What is going wrong?
+What needs attention now?
 ```
 
-with proper forward migration behavior.
-
-Existing records must remain valid.
-
-Backfilled:
+Suggested structure:
 
 ```text
-confidenceTier
-reviewState
+┌───────────────────────────────────────────────┐
+│ PROJECT NAME                     AS OF DATE   │
+├───────────────────────────────────────────────┤
+│ HEALTH                                        │
+│                                               │
+│ 62% Actual   74% Planned   -12 pts   AT RISK │
+├───────────────────────────────────────────────┤
+│ ACTIVITY STATUS                               │
+│ On Track | Ahead | At Risk | Delayed | Done   │
+├───────────────────────┬───────────────────────┤
+│ NEEDS ATTENTION       │ UPCOMING MILESTONES   │
+│ • 4 delayed           │ • Foundation B        │
+│ • 2 at risk           │ • Structure start     │
+│ • 7 stale             │                       │
+│ • 2 unresolved        │                       │
+├───────────────────────┴───────────────────────┤
+│ RECENT UPDATES                                │
+│ ...                                           │
+└───────────────────────────────────────────────┘
 ```
 
-must remain consistent with their historical status.
+Adapt this to the existing visual system.
+
+Do not introduce an unrelated design language.
 
 ---
 
-# 23. Tests for project isolation
+# 17. Existing frontend architecture
 
-Ensure:
+The current frontend is already centered around `frontend/src/App.tsx` and `index.css`.
+
+Inspect the existing workspace/tab architecture before making changes.
+
+Prefer extracting reusable components/modules if `App.tsx` is already large.
+
+Possible structure:
 
 ```text
-[ ] Project A cannot confirm Project B match
-[ ] Project A cannot reject Project B match
-[ ] Project A cannot resolve Project B match
-[ ] Project A cannot resolve to Project B activity
-[ ] Project B audit events do not appear in Project A queries
+frontend/src/components/dashboard/
+    ProjectHealth.tsx
+    ActivityStatusSummary.tsx
+    AttentionSummary.tsx
+    RecentUpdates.tsx
+    MilestoneSummary.tsx
 ```
 
-Use the same 404/not-found security semantics already established in FieldLine.
+Use the smallest clean decomposition consistent with the current codebase.
+
+Do not rewrite the entire application.
 
 ---
 
-# 24. Tests for audit ordering / transactionality
+# 18. Dashboard data fetching
 
-After every successful operation:
+Do not create duplicated fetches for the same source.
 
-```text
-database state
-+
-audit event
+Implement predictable loading states:
+
+```text id="loading20"
+loading
+partial/error
+loaded
 ```
 
-must both exist.
+Handle slow project queries gracefully.
 
-After every forced failure:
+Do not block the entire page if one optional section fails.
 
-```text
-database state unchanged
-+
-no partial audit event
-```
-
-must hold.
-
-Use direct database assertions rather than only inspecting returned service objects.
+A critical project-health failure should be visibly reported.
 
 ---
 
-# 25. Preserve canonical truth protection
+# 19. Empty states
 
-The existing invariant remains:
+Handle:
 
-```text
-suggested / awaiting_review
-    → NOT canonical
-
-suggested / unresolved
-    → NOT canonical
-
-rejected
-    → NOT canonical
-
-confirmed
-    → eligible for existing ProgressService
+```text id="empty20"
+no recent updates
+no upcoming milestones
+no delayed activities
+no at-risk activities
+no stale activities
+no unresolved matches
 ```
 
-Do not weaken this.
+Use clear positive empty states.
 
-The only way uncertain AI output becomes canonical remains an explicit approved transition:
+Do not show broken-looking empty cards.
+
+Example:
 
 ```text
-high + unambiguous
-    → system confirmed
+No delayed activities
+```
 
-medium/low
-    → human review
-    → confirmed
+rather than blank space.
+
+---
+
+# 20. Error states
+
+Show project-scoped errors cleanly.
+
+Do not expose:
+
+```text id="error20"
+filesystem paths
+stack traces
+SQLite errors
+internal provider details
+```
+
+Reuse the application's existing error-handling behavior.
+
+---
+
+# 21. As-of date
+
+Because Project Intelligence already supports deterministic:
+
+```text id="asof20"
+asOfDate
+```
+
+the dashboard should clearly display the date represented by its metrics.
+
+Example:
+
+```text
+As of 28 Aug 2026
+```
+
+Do not make the dashboard imply that historical metrics are today's values.
+
+If the current dashboard is live/today-oriented, use today's canonical snapshot date.
+
+A date selector is optional; do not add one unless it fits naturally with the existing Project Intelligence controls.
+
+---
+
+# 22. Source transparency
+
+For recent updates display the source:
+
+```text
+XLSX
+PDF
+Manual
+Image
+Voice
+Text
+```
+
+For AI-derived match states, display:
+
+```text
+Confirmed
+Suggested
+Unresolved
+Rejected
+```
+
+The dashboard should make the origin and certainty of important information visible.
+
+---
+
+# 23. Performance
+
+Do not fetch:
+
+```text id="perf20"
+entire evidence files
+entire event history
+entire progress history
+```
+
+just to render the dashboard.
+
+Use bounded APIs and existing summary services.
+
+Lazy-load expensive/non-critical content if appropriate.
+
+---
+
+# 24. Responsive behavior
+
+The first viewport must remain useful on:
+
+```text id="responsive20"
+desktop
+tablet
+reasonable narrow viewport
+```
+
+Do not rely on fixed-width giant tables for critical health metrics.
+
+Recent updates may become a vertical list on smaller screens.
+
+---
+
+# 25. Accessibility
+
+Use:
+
+```text id="a11y20"
+semantic headings
+buttons for actionable elements
+keyboard-accessible controls
+clear status text
+visible focus states
+non-color-only status indicators
+```
+
+Do not communicate:
+
+```text "red = delayed"
+```
+
+without a text/icon/state label.
+
+---
+
+# 26. Tests
+
+Add frontend/component tests if the existing frontend test setup supports them.
+
+At minimum, backend/API tests should verify any new dashboard aggregation endpoint if one is created.
+
+Test:
+
+```text id="backendtests20"
+[ ] project-scoped dashboard data
+[ ] health values match canonical snapshot
+[ ] risk classification matches canonical engine
+[ ] activity status counts are correct
+[ ] recent updates bounded and deterministic
+[ ] milestone data uses existing semantics
+[ ] project isolation
+```
+
+If no new backend endpoint is needed, focus on existing API integration and frontend behavior.
+
+---
+
+# 27. Regression tests
+
+Preserve all existing tests:
+
+```text id="regression20"
+Pass 13 Evidence
+Pass 14 Ingestion
+Pass 15 Jobs
+Pass 16 Idempotency
+Pass 17 Intelligence
+Pass 18 Assistant
+Pass 19 Human Review
+```
+
+Do not weaken existing assertions.
+
+---
+
+# 28. Documentation
+
+Update:
+
+```text id="docs20"
+README.md
+docs/ARCHITECTURE.md
+```
+
+Document:
+
+```text
+Project Dashboard
+    ↓
+presentation over existing canonical services
+
+Project health
+    ↓
+Progress Snapshot + Risk
+
+Attention
+    ↓
+Project Intelligence + Review state
+
+Recent updates
+    ↓
+Progress / ActivityProgress
+
+Milestones
+    ↓
+Project Intelligence
+
+Evidence
+    ↓
+existing Evidence provenance
+```
+
+Explicitly state:
+
+```text
+The dashboard does not define project truth.
 ```
 
 ---
 
-# 26. Required regression scenarios
+# 29. Scope guard
 
-Build end-to-end tests for:
+DO NOT implement:
 
-### Scenario A — Medium-confidence confirmation
-
-```text
-AI
-→ medium
-→ suggested
-→ human confirm
-→ confirmed
-→ canonical ProgressService
-```
-
-### Scenario B — Low-confidence resolution
-
-```text
-AI
-→ low
-→ unresolved
-→ human selects alternative
-→ manual confirmed
-→ canonical ProgressService
-```
-
-### Scenario C — Rejection
-
-```text
-AI
-→ suggested
-→ human reject
-→ rejected
-→ no ActivityProgress
-```
-
-### Scenario D — Ambiguous high score
-
-```text
-0.91 vs 0.90
-→ NOT auto-confirmed
-→ awaiting review
-```
-
-### Scenario E — Isolated high confidence
-
-```text
-0.95
-with sufficient separation
-→ auto-confirmed
-```
-
-### Scenario F — Historical immutability
-
-```text
-confirmed
-→ used for ActivityProgress
-→ attempted retarget
-→ rejected
-→ all historical links unchanged
-```
-
-### Scenario G — Audit failure rollback
-
-```text
-review update
-+
-forced audit failure
-→ everything rolled back
-```
-
----
-
-# 27. No unnecessary redesign
-
-Do not introduce:
-
-```text
-authentication system
-RBAC
+```text id="scope20"
+Pass 21 Activity Detail View
+Pass 22 Voice Input
+assistant redesign
+chat history
+new matching algorithms
+new risk algorithms
+new progress formulas
+new milestone engine
+new evidence engine
 notifications
-email
-multi-user accounts
-new matching algorithm
-new confidence model
-new ProgressService
-new dashboard
-Pass 20 job changes
-assistant changes
+mobile application
 ```
 
-This is a **Pass 19 corrective fix only**.
+Do not turn this into a general BI dashboard.
+
+Pass 20 is the primary FieldLine operational overview.
 
 ---
 
-# 28. Final verification
+# 30. Definition of done
+
+Pass 20 is complete only when:
+
+```text id="done20"
+[ ] Dashboard is the primary project overview.
+
+[ ] Overall actual progress is visible.
+
+[ ] Planned progress is visible.
+
+[ ] Variance is visible.
+
+[ ] Current project health/risk is visible.
+
+[ ] On Track / Ahead / At Risk / Delayed / Completed status is visible.
+
+[ ] Recent updates show time/date, activity, progress/status and source.
+
+[ ] Upcoming milestones are visible.
+
+[ ] Completed/late milestone information is shown only where canonical data supports it.
+
+[ ] Needs Attention summarizes delayed, at-risk, stale and unresolved work.
+
+[ ] Evidence-backed results provide navigation to existing Evidence/provenance.
+
+[ ] Suggested/unresolved matches are visibly distinct from confirmed truth.
+
+[ ] Dashboard uses existing deterministic services.
+
+[ ] No business rule is duplicated in React.
+
+[ ] Project isolation is preserved.
+
+[ ] Loading / empty / error states are handled.
+
+[ ] As-of date is visible and semantically correct.
+
+[ ] First viewport communicates project health within seconds.
+
+[ ] Existing Pass 13–19 behavior remains intact.
+
+[ ] Full regression suite passes.
+
+[ ] Build passes.
+
+[ ] No Pass 21+ functionality is implemented.
+```
+
+---
+
+# 31. Final verification
+
+Before committing, inspect the diff specifically for:
+
+```text id="review20"
+new dashboard-specific progress calculations
+new dashboard-specific risk calculations
+duplicated milestone logic
+unbounded API queries
+cross-project data leakage
+suggested matches displayed as confirmed
+evidence filesystem paths
+large App.tsx rewrite without necessity
+Pass 21+ functionality
+```
 
 Run:
 
-```bash
+```bash id="verify20"
 npm test
 npm run build
 ```
 
-The full existing suite must remain green.
-
-Do not merely report the total test count.
-
-Show specifically that the new tests exercise:
-
-```text
-immutable confirmed matches
-illegal state transitions
-transaction rollback
-audit failure
-concurrency
-cross-project isolation
-canonical truth protection
-```
-
-Inspect the diff for:
-
-```text
-in-place rewriting of confirmed activity IDs
-confirmed → rejected mutation
-rejected → confirmed mutation
-best-effort audit logging
-state update outside transaction
-audit event outside transaction
-duplicate progress creation
-rematching deleting reviewed matches
-```
-
----
-
-# 29. Definition of done
-
-Pass 19 is approved only when all of these are true:
-
-```text
-[ ] Confidence tier remains deterministic.
-
-[ ] High + unambiguous can auto-confirm.
-
-[ ] High + ambiguous cannot auto-confirm.
-
-[ ] Medium becomes suggested / awaiting review.
-
-[ ] Low becomes unresolved.
-
-[ ] Human confirm works only from legal review states.
-
-[ ] Human reject works only from legal review states.
-
-[ ] Low-confidence resolve works only from legal review states.
-
-[ ] Confirmed historical matches cannot be retargeted.
-
-[ ] Confirmed historical matches cannot be retroactively rejected.
-
-[ ] Rejected matches cannot be silently confirmed.
-
-[ ] Historical AI confidence remains preserved.
-
-[ ] Human resolution records manual review provenance.
-
-[ ] Match mutation and required audit event are atomic.
-
-[ ] Auto-confirm and audit event are atomic.
-
-[ ] Audit failures roll back the state transition.
-
-[ ] Invalid transitions are deterministic.
-
-[ ] Concurrent conflicting reviews cannot corrupt state.
-
-[ ] Existing ProgressService remains the only canonical progress path.
-
-[ ] Existing ActivityProgress remains historically consistent.
-
-[ ] Existing rematching preservation remains intact.
-
-[ ] Project isolation remains intact.
-
-[ ] Frontend clearly communicates uncertainty.
-
-[ ] Frontend does not present illegal actions for terminal states.
-
-[ ] All existing Pass 13–18 tests remain green.
-
-[ ] New Pass 19 corrective tests pass.
-
-[ ] npm test passes.
-
-[ ] npm run build passes.
-
-[ ] No Pass 20+ functionality is implemented.
-```
-
----
-
-# 30. Commit
-
 Commit:
 
-```text
-fix: harden FieldLine review state integrity
+```text id="commit20"
+feat: implement FieldLine project dashboard
 ```
 
-Push to `main`.
+Push to:
 
-Report:
+```text id="push20"
+main
+```
 
-```text
+Then report:
+
+```text id="report20"
 1. exact files changed
-2. state-transition model
-3. historical immutability mechanism
-4. transaction boundary
-5. audit-event atomicity
-6. concurrency handling
-7. project-isolation behavior
-8. tests added
-9. npm test result
-10. npm run build result
-11. commit SHA
-12. remaining limitations
-```
-
-Do not mark Pass 19 complete until the two core invariants are demonstrably true:
-
-```text
-CONFIRMED HISTORY CANNOT BE REWRITTEN
-
-and
-
-REVIEW STATE + AUDIT EVENT COMMIT OR ROLLBACK TOGETHER
+2. dashboard architecture
+3. canonical services reused
+4. health/status composition
+5. recent updates behavior
+6. milestone behavior
+7. evidence navigation
+8. uncertainty/review presentation
+9. tests added
+10. npm test result
+11. npm run build result
+12. commit SHA
+13. known limitations
 ```

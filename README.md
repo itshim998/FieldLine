@@ -77,15 +77,24 @@ Deterministic Confidence Classification (Pass 19: High ≥ 0.90, Medium ≥ 0.60
                                          ▼
                  Canonical Progress Truth (ProgressService)
                  > Non-negotiable: Only CONFIRMED matches produce canonical ActivityProgress.
-```
+### Primary Project Dashboard Layer (Pass 20)
 
-> **Key Invariant:** No ambiguous AI match silently becomes canonical project truth. All uncertain candidates require human review before progress can be normalized and recorded.
-
-AI Pipeline:
 ```text
-AIService → AIProvider (Gemini / Mock) → Raw Response → Zod Schema Validation → Grounded Service Validation
+GET /api/projects/:projectId/dashboard (Thin Aggregator Controller)
+    ↓
+ProjectDashboardService (Deterministic Read-Only Composition)
+    ├── Project Health          → ProgressSnapshotService + RiskClassificationService
+    ├── Activity Status Breakdown → ProgressSnapshotService + RiskClassificationService
+    ├── Items Requiring Attention → ProjectIntelligenceService + ActivityMatchRepository (Unresolved)
+    ├── Key Milestones            → Schedule Repository (zero-duration activities: plannedStart === plannedFinish)
+    └── Recent Updates Feed       → ProgressUpdateRepository + ActivityProgress + Evidence
+    ↓
+Single Typed Response DTO (ProjectDashboard)
+    ↓
+React Frontend Dashboard Components (<ProjectHealth />, <ActivityStatusSummary />, <AttentionSummary />, <MilestoneSummary />, <RecentUpdates />)
 ```
-> **Non-negotiable principle:** AI code must never directly manipulate SQLite or database state.
+
+> **Fundamental Principle:** The Project Dashboard is purely a **PRESENTATION** layer. It does **NOT** define project truth, invent new metrics, or mutate database state. All data is composed deterministically from canonical engines.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural details and layer boundaries.
 
@@ -191,7 +200,7 @@ Example response:
 - [x] **PASS 17 — Project Intelligence Queries** *(Completed)*
 - [x] **PASS 18 — FieldLine Assistant** *(Completed)*
 - [x] **PASS 19 — Human Review Workflow** *(Completed)*
-- [ ] **PASS 20 — Dashboard**
+- [x] **PASS 20 — Dashboard** *(Completed)*
 - [ ] **PASS 21 — Activity Detail View**
 - [ ] **PASS 22 — Voice Input**
 - [ ] **PASS 23 — Test and Evaluation Suite**

@@ -650,5 +650,48 @@ frontend/
       - Suggested (`awaiting_review`) and unresolved (`unresolved`) matches throw `ValidationError` if progress recording is attempted before human review.
     - **Database Migration (`0007_match_review_tiers.ts`)**:
       - Adds `confidence_tier` (`high`, `medium`, `low`) and `review_state` (`unresolved`, `awaiting_review`, `resolved`) columns with indexes `idx_activity_matches_review_state` and `idx_activity_matches_confidence_tier`.
+21. **Pass 20 — Primary Project Dashboard**:
+    - **Purpose**: Provides a high-density, authoritative, and deterministic overview of project status, health, execution breakdown, urgent attention items, key milestones, and recent field updates in a single top viewport without defining new truth models.
+    - **Fundamental Architectural Rule**:
+      - **The Dashboard does NOT define project truth.**
+      - It does NOT implement new risk engines, progress engines, milestone engines, stale-update engines, or matching algorithms.
+      - It is purely a **PRESENTATION and COMPOSITION** layer over existing canonical domain services:
+        - `Project health` &rarr; Composed deterministically from `ProgressSnapshotService` + `RiskClassificationService`.
+        - `Activity status breakdown` &rarr; Composed from `ProgressSnapshotService` + `RiskClassificationService`.
+        - `Items requiring attention` &rarr; Composed from `ProjectIntelligenceService` (`delayed`, `atRisk`, `staleActivities`) + `ActivityMatchRepository` (`unresolved` & `awaiting_review` matches).
+        - `Recent updates feed` &rarr; Composed from `ProgressUpdateRepository` + `ActivityProgressRepository` + `EvidenceRepository`.
+        - `Key milestones` &rarr; Composed from `ActivityRepository` (zero-duration activities: `plannedStart === plannedFinish`) + `ProgressSnapshotService` (`isCompleted`, `isOverdue`, `isLate`).
+        - `Evidence attachments` &rarr; Composed from `EvidenceRepository` preserving full audit provenance.
+    - **Data Flow & Composition Pipeline**:
+      ```text
+      GET /api/projects/:projectId/dashboard?asOfDate=YYYY-MM-DD&recentLimit=10
+          ↓
+      dashboardRouter (Thin Controller & Parameter Validation)
+          ↓
+      ProjectDashboardService.composeProjectDashboard(projectId, options)
+          ├── 1. Project Existence & Scope Verification (ProjectRepository)
+          ├── 2. Canonical Progress Snapshot (ProgressSnapshotService)
+          ├── 3. Authoritative Risk Classification (RiskClassificationService)
+          ├── 4. Project Intelligence Fact Sets (ProjectIntelligenceService)
+          ├── 5. Zero-Duration Milestones Extraction (plannedStart === plannedFinish)
+          ├── 6. Unresolved Match Aggregation (ActivityMatchRepository)
+          └── 7. Bounded Recent Updates Feed (ProgressUpdateRepository + ActivityProgress + Evidence)
+          ↓
+      Typed Dashboard DTO (ProjectDashboard)
+          ↓
+      React UI Presentation (<ProjectHealth />, <ActivityStatusSummary />, <AttentionSummary />, <MilestoneSummary />, <RecentUpdates />)
+      ```
+    - **Security & Privacy Invariants**:
+      - **Strict Project Scoping**: All database reads are isolated to the specified `projectId`. Foreign project records are never leaked.
+      - **Filesystem Privacy Protection**: Raw server filesystem paths (`filePath`) are stripped from all API outputs; only client-safe metadata (`id`, `fileName`, `fileType`, `fileSizeBytes`, `uploadedAt`) is exposed.
+      - **Deterministic Wall-Clock Independence**: Dashboard calculations accept an optional `asOfDate` parameter (defaulting to current ISO date), enabling reproducible historical snapshot inspection.
+    - **Frontend Component Architecture**:
+      - `ProjectHealth.tsx`: Top hero card displaying Overall Actual %, Planned %, Variance points + direction, overall risk classification pill, dual-track progress visual, and As-of date badge.
+      - `ActivityStatusSummary.tsx`: Breakdown counts for ON_TRACK, AHEAD, AT_RISK, DELAYED, COMPLETED with proportional distribution track and interactive filter triggers.
+      - `AttentionSummary.tsx`: Needs Attention cards covering delayed activities, at-risk activities, stale field updates, and unresolved AI candidate matches with direct navigation callbacks.
+      - `MilestoneSummary.tsx`: Key project milestones grouped into Upcoming (days until), Completed, and Overdue/Late.
+      - `RecentUpdates.tsx`: Bounded chronological report cards with format source badges (manual, xlsx, pdf, image, text, voice), match review state badges (Confirmed, Suggested, Unresolved, Rejected), canonical progress notes, and evidence provenance buttons.
+      - `ProjectDashboardView.tsx`: Main view coordinating API fetch, state management, snapshot date selector, loading skeleton, error banner, and seamless tab transitions.
+
 
 
