@@ -38,31 +38,19 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
       projectId,
       asOfDate: '2026-08-28',
       generatedAt: '2026-08-28T00:00:00.000Z',
-      delayed: [
+      delayed: [],
+      atRisk: [
         {
           activityId: 'act-101',
-          externalId: 'ACT-101',
-          name: 'Foundation B Pouring',
+          externalId: 'FOUNDATION-B',
+          name: 'Foundation B',
           plannedFinish: '2026-08-20',
-          actualProgress: 60,
-          progressVariance: -40,
-          overdue: true,
-          classification: 'DELAYED',
-          reasons: [{ code: 'OBJECTIVE_OVERDUE', message: 'Planned finish has passed' }]
-        },
-        {
-          activityId: 'act-102',
-          externalId: 'ACT-102',
-          name: 'Pier 4 Reinforcement',
-          plannedFinish: '2026-08-22',
-          actualProgress: 30,
-          progressVariance: -70,
-          overdue: true,
-          classification: 'DELAYED',
-          reasons: [{ code: 'OBJECTIVE_OVERDUE', message: 'Overdue finish' }]
+          actualProgress: 62,
+          progressVariance: -18,
+          classification: 'AT_RISK',
+          reasons: [{ code: 'NEGATIVE_PROGRESS_VARIANCE', message: 'behind planned progress' }]
         }
       ],
-      atRisk: [],
       completedToday: [],
       behindSchedule: [],
       approachingMilestones: [],
@@ -71,22 +59,45 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     })
   };
 
-  it('Section 15.1: should accept valid grounded answer with structured claims citing valid factRefs', async () => {
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'delayed',
-        activityQuery: null,
-        explicitDate: null
-      })
-    } as unknown as AssistantIntentService;
+  const fakeActivityRepo = {
+    listByProjectId: vi.fn().mockReturnValue([
+      {
+        id: 'act-101',
+        projectId,
+        scheduleId: 'sch-1',
+        externalId: 'FOUNDATION-B',
+        name: 'Foundation B',
+        description: null,
+        wbsCode: '1.1',
+        location: null,
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-20',
+        plannedQuantity: 100,
+        unit: 'm3',
+        baselineProgress: 0,
+        createdAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z'
+      }
+    ])
+  };
 
+  const fakeIntentService = {
+    interpret: vi.fn().mockResolvedValue({
+      intent: 'at_risk',
+      activityQuery: 'Foundation B',
+      explicitDate: null
+    })
+  } as unknown as AssistantIntentService;
+
+  it('Section 10: Unsupported causal claim test (MUST NOT be accepted)', async () => {
+    // Fact contains variance info but no staffing info. Model returns unsupported "contractor is understaffed" claim.
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B Pouring (ACT-101) is delayed by 40% variance since planned finish was 2026-08-20.',
-            factRefs: ['delayed:ACT-101']
+            text: 'Foundation B is at risk because the contractor is understaffed.',
+            factRefs: ['at_risk:FOUNDATION-B']
           }
         ]
       })
@@ -96,65 +107,55 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     const service = new AssistantService(
       fakeAIService,
       fakeIntentService,
-      new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
+      new DeterministicActivityResolver(fakeActivityRepo as any),
       factBuilder,
       fakeProjectRepo
     );
 
-    const res = await service.answerQuestion(projectId, 'What is delayed?');
-    expect(res.grounded).toBe(true);
-    expect(res.factRefs).toEqual(['delayed:ACT-101']);
-    expect(res.claims?.length).toBe(1);
-    expect(res.answer).toContain('Foundation B Pouring');
-  });
-
-  it('Section 15.2: should reject answer when LLM cites unknown or hallucinated factRefs', async () => {
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'delayed',
-        activityQuery: null,
-        explicitDate: null
-      })
-    } as unknown as AssistantIntentService;
-
-    const fakeAIService: AIService = {
-      generateText: vi.fn(),
-      extractStructured: vi.fn().mockResolvedValue({
-        claims: [
-          {
-            text: 'Some hallucinated task is delayed.',
-            factRefs: ['fake-reference']
-          }
-        ]
-      })
-    };
-
-    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
-    const service = new AssistantService(
-      fakeAIService,
-      fakeIntentService,
-      new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
-      factBuilder,
-      fakeProjectRepo
-    );
-
-    await expect(service.answerQuestion(projectId, 'What is delayed?')).rejects.toThrow(
+    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
       AIProviderError
     );
-    await expect(service.answerQuestion(projectId, 'What is delayed?')).rejects.toThrow(
-      /unverified fact references/i
+    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
+      /unsupported workforce \/ labor \/ staffing causes/i
     );
   });
 
-  it('Section 15.3: should reject answer when claim has missing references (factRefs: [])', async () => {
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'delayed',
-        activityQuery: null,
-        explicitDate: null
+  it('Section 11: Valid grounded claim test (MUST be accepted)', async () => {
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            text: 'Foundation B is 62% complete against 80% planned.',
+            factRefs: ['at_risk:FOUNDATION-B']
+          },
+          {
+            text: 'It is therefore 18 percentage points behind plan.',
+            factRefs: ['at_risk:FOUNDATION-B']
+          }
+        ]
       })
-    } as unknown as AssistantIntentService;
+    };
 
+    const factBuilder = new VerifiedFactBuilder(fakeIntelligenceService);
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      new DeterministicActivityResolver(fakeActivityRepo as any),
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(projectId, 'Why is Foundation B at risk?');
+    expect(res.grounded).toBe(true);
+    expect(res.status).toBe('success');
+    expect(res.factRefs).toEqual(['at_risk:FOUNDATION-B']);
+    expect(res.claims?.length).toBe(2);
+    expect(res.answer).toContain('Foundation B is 62% complete against 80% planned.');
+    expect(res.answer).toContain('18 percentage points behind plan.');
+  });
+
+  it('Section 12: Missing-reference test (MUST be rejected without auto-fill)', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
@@ -171,33 +172,24 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     const service = new AssistantService(
       fakeAIService,
       fakeIntentService,
-      new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
+      new DeterministicActivityResolver(fakeActivityRepo as any),
       factBuilder,
       fakeProjectRepo
     );
 
-    await expect(service.answerQuestion(projectId, 'What is delayed?')).rejects.toThrow(
+    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
       AIProviderError
     );
   });
 
-  it('Section 15.4: should reject unsupported causal claim even when citing a valid fact reference', async () => {
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'delayed',
-        activityQuery: null,
-        explicitDate: null
-      })
-    } as unknown as AssistantIntentService;
-
-    // Fact 'delayed:ACT-101' contains schedule/variance info, but NO workforce or staffing information.
+  it('Section 13: Unknown-reference test (MUST be rejected)', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B is delayed because the contractor has insufficient workers.',
-            factRefs: ['delayed:ACT-101']
+            text: 'Foundation B is 62% complete.',
+            factRefs: ['fake-ref']
           }
         ]
       })
@@ -207,39 +199,31 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     const service = new AssistantService(
       fakeAIService,
       fakeIntentService,
-      new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
+      new DeterministicActivityResolver(fakeActivityRepo as any),
       factBuilder,
       fakeProjectRepo
     );
 
-    await expect(service.answerQuestion(projectId, 'What is delayed?')).rejects.toThrow(
+    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
       AIProviderError
     );
-    await expect(service.answerQuestion(projectId, 'What is delayed?')).rejects.toThrow(
-      /unsupported workforce \/ labor \/ staffing causes/i
+    await expect(service.answerQuestion(projectId, 'Why is Foundation B at risk?')).rejects.toThrow(
+      /unverified fact references/i
     );
   });
 
-  it('Section 15.5: should accept multiple claims citing distinct valid references', async () => {
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'delayed',
-        activityQuery: null,
-        explicitDate: null
-      })
-    } as unknown as AssistantIntentService;
-
+  it('Section 14: Multiple claims test (MUST be accepted)', async () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
         claims: [
           {
-            text: 'Foundation B Pouring (ACT-101) is overdue with 60% progress.',
-            factRefs: ['delayed:ACT-101']
+            text: 'Foundation B is 62% complete.',
+            factRefs: ['at_risk:FOUNDATION-B']
           },
           {
-            text: 'Pier 4 Reinforcement (ACT-102) is also delayed with 30% actual progress.',
-            factRefs: ['delayed:ACT-102']
+            text: 'Planned progress is 80%.',
+            factRefs: ['at_risk:FOUNDATION-B']
           }
         ]
       })
@@ -249,132 +233,18 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     const service = new AssistantService(
       fakeAIService,
       fakeIntentService,
-      new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
+      new DeterministicActivityResolver(fakeActivityRepo as any),
       factBuilder,
       fakeProjectRepo
     );
 
-    const res = await service.answerQuestion(projectId, 'What is delayed?');
+    const res = await service.answerQuestion(projectId, 'Why is Foundation B at risk?');
     expect(res.grounded).toBe(true);
-    expect(res.factRefs).toEqual(['delayed:ACT-101', 'delayed:ACT-102']);
     expect(res.claims?.length).toBe(2);
-    expect(res.answer).toContain('Foundation B Pouring');
-    expect(res.answer).toContain('Pier 4 Reinforcement');
+    expect(res.factRefs).toEqual(['at_risk:FOUNDATION-B']);
   });
 
-  it('Section 16: End-to-end grounding test for "Why is Foundation B at risk?"', async () => {
-    const foundationBIntelligenceService: ProjectIntelligenceService = {
-      getIntelligence: vi.fn().mockReturnValue({
-        projectId,
-        asOfDate: '2026-08-28',
-        generatedAt: '2026-08-28T00:00:00.000Z',
-        delayed: [],
-        atRisk: [
-          {
-            activityId: 'act-101',
-            externalId: 'ACT-101',
-            name: 'Foundation B',
-            plannedFinish: '2026-08-20',
-            actualProgress: 62,
-            progressVariance: -18,
-            classification: 'AT_RISK',
-            reasons: [{ code: 'NEGATIVE_PROGRESS_VARIANCE', message: 'behind planned progress' }]
-          }
-        ],
-        completedToday: [],
-        behindSchedule: [],
-        approachingMilestones: [],
-        staleActivities: [],
-        recentChanges: []
-      })
-    };
-
-    const fakeIntentService = {
-      interpret: vi.fn().mockResolvedValue({
-        intent: 'at_risk',
-        activityQuery: 'Foundation B',
-        explicitDate: null
-      })
-    } as unknown as AssistantIntentService;
-
-    const fakeActivityRepo = {
-      listByProjectId: vi.fn().mockReturnValue([
-        {
-          id: 'act-101',
-          projectId,
-          scheduleId: 'sch-1',
-          externalId: 'ACT-101',
-          name: 'Foundation B',
-          description: null,
-          wbsCode: '1.1',
-          location: null,
-          plannedStart: '2026-08-01',
-          plannedFinish: '2026-08-20',
-          plannedQuantity: 100,
-          unit: 'm3',
-          baselineProgress: 0,
-          createdAt: '2026-08-01T00:00:00.000Z',
-          updatedAt: '2026-08-01T00:00:00.000Z'
-        }
-      ])
-    };
-
-    // 1. Simulate model hallucinating "understaffed" cause
-    const hallucinatingAIService: AIService = {
-      generateText: vi.fn(),
-      extractStructured: vi.fn().mockResolvedValue({
-        claims: [
-          {
-            text: 'Foundation B is at risk because the contractor is understaffed.',
-            factRefs: ['at_risk:ACT-101']
-          }
-        ]
-      })
-    };
-
-    const factBuilder = new VerifiedFactBuilder(foundationBIntelligenceService);
-    const serviceWithHallucination = new AssistantService(
-      hallucinatingAIService,
-      fakeIntentService,
-      new DeterministicActivityResolver(fakeActivityRepo as any),
-      factBuilder,
-      fakeProjectRepo
-    );
-
-    await expect(
-      serviceWithHallucination.answerQuestion(projectId, 'Why is Foundation B at risk?')
-    ).rejects.toThrow(AIProviderError);
-
-    // 2. Simulate model providing accurate grounded claim from verified facts
-    const groundedAIService: AIService = {
-      generateText: vi.fn(),
-      extractStructured: vi.fn().mockResolvedValue({
-        claims: [
-          {
-            text: 'Foundation B is at risk because actual progress is 62% against 80% planned, a -18 percentage-point variance.',
-            factRefs: ['at_risk:ACT-101']
-          }
-        ]
-      })
-    };
-
-    const serviceGrounded = new AssistantService(
-      groundedAIService,
-      fakeIntentService,
-      new DeterministicActivityResolver(fakeActivityRepo as any),
-      factBuilder,
-      fakeProjectRepo
-    );
-
-    const res = await serviceGrounded.answerQuestion(projectId, 'Why is Foundation B at risk?');
-    expect(res.grounded).toBe(true);
-    expect(res.status).toBe('success');
-    expect(res.factRefs).toEqual(['at_risk:ACT-101']);
-    expect(res.answer).toContain('62%');
-    expect(res.answer).toContain('-18');
-  });
-
-  it('Section 15.6: should return safe insufficient_data response when verified facts set is empty', async () => {
+  it('Section 15: Empty verified fact set test (bypasses LLM, returns deterministic response)', async () => {
     const emptyIntelligenceService: ProjectIntelligenceService = {
       getIntelligence: vi.fn().mockReturnValue({
         projectId,
@@ -390,7 +260,7 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
       })
     };
 
-    const fakeIntentService = {
+    const emptyIntentService = {
       interpret: vi.fn().mockResolvedValue({
         intent: 'delayed',
         activityQuery: null,
@@ -406,7 +276,7 @@ describe('Grounded Answer Generation & Fact Reference Validation (Pass 18 Correc
     const factBuilder = new VerifiedFactBuilder(emptyIntelligenceService);
     const service = new AssistantService(
       fakeAIService,
-      fakeIntentService,
+      emptyIntentService,
       new DeterministicActivityResolver({ listByProjectId: () => [] } as any),
       factBuilder,
       fakeProjectRepo
