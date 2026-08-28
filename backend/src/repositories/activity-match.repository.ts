@@ -67,6 +67,7 @@ export interface ActivityMatchRepository {
   getById(id: string): ActivityMatch | null;
   getByIdAndProjectId(id: string, projectId: string): ActivityMatch | null;
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityMatch[];
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityMatch[];
   listByProjectId(projectId: string): ActivityMatch[];
   updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null;
   confirmMatchAtomically(input: ConfirmMatchAtomicInput): ActivityMatch;
@@ -811,6 +812,28 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     } catch (err: unknown) {
       throw new DatabaseError(
         `Failed to list activity matches by progress update: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityMatch[] {
+    if (progressUpdateIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const db = this.getDb();
+      const placeholders = progressUpdateIds.map(() => '?').join(',');
+      const stmt = db.prepare(`
+        SELECT * FROM activity_matches 
+        WHERE project_id = ? AND progress_update_id IN (${placeholders}) 
+        ORDER BY progress_update_id ASC, confidence_score DESC, id ASC
+      `);
+      const rows = stmt.all(projectId, ...progressUpdateIds) as ActivityMatchDbRow[];
+      return rows.map(mapRowToActivityMatch);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list activity matches for progress update batch: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

@@ -1,871 +1,920 @@
-# FieldLine — PASS 20: PRIMARY PROJECT DASHBOARD
+# FieldLine — POST-PASS 20 DASHBOARD HARDENING
 
-Implement **Pass 20 — Dashboard** in the existing FieldLine repository.
+The current FieldLine `main` contains the approved Pass 20 dashboard.
 
-Approved base is the current `main` after Pass 19.
+Make ONLY the following two architectural improvements:
 
-Before editing, inspect the actual repository HEAD and current implementation.
+1. Move dashboard aggregate actual/planned progress calculation into the canonical Progress Snapshot layer.
+2. Remove the recent-update N+1 query pattern in `ProjectDashboardService` using bounded batch repository queries.
+
+This is a **targeted refactor/hardening task**, not a new product pass.
 
 Do NOT implement Pass 21+.
 
 ---
 
-# 1. Objective
+# 1. Current baseline
 
-Build the primary presentation interface so a manager/judge can understand the project's current state within seconds.
+Current Pass 20 dashboard commit:
 
-The dashboard must show:
-
-```text id="obj20"
-Project health
-Activity status
-Recent updates
-Milestones
-Evidence/provenance
-Review uncertainty where relevant
+```text id="base20"
+4f312c97ba47716a836a9cbe228cec85f12113d2
+feat: implement Pass 20 - Primary Project Dashboard
 ```
 
-The dashboard is a PRESENTATION layer.
+Before editing:
 
-It must NOT become a second source of project truth.
+1. inspect the actual current `main`
+2. inspect all current snapshot types/calculators/services
+3. inspect dashboard service/repositories
+4. inspect existing tests
+5. preserve the currently approved behavior
+
+Do not assume the walkthrough is more authoritative than the current repository.
 
 ---
 
-# 2. Existing canonical sources
+# 2. HARD REQUIREMENT — DO NOT CHANGE PRODUCT SEMANTICS
 
-Reuse the existing APIs/services.
+The resulting dashboard must display the same values as before for identical project data.
 
-Important existing sources include:
+Do not change:
 
-```text id="sources20a"
-ProgressSnapshotService
+```text id="semantics20"
+risk classification
+activity classification
+milestone semantics
+stale-update semantics
+recent-update ordering
+asOfDate semantics
+project isolation
+evidence semantics
+review-state semantics
+```
+
+This task is about:
+
+```text id="refactor20"
+canonical ownership
++
+query efficiency
+```
+
+not changing business rules.
+
+---
+
+# 3. Improvement A — canonical aggregate progress
+
+## Current issue
+
+The dashboard currently derives:
+
+```text id="agg-old20"
+overallActualProgress
+overallPlannedProgress
+```
+
+directly by averaging:
+
+```ts
+snapshot.activities.reduce(...)
+```
+
+inside:
+
+```text
+backend/src/services/dashboard/project-dashboard.service.ts
+```
+
+This means the dashboard is reimplementing an aggregate that belongs conceptually to the canonical snapshot.
+
+The current ProgressSnapshot model exposes:
+
+```text
+activities
+summary
+```
+
+but does not expose explicit aggregate actual/planned progress values.
+
+---
+
+# 4. Required design
+
+Add canonical aggregate fields to:
+
+```text
+backend/src/services/snapshot/progress-snapshot.types.ts
+```
+
+and/or the canonical snapshot domain type, whichever is the actual authoritative model in the current repository.
+
+Suggested fields:
+
+```ts id="agg-fields20"
+overallActualProgress: number;
+overallPlannedProgress: number;
+progressVariance: number;
+varianceState: VarianceState;
+```
+
+Do NOT add duplicate semantics if the current `summary` already owns these values.
+
+First inspect the current snapshot calculator.
+
+---
+
+# 5. Canonical calculation location
+
+The aggregate must be calculated in the existing pure deterministic snapshot calculator:
+
+```text
+backend/src/services/snapshot/progress-snapshot.calculator.ts
+```
+
+Do NOT calculate it in:
+
+```text
+ProjectDashboardService
+React components
+route handlers
+```
+
+The snapshot calculator already receives the canonical activity set and historical observations.
+
+Use that existing input.
+
+---
+
+# 6. Exact semantic requirement
+
+The aggregate must preserve the CURRENT dashboard formula exactly unless inspection proves the current dashboard formula itself is incorrect.
+
+Current behavior is conceptually:
+
+```text
+overallActualProgress
+=
+mean(activity.actualProgress)
+
+overallPlannedProgress
+=
+mean(activity.plannedProgress)
+
+progressVariance
+=
+overallActualProgress - overallPlannedProgress
+```
+
+with the same rounding currently used by the dashboard.
+
+For empty projects preserve:
+
+```text id="emptyagg20"
+overallActualProgress = 0
+overallPlannedProgress = 0
+progressVariance = 0
+varianceState = on_plan
+```
+
+Do not silently switch to a weighted average.
+
+Do not introduce quantity-based weighting.
+
+Do not invent a new aggregation formula.
+
+---
+
+# 7. Single source of truth
+
+After this refactor:
+
+```text id="singleowner20"
+ProgressSnapshot
+    ↓
+owns aggregate progress metrics
+
+Dashboard
+    ↓
+consumes snapshot aggregate fields
+```
+
+The dashboard must NOT contain another implementation such as:
+
+```ts
+snapshot.activities.reduce(...)
+```
+
+for overall progress.
+
+Remove that calculation completely from the dashboard service.
+
+---
+
+# 8. Risk remains separately canonical
+
+Do NOT combine aggregate progress and risk classification into one new engine.
+
+Continue using:
+
+```text id="riskowner20"
 RiskClassificationService
-ProjectIntelligenceService
-ProgressUpdateRepository / APIs
-ActivityMatch / review APIs
-Evidence APIs
 ```
 
-The existing Project Intelligence endpoint is:
-
-```http
-GET /api/projects/:projectId/intelligence
-```
-
-and already exposes:
-
-```text id="7facts20"
-delayed
-atRisk
-completedToday
-behindSchedule
-approachingMilestones
-staleActivities
-recentChanges
-```
-
-Reuse it.
-
-Do NOT recreate these calculations in React.
-
-Do NOT introduce separate formulas for risk, variance, delay, milestone timing or staleness.
-
----
-
-# 3. Dashboard architecture
-
-Preferred architecture:
-
-```text id="arch20"
-Existing canonical data
-      ↓
-Dashboard composition
-      ↓
-Presentation components
-```
-
-Do NOT make the dashboard itself responsible for domain truth.
-
-Do NOT create:
-
-```text id="nobiz20"
-new risk engine
-new progress engine
-new milestone engine
-new stale-update engine
-new matching engine
-```
-
----
-
-# 4. Decide whether a dashboard endpoint is necessary
-
-First inspect current frontend API usage.
-
-Preferred:
-
-```text id="api20a"
-reuse existing endpoints
-```
-
-If the dashboard requires too many separate project-scoped HTTP requests and a thin aggregation endpoint materially improves correctness/performance, add:
-
-```http
-GET /api/projects/:projectId/dashboard
-```
-
-but ONLY as a composition endpoint.
-
-Its implementation may call/reuse existing domain services.
-
-It must NOT duplicate business rules.
-
-If added, define typed response DTOs and project isolation.
-
----
-
-# 5. Dashboard response
-
-The dashboard needs a compact project overview.
-
-Conceptually:
-
-```ts id="dashdto20"
-interface ProjectDashboard {
-  project: ProjectSummary;
-  health: ProjectHealthSummary;
-  activityStatus: ActivityStatusSummary;
-  recentUpdates: DashboardRecentUpdate[];
-  milestones: DashboardMilestoneSection;
-  attention: DashboardAttentionSummary;
-}
-```
-
-Reuse existing DTOs where practical.
-
-Do not duplicate the entire project database model.
-
----
-
-# 6. Project Health section
-
-Top-of-dashboard section:
-
-```text id="health20"
-Project Health
-```
-
-Show:
+for:
 
 ```text
-Overall Progress
-Planned Progress
-Variance
-Health / Risk Classification
+overallRiskClassification
+activity status counts
 ```
 
-Use the existing progress snapshot and risk classification.
-
-Example:
+The snapshot owns:
 
 ```text
-62% Actual
-74% Planned
--12 pts
-AT RISK
+overall actual
+overall planned
+variance
+variance state
 ```
 
-Do NOT invent another score such as:
+Risk service owns:
 
 ```text
-Health = 73
+risk classification
 ```
 
-unless that metric already exists in the repository.
-
-Use canonical terminology.
+This separation must remain.
 
 ---
 
-# 7. Activity Status section
+# 9. Tests for aggregate ownership
 
-Display counts for:
+Update/add tests proving:
 
-```text id="status20"
-ON_TRACK
-AHEAD
-AT_RISK
-DELAYED
-COMPLETED
+```text id="aggtests20"
+[ ] snapshot exposes overall actual progress
+[ ] snapshot exposes overall planned progress
+[ ] snapshot exposes variance
+[ ] snapshot exposes variance state
+[ ] values match previous dashboard behavior
+[ ] empty project behavior is preserved
+[ ] rounding remains identical
+[ ] dashboard simply consumes snapshot aggregate fields
 ```
 
-Use the existing deterministic risk classification output.
+Add a test that deliberately makes the dashboard's activity array unsuitable for recalculation if practical, proving the dashboard uses the canonical aggregate fields rather than recomputing them.
 
-Do not recalculate the classifications in frontend code.
-
-Clicking a status should allow navigation/filtering to the relevant existing activity/progress view.
-
-Do not create the future Activity Detail View in this pass.
+Do not make the test artificial merely for coverage; prefer a meaningful service-level assertion.
 
 ---
 
-# 8. Attention summary
+# 10. Improvement B — remove dashboard recent-update N+1 queries
 
-Create a compact "Needs Attention" section using existing facts:
+## Current issue
 
-```text id="attention20"
-Delayed: N
-At Risk: N
-Stale Updates: N
-Unresolved Matches: N
+The dashboard currently:
+
+1. fetches progress updates
+2. loops over updates
+3. for EACH update fetches:
+
+   * matches
+   * ActivityProgress observations
+   * evidence
+
+This creates a query pattern approximately:
+
+```text
+1 query for updates
++
+N queries for matches
++
+N queries for observations
++
+N queries for evidence
 ```
+
+For the default 10 updates, that is roughly:
+
+```text
+31 queries
+```
+
+for the recent-update section alone.
+
+This is unnecessary even in local SQLite.
+
+---
+
+# 11. Required batch repository APIs
+
+Add project-scoped batch methods to existing repositories.
+
+Do NOT create a new data-access layer.
+
+Recommended methods:
+
+```ts id="batchapis20"
+ActivityMatchRepository.listByProgressUpdateIds(
+  progressUpdateIds: string[],
+  projectId: string
+): ActivityMatch[]
+
+ActivityProgressRepository.listByProgressUpdateIds(
+  progressUpdateIds: string[],
+  projectId: string
+): ActivityProgress[]
+
+EvidenceRepository.listByProgressUpdateIds(
+  progressUpdateIds: string[],
+  projectId: string
+): Evidence[]
+```
+
+Use names consistent with the repository conventions if slightly different.
+
+The critical requirement is:
+
+```text
+one bounded batch query per repository
+```
+
+rather than one query per progress update.
+
+---
+
+# 12. SQL requirements for batch methods
 
 Use:
 
-```text id="6mrssx"
-ProjectIntelligence.delayed
-ProjectIntelligence.atRisk
-ProjectIntelligence.staleActivities
+```text id="sql20"
+WHERE project_id = ?
+AND progress_update_id IN (...)
 ```
 
-For unresolved matches, use existing Pass 19 review-state data.
+or the equivalent safe SQL.
 
-Do not invent another attention/risk score.
+Do NOT construct SQL by concatenating user-controlled values.
 
-Clicking an item should navigate to the existing relevant workspace/view.
+Generate placeholders programmatically.
+
+Handle:
+
+```text id="emptybatch20"
+progressUpdateIds.length === 0
+```
+
+by returning:
+
+```text
+[]
+```
+
+without running a useless SQL query.
 
 ---
 
-# 9. Recent Updates
+# 13. Project isolation
 
-Create a chronological dashboard section:
+Every batch query MUST remain project scoped.
 
-```text id="recent20"
-Recent Updates
+Never use:
+
+```sql
+WHERE progress_update_id IN (...)
 ```
 
-Each item should show at minimum:
+without:
 
 ```text
-date/time
-activity
-reported progress/status
-source
+project_id = ?
 ```
 
-Source examples:
+This is especially important because IDs are not sufficient authorization boundaries.
 
-```text
-manual
-xlsx
-pdf
-image
-text
-voice
+Add tests that verify:
+
+```text id="batchisolation20"
+Project A batch request
+→ cannot return Project B matches
+
+Project A batch request
+→ cannot return Project B observations
+
+Project A batch request
+→ cannot return Project B evidence
 ```
-
-Use canonical ProgressUpdate and ActivityProgress data.
-
-Do NOT infer activity completion from:
-
-```text
-Evidence.uploadedAt
-job.completedAt
-frontend timestamp
-```
-
-Activity progress remains authoritative.
 
 ---
 
-# 10. Recent update ordering
+# 14. Deterministic ordering
 
-Use deterministic ordering.
+Batch repository methods must return deterministic order.
 
-Newest first.
+For example:
 
-Tie-break deterministically when timestamps are equal.
-
-Do not rely on arbitrary SQLite row order.
-
-Use bounded results.
-
-A reasonable default is:
-
-```text id="recentlimit20"
-10 most recent meaningful updates
+```text id="matchorder20"
+ORDER BY progress_update_id, confidence_score DESC, id ASC
 ```
 
-or another clearly documented limit consistent with existing APIs.
+and appropriate equivalents for:
 
-Do not load unlimited history into the dashboard.
+```text
+ActivityProgress
+Evidence
+```
+
+The dashboard can then group them in memory.
+
+Do not depend on SQLite's implicit row order.
 
 ---
 
-# 11. Milestones section
+# 15. Dashboard implementation
 
-Show:
+Change:
 
-```text id="milestone20"
-Upcoming Milestones
+```text
+backend/src/services/dashboard/project-dashboard.service.ts
 ```
+
+so that it first obtains the bounded recent updates:
+
+```text id="recentbatch20"
+const boundedUpdates = updatesAll.slice(0, recentLimit);
+```
+
+Then extract IDs:
+
+```text
+const updateIds = boundedUpdates.map(u => u.id);
+```
+
+Perform:
+
+```text id="batchcalls20"
+matches = activityMatchRepo.listByProgressUpdateIds(updateIds, projectId)
+
+observations =
+    activityProgressRepo.listByProgressUpdateIds(updateIds, projectId)
+
+evidence =
+    evidenceRepo.listByProgressUpdateIds(updateIds, projectId)
+```
+
+Then group:
+
+```text id="group20"
+matchesByUpdateId
+observationsByUpdateId
+evidenceByUpdateId
+```
+
+using Maps.
+
+The per-update loop must perform only in-memory lookups.
+
+---
+
+# 16. Important — preserve output exactly
+
+The resulting:
+
+```text id="output20"
+DashboardRecentUpdateItem[]
+```
+
+must remain semantically identical.
+
+Each item still contains:
+
+```text
+id
+reportDate
+createdAt
+reporterName
+reporterRole
+sourceType
+rawText
+status
+matches
+canonicalObservations
+evidenceList
+```
+
+Do not remove fields.
+
+Do not change source labels.
+
+Do not change match/review states.
+
+Do not change evidence metadata.
+
+---
+
+# 17. Preserve recent-update ordering
+
+The repository already returns progress updates in:
+
+```text
+report_date DESC,
+created_at DESC,
+id DESC
+```
+
+or the current canonical ordering.
+
+Do not replace this with client-side sorting unless necessary.
+
+The dashboard's `recentLimit` must continue to mean:
+
+```text
+first N canonical recent progress updates
+```
+
+not:
+
+```text
+first N joined rows
+```
+
+This is important.
+
+---
+
+# 18. Do not load unbounded data unnecessarily
+
+The current dashboard default is:
+
+```text
+DEFAULT_DASHBOARD_RECENT_LIMIT = 10
+```
+
+and maximum:
+
+```text
+MAX_DASHBOARD_RECENT_LIMIT = 50
+```
+
+Preserve these limits.
+
+Only batch-fetch related entities for the selected update IDs.
+
+Do not fetch all matches/evidence/observations for the entire project just to build the dashboard.
+
+---
+
+# 19. Avoid a fake optimization
+
+Do NOT implement:
+
+```text
+SELECT *
+FROM everything
+WHERE project_id = ?
+```
+
+and then filter in memory.
+
+The optimization must actually be bounded to the selected update IDs.
+
+---
+
+# 20. Optional: activity lookup remains in memory
+
+The dashboard already loads:
+
+```text id="activitymap20"
+activities = activityRepo.listByProjectId(projectId)
+```
+
+and builds:
+
+```text
+activityMap
+```
+
+Keep this unless inspection reveals a better existing mechanism.
+
+Do not add more per-item activity queries.
+
+---
+
+# 21. Suggested repository implementation strategy
+
+For:
+
+```text
+IN (?, ?, ?, ...)
+```
+
+use the existing better-sqlite3 statement preparation conventions.
+
+Example concept:
+
+```ts
+const placeholders = ids.map(() => '?').join(',');
+const stmt = db.prepare(`
+  SELECT *
+  FROM activity_matches
+  WHERE project_id = ?
+    AND progress_update_id IN (${placeholders})
+  ORDER BY progress_update_id ASC, confidence_score DESC, id ASC
+`);
+```
+
+with parameters:
+
+```text
+[projectId, ...ids]
+```
+
+Use the same project-scoped row mapping already used by the repository.
+
+Do not duplicate entity-to-domain mapping logic unnecessarily.
+
+---
+
+# 22. Tests for query reduction
+
+Do not rely only on a code review.
+
+Add a dashboard service test using spy/fake repository implementations proving that:
+
+```text id="querycount20"
+listByProgressUpdateIds(...)
+```
+
+is called once per repository
 
 and:
 
 ```text
-Recently Completed / Late Milestones
+listByProgressUpdateId(...)
 ```
 
-Use the same milestone definition already used by Project Intelligence:
+is NOT called repeatedly inside the recent-update loop.
 
-```text id="milestone_definition20"
-plannedStart === plannedFinish
-```
-
-Do not create another milestone calculation.
-
-For upcoming milestones, reuse:
-
-```text id="reusemilestone20"
-ProjectIntelligence.approachingMilestones
-```
-
-with an appropriate UI limit.
+If repository spies are awkward, add focused repository tests plus a service-level test asserting the three batch methods receive the full selected ID set.
 
 ---
 
-# 12. Completed / late milestones
+# 23. Preserve evidence privacy
 
-For completed milestones, inspect existing ActivityProgress / risk data.
+The batch Evidence API must still return only the dashboard-safe metadata.
 
-A milestone should not be called "completed" merely because its date passed.
-
-Use canonical ActivityProgress status / actual finish where available.
-
-For a late milestone, use existing authoritative progress/risk fields.
-
-Do NOT create a new late-milestone formula.
-
-If the current repository cannot establish "completed late" unambiguously, expose only what the canonical data supports rather than guessing.
-
----
-
-# 13. Evidence-backed navigation
-
-The dashboard should allow users to get to the source evidence behind a result.
-
-For update/activity cards where provenance exists, provide:
-
-```text id="evidence20"
-View Evidence
-```
-
-or:
+Do NOT expose:
 
 ```text
-Trace Evidence
-```
-
-Use existing Evidence APIs and identifiers.
-
-Do NOT display filesystem paths.
-
-Do NOT duplicate Evidence storage.
-
-Do NOT build a second Evidence inventory.
-
-The existing Evidence workspace remains authoritative for full evidence management.
-
----
-
-# 14. Progress update click behavior
-
-Clicking a recent update should navigate/open the existing progress history/review surface.
-
-Where match review is applicable:
-
-```text
-Confirmed
-Suggested
-Unresolved
-Rejected
-```
-
-must remain visually distinguishable.
-
-Do not create new review semantics in the dashboard.
-
----
-
-# 15. Review uncertainty on dashboard
-
-Surface unresolved work clearly.
-
-For example:
-
-```text
-Needs Review
-Foundation B
-Medium confidence — Suggested
-
-Unresolved
-"North wall"
-Low confidence — Unresolved
-```
-
-Do NOT present suggested/unresolved matches as normal canonical progress.
-
-Only confirmed matches represent canonical truth.
-
-This is inherited directly from Pass 19.
-
----
-
-# 16. Visual hierarchy
-
-The first viewport should answer:
-
-```text
-How healthy is the project?
-What is going wrong?
-What needs attention now?
-```
-
-Suggested structure:
-
-```text
-┌───────────────────────────────────────────────┐
-│ PROJECT NAME                     AS OF DATE   │
-├───────────────────────────────────────────────┤
-│ HEALTH                                        │
-│                                               │
-│ 62% Actual   74% Planned   -12 pts   AT RISK │
-├───────────────────────────────────────────────┤
-│ ACTIVITY STATUS                               │
-│ On Track | Ahead | At Risk | Delayed | Done   │
-├───────────────────────┬───────────────────────┤
-│ NEEDS ATTENTION       │ UPCOMING MILESTONES   │
-│ • 4 delayed           │ • Foundation B        │
-│ • 2 at risk           │ • Structure start     │
-│ • 7 stale             │                       │
-│ • 2 unresolved        │                       │
-├───────────────────────┴───────────────────────┤
-│ RECENT UPDATES                                │
-│ ...                                           │
-└───────────────────────────────────────────────┘
-```
-
-Adapt this to the existing visual system.
-
-Do not introduce an unrelated design language.
-
----
-
-# 17. Existing frontend architecture
-
-The current frontend is already centered around `frontend/src/App.tsx` and `index.css`.
-
-Inspect the existing workspace/tab architecture before making changes.
-
-Prefer extracting reusable components/modules if `App.tsx` is already large.
-
-Possible structure:
-
-```text
-frontend/src/components/dashboard/
-    ProjectHealth.tsx
-    ActivityStatusSummary.tsx
-    AttentionSummary.tsx
-    RecentUpdates.tsx
-    MilestoneSummary.tsx
-```
-
-Use the smallest clean decomposition consistent with the current codebase.
-
-Do not rewrite the entire application.
-
----
-
-# 18. Dashboard data fetching
-
-Do not create duplicated fetches for the same source.
-
-Implement predictable loading states:
-
-```text id="loading20"
-loading
-partial/error
-loaded
-```
-
-Handle slow project queries gracefully.
-
-Do not block the entire page if one optional section fails.
-
-A critical project-health failure should be visibly reported.
-
----
-
-# 19. Empty states
-
-Handle:
-
-```text id="empty20"
-no recent updates
-no upcoming milestones
-no delayed activities
-no at-risk activities
-no stale activities
-no unresolved matches
-```
-
-Use clear positive empty states.
-
-Do not show broken-looking empty cards.
-
-Example:
-
-```text
-No delayed activities
-```
-
-rather than blank space.
-
----
-
-# 20. Error states
-
-Show project-scoped errors cleanly.
-
-Do not expose:
-
-```text id="error20"
+filePath
 filesystem paths
-stack traces
-SQLite errors
-internal provider details
+raw server storage locations
 ```
 
-Reuse the application's existing error-handling behavior.
-
----
-
-# 21. As-of date
-
-Because Project Intelligence already supports deterministic:
-
-```text id="asof20"
-asOfDate
-```
-
-the dashboard should clearly display the date represented by its metrics.
-
-Example:
+The dashboard currently maps evidence to:
 
 ```text
-As of 28 Aug 2026
+id
+fileName
+fileType
+fileSizeBytes
+uploadedAt
 ```
 
-Do not make the dashboard imply that historical metrics are today's values.
-
-If the current dashboard is live/today-oriented, use today's canonical snapshot date.
-
-A date selector is optional; do not add one unless it fits naturally with the existing Project Intelligence controls.
+Preserve that exact privacy boundary.
 
 ---
 
-# 22. Source transparency
+# 24. Performance target
 
-For recent updates display the source:
+For a dashboard with:
 
 ```text
-XLSX
-PDF
-Manual
-Image
-Voice
-Text
+recentLimit = 10
 ```
 
-For AI-derived match states, display:
+the recent-update data path should be approximately:
 
 ```text
-Confirmed
-Suggested
-Unresolved
-Rejected
+1 query → progress updates
+1 query → matches
+1 query → observations
+1 query → evidence
 ```
 
-The dashboard should make the origin and certainty of important information visible.
+plus the already-existing project/activity/intelligence/snapshot queries.
+
+It must NOT be:
+
+```text
+1 + N + N + N
+```
+
+Do not promise a precise total project-wide query count because existing canonical services may legitimately execute multiple reads.
+
+The relevant requirement is removal of per-update repository calls.
 
 ---
 
-# 23. Performance
+# 25. No caching
 
-Do not fetch:
+Do NOT add:
 
-```text id="perf20"
-entire evidence files
-entire event history
-entire progress history
+```text id="nocache20"
+Redis
+in-memory dashboard cache
+TTL cache
+memoization of project state
 ```
 
-just to render the dashboard.
+The project is local-first SQLite.
 
-Use bounded APIs and existing summary services.
-
-Lazy-load expensive/non-critical content if appropriate.
+The simpler deterministic batch approach is preferable.
 
 ---
 
-# 24. Responsive behavior
+# 26. No schema migration
 
-The first viewport must remain useful on:
+This optimization should require:
 
-```text id="responsive20"
-desktop
-tablet
-reasonable narrow viewport
+```text id="nomigration20"
+NO database migration
 ```
 
-Do not rely on fixed-width giant tables for critical health metrics.
+Do not add new database tables or columns.
 
-Recent updates may become a vertical list on smaller screens.
+We are only changing:
 
----
-
-# 25. Accessibility
-
-Use:
-
-```text id="a11y20"
-semantic headings
-buttons for actionable elements
-keyboard-accessible controls
-clear status text
-visible focus states
-non-color-only status indicators
+```text
+snapshot DTO/calculation
+repository read APIs
+dashboard composition
+tests
+documentation if needed
 ```
-
-Do not communicate:
-
-```text "red = delayed"
-```
-
-without a text/icon/state label.
-
----
-
-# 26. Tests
-
-Add frontend/component tests if the existing frontend test setup supports them.
-
-At minimum, backend/API tests should verify any new dashboard aggregation endpoint if one is created.
-
-Test:
-
-```text id="backendtests20"
-[ ] project-scoped dashboard data
-[ ] health values match canonical snapshot
-[ ] risk classification matches canonical engine
-[ ] activity status counts are correct
-[ ] recent updates bounded and deterministic
-[ ] milestone data uses existing semantics
-[ ] project isolation
-```
-
-If no new backend endpoint is needed, focus on existing API integration and frontend behavior.
 
 ---
 
 # 27. Regression tests
 
-Preserve all existing tests:
+Run the full suite.
+
+At minimum prove:
 
 ```text id="regression20"
-Pass 13 Evidence
-Pass 14 Ingestion
-Pass 15 Jobs
-Pass 16 Idempotency
-Pass 17 Intelligence
-Pass 18 Assistant
-Pass 19 Human Review
+[ ] snapshot aggregate tests pass
+[ ] dashboard health values remain unchanged
+[ ] recent update contents remain unchanged
+[ ] recent update ordering remains unchanged
+[ ] recentLimit remains enforced
+[ ] evidence privacy remains intact
+[ ] project isolation remains intact
+[ ] milestones remain unchanged
+[ ] attention summary remains unchanged
 ```
-
-Do not weaken existing assertions.
 
 ---
 
-# 28. Documentation
+# 28. Build verification
 
-Update:
+Run:
 
-```text id="docs20"
-README.md
-docs/ARCHITECTURE.md
+```bash id="build20"
+npm test
+npm run build
 ```
 
-Document:
+Both must pass.
 
-```text
+Do not weaken existing tests.
+
+Do not delete tests merely because repository interfaces changed.
+
+---
+
+# 29. Diff review
+
+Before committing inspect the diff for:
+
+```text id="diff20"
+dashboard reimplementing aggregate math
+per-update repository calls remaining
+unbounded batch query
+missing project_id predicates
+changed ordering
+changed recentLimit semantics
+filesystem path leakage
+schema changes
+cache introduction
+Pass 21+ scope leakage
+```
+
+---
+
+# 30. Documentation
+
+Only make documentation changes necessary to reflect the new canonical ownership.
+
+The architecture should describe:
+
+```text id="doc20"
+Progress Snapshot
+    └── canonical aggregate progress metrics
+
 Project Dashboard
-    ↓
-presentation over existing canonical services
+    └── presentation/aggregation over snapshot + intelligence
 
-Project health
-    ↓
-Progress Snapshot + Risk
-
-Attention
-    ↓
-Project Intelligence + Review state
-
-Recent updates
-    ↓
-Progress / ActivityProgress
-
-Milestones
-    ↓
-Project Intelligence
-
-Evidence
-    ↓
-existing Evidence provenance
+Recent update data
+    └── bounded batch repository reads
 ```
 
-Explicitly state:
-
-```text
-The dashboard does not define project truth.
-```
+Do not rewrite unrelated documentation.
 
 ---
 
-# 29. Scope guard
+# 31. Definition of done
 
-DO NOT implement:
-
-```text id="scope20"
-Pass 21 Activity Detail View
-Pass 22 Voice Input
-assistant redesign
-chat history
-new matching algorithms
-new risk algorithms
-new progress formulas
-new milestone engine
-new evidence engine
-notifications
-mobile application
-```
-
-Do not turn this into a general BI dashboard.
-
-Pass 20 is the primary FieldLine operational overview.
-
----
-
-# 30. Definition of done
-
-Pass 20 is complete only when:
+This hardening task is complete only when:
 
 ```text id="done20"
-[ ] Dashboard is the primary project overview.
+[ ] Overall actual progress is canonicalized in ProgressSnapshot.
 
-[ ] Overall actual progress is visible.
+[ ] Overall planned progress is canonicalized in ProgressSnapshot.
 
-[ ] Planned progress is visible.
+[ ] Progress variance is canonicalized in ProgressSnapshot.
 
-[ ] Variance is visible.
+[ ] Variance state remains canonical and unchanged semantically.
 
-[ ] Current project health/risk is visible.
+[ ] Dashboard consumes those snapshot fields instead of recalculating them.
 
-[ ] On Track / Ahead / At Risk / Delayed / Completed status is visible.
+[ ] Recent update matches are loaded in one batch query.
 
-[ ] Recent updates show time/date, activity, progress/status and source.
+[ ] Recent update observations are loaded in one batch query.
 
-[ ] Upcoming milestones are visible.
+[ ] Recent update evidence is loaded in one batch query.
 
-[ ] Completed/late milestone information is shown only where canonical data supports it.
+[ ] No per-update repository calls remain in dashboard recent-update assembly.
 
-[ ] Needs Attention summarizes delayed, at-risk, stale and unresolved work.
+[ ] Batch queries are project-scoped.
 
-[ ] Evidence-backed results provide navigation to existing Evidence/provenance.
+[ ] Batch queries are bounded to selected progressUpdateIds.
 
-[ ] Suggested/unresolved matches are visibly distinct from confirmed truth.
+[ ] Empty batch inputs are handled cleanly.
 
-[ ] Dashboard uses existing deterministic services.
+[ ] Deterministic ordering is preserved.
 
-[ ] No business rule is duplicated in React.
+[ ] Dashboard output is unchanged semantically.
 
-[ ] Project isolation is preserved.
+[ ] Evidence filesystem paths remain hidden.
 
-[ ] Loading / empty / error states are handled.
+[ ] Existing project isolation is preserved.
 
-[ ] As-of date is visible and semantically correct.
+[ ] No database migration is introduced.
 
-[ ] First viewport communicates project health within seconds.
+[ ] No caching layer is introduced.
 
-[ ] Existing Pass 13–19 behavior remains intact.
+[ ] Existing Pass 13–20 behavior remains intact.
 
-[ ] Full regression suite passes.
+[ ] Full test suite passes.
 
-[ ] Build passes.
+[ ] npm run build passes.
 
 [ ] No Pass 21+ functionality is implemented.
 ```
 
 ---
 
-# 31. Final verification
+# 32. Commit
 
-Before committing, inspect the diff specifically for:
+Use:
 
-```text id="review20"
-new dashboard-specific progress calculations
-new dashboard-specific risk calculations
-duplicated milestone logic
-unbounded API queries
-cross-project data leakage
-suggested matches displayed as confirmed
-evidence filesystem paths
-large App.tsx rewrite without necessity
-Pass 21+ functionality
-```
-
-Run:
-
-```bash id="verify20"
-npm test
-npm run build
-```
-
-Commit:
-
-```text id="commit20"
-feat: implement FieldLine project dashboard
+```text id="commit-hard20"
+refactor: harden FieldLine dashboard data access
 ```
 
 Push to:
 
-```text id="push20"
+```text
 main
 ```
 
-Then report:
+Report:
 
-```text id="report20"
+```text id="report-hard20"
 1. exact files changed
-2. dashboard architecture
-3. canonical services reused
-4. health/status composition
-5. recent updates behavior
-6. milestone behavior
-7. evidence navigation
-8. uncertainty/review presentation
-9. tests added
-10. npm test result
-11. npm run build result
-12. commit SHA
-13. known limitations
+2. new canonical snapshot aggregate fields
+3. how dashboard now consumes them
+4. batch repository methods added
+5. previous vs new recent-update query pattern
+6. project isolation behavior
+7. tests added
+8. npm test result
+9. npm run build result
+10. commit SHA
+11. remaining limitations
 ```
+
+Do NOT mark this as a new numbered product pass.
+
+It is a post-Pass-20 architectural hardening change.

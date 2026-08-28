@@ -295,4 +295,40 @@ describe('ProgressSnapshotService (Planned vs Actual Integration)', () => {
     expect(snap1.activities).toEqual(snap2.activities);
     expect(snap1.summary).toEqual(snap2.summary);
   });
+
+  it('should expose canonical aggregate progress metrics on snapshot and summary', () => {
+    progressRepo.create({
+      projectId: projectAId,
+      activityId: act1Id,
+      actualPercent: 30,
+      status: 'in_progress',
+      asOfDate: '2026-08-15'
+    });
+    progressRepo.create({
+      projectId: projectAId,
+      activityId: act2Id,
+      actualPercent: 100,
+      status: 'completed',
+      asOfDate: '2026-08-15'
+    });
+
+    // Project A on 2026-08-15:
+    // Act 1 (planned 46.67%, actual 30%)
+    // Act 2 (planned 100%, actual 100%)
+    // Act 3 (planned 0%, actual 0%)
+    // Total Planned: (46.67 + 100 + 0) / 3 = 48.89%
+    // Total Actual: (30 + 100 + 0) / 3 = 43.33%
+    // Variance: 43.33 - 48.89 = -5.56 pts ('behind')
+    const snapshot = snapshotService.getProgressSnapshot(projectAId, '2026-08-15');
+
+    expect(snapshot.summary.overallActualProgress).toBe(43.33);
+    expect(snapshot.summary.overallPlannedProgress).toBe(48.89);
+    expect(snapshot.summary.progressVariance).toBe(-5.56);
+    expect(snapshot.summary.varianceState).toBe('behind');
+
+    expect(snapshot.overallActualProgress).toBe(43.33);
+    expect(snapshot.overallPlannedProgress).toBe(48.89);
+    expect(snapshot.progressVariance).toBe(-5.56);
+    expect(snapshot.varianceState).toBe('behind');
+  });
 });

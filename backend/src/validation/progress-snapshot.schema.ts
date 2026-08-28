@@ -44,7 +44,11 @@ export const progressSnapshotSummarySchema = z.object({
   overdue: z.number().min(0),
   ahead: z.number().min(0),
   onPlan: z.number().min(0),
-  behind: z.number().min(0)
+  behind: z.number().min(0),
+  overallActualProgress: z.number().min(0).max(100),
+  overallPlannedProgress: z.number().min(0).max(100),
+  progressVariance: z.number(),
+  varianceState: varianceStateEnum
 });
 
 export const projectProgressSnapshotSchema = z.object({
@@ -52,7 +56,11 @@ export const projectProgressSnapshotSchema = z.object({
   asOfDate: z.string(),
   generatedAt: z.string(),
   activities: z.array(activityProgressSnapshotItemSchema),
-  summary: progressSnapshotSummarySchema
+  summary: progressSnapshotSummarySchema,
+  overallActualProgress: z.number().min(0).max(100).optional(),
+  overallPlannedProgress: z.number().min(0).max(100).optional(),
+  progressVariance: z.number().optional(),
+  varianceState: varianceStateEnum.optional()
 });
 
 export type ProgressSnapshotParamsDto = z.infer<typeof progressSnapshotParamsSchema>;

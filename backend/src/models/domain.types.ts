@@ -373,6 +373,10 @@ export interface ProgressSnapshotSummary {
   ahead: number;
   onPlan: number;
   behind: number;
+  overallActualProgress: number;
+  overallPlannedProgress: number;
+  progressVariance: number;
+  varianceState: VarianceState;
 }
 
 export interface ProjectProgressSnapshot {
@@ -381,6 +385,10 @@ export interface ProjectProgressSnapshot {
   generatedAt: string;
   activities: ActivityProgressSnapshotItem[];
   summary: ProgressSnapshotSummary;
+  overallActualProgress: number;
+  overallPlannedProgress: number;
+  progressVariance: number;
+  varianceState: VarianceState;
 }
 
 // ==========================================

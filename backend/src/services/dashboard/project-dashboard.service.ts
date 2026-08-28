@@ -141,27 +141,12 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       updatedAt: project.updatedAt
     };
 
-    // 6. Calculate ProjectHealthSummary using canonical snapshot & risk classifications
+    // 6. ProjectHealthSummary directly consumes canonical snapshot aggregate metrics & risk classifications
     const totalCount = snapshot.activities.length;
-    const overallActualProgress = totalCount === 0
-      ? 0
-      : Math.round((snapshot.activities.reduce((sum, a) => sum + a.actualProgress, 0) / totalCount) * 100) / 100;
-
-    const overallPlannedProgress = totalCount === 0
-      ? 0
-      : Math.round((snapshot.activities.reduce((sum, a) => sum + a.plannedProgress, 0) / totalCount) * 100) / 100;
-
-    let progressVariance = Math.round((overallActualProgress - overallPlannedProgress) * 100) / 100;
-    if (Object.is(progressVariance, -0)) {
-      progressVariance = 0;
-    }
-
-    let varianceState: ProjectHealthSummary['varianceState'] = 'on_plan';
-    if (progressVariance > 0.01) {
-      varianceState = 'ahead';
-    } else if (progressVariance < -0.01) {
-      varianceState = 'behind';
-    }
+    const overallActualProgress = snapshot.summary.overallActualProgress;
+    const overallPlannedProgress = snapshot.summary.overallPlannedProgress;
+    const progressVariance = snapshot.summary.progressVariance;
+    const varianceState = snapshot.summary.varianceState;
 
     // Determine overall project risk classification based on canonical summary
     let overallRiskClassification: ProjectHealthSummary['overallRiskClassification'] = 'ON_TRACK';
@@ -335,55 +320,73 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       unresolvedMatches
     };
 
-    // 10. Build Recent Updates (bounded, deterministic newest first)
+    // 10. Build Recent Updates (bounded, deterministic newest first with batch repository queries)
     const boundedUpdates = updatesAll.slice(0, recentLimit);
-    const recentUpdates: DashboardRecentUpdateItem[] = boundedUpdates.map((updItem) => {
-      // Fetch matches for this report record
-      const updMatches = this.activityMatchRepo.listByProgressUpdateId(updItem.id, projectId);
-      const dashboardMatches: DashboardMatchItem[] = updMatches.map((m) => {
-        const act = activityMap.get(m.activityId);
-        return {
-          id: m.id,
-          activityId: m.activityId,
-          activityExternalId: act?.externalId || m.activityId,
-          activityName: act?.name || 'Unlinked Activity',
-          confidenceScore: m.confidenceScore,
-          status: m.status,
-          confidenceTier: m.confidenceTier,
-          reviewState: m.reviewState,
-          matchMethod: m.matchMethod,
-          rationale: m.rationale,
-          evidenceId: m.evidenceId
-        };
-      });
+    const boundedUpdateIds = boundedUpdates.map((u) => u.id);
 
-      // Fetch canonical observations for this report record
-      const updObs = this.activityProgressRepo.listByProgressUpdateId(updItem.id, projectId);
-      const dashboardObs: DashboardProgressObservationItem[] = updObs.map((obs) => {
-        const act = activityMap.get(obs.activityId);
-        return {
-          id: obs.id,
-          activityId: obs.activityId,
-          activityExternalId: act?.externalId || obs.activityId,
-          activityName: act?.name || 'Activity',
-          actualPercent: obs.actualPercent,
-          actualStart: obs.actualStart,
-          actualFinish: obs.actualFinish,
-          status: obs.status,
-          asOfDate: obs.asOfDate
-        };
-      });
+    // Batch query matches, observations, and evidence across bounded report record IDs
+    const batchMatches = this.activityMatchRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
+    const batchObs = this.activityProgressRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
+    const batchEvidenceRaw = this.evidenceRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
 
-      // Fetch evidence items for this report record (strip raw filesystem paths)
-      const evidenceListRaw = this.evidenceRepo.listByProgressUpdateId(updItem.id, projectId);
-      const evidenceList: DashboardEvidenceItem[] = evidenceListRaw.map((e) => ({
+    // Group batch results in-memory by progress report record id
+    const matchesByReportId = new Map<string, DashboardMatchItem[]>();
+    for (const m of batchMatches) {
+      const act = activityMap.get(m.activityId);
+      const dashboardMatch: DashboardMatchItem = {
+        id: m.id,
+        activityId: m.activityId,
+        activityExternalId: act?.externalId || m.activityId,
+        activityName: act?.name || 'Unlinked Activity',
+        confidenceScore: m.confidenceScore,
+        status: m.status,
+        confidenceTier: m.confidenceTier,
+        reviewState: m.reviewState,
+        matchMethod: m.matchMethod,
+        rationale: m.rationale,
+        evidenceId: m.evidenceId
+      };
+      const existingList = matchesByReportId.get(m.progressUpdateId) || [];
+      existingList.push(dashboardMatch);
+      matchesByReportId.set(m.progressUpdateId, existingList);
+    }
+
+    const obsByReportId = new Map<string, DashboardProgressObservationItem[]>();
+    for (const obs of batchObs) {
+      if (!obs.progressUpdateId) continue;
+      const act = activityMap.get(obs.activityId);
+      const dashboardObs: DashboardProgressObservationItem = {
+        id: obs.id,
+        activityId: obs.activityId,
+        activityExternalId: act?.externalId || obs.activityId,
+        activityName: act?.name || 'Activity',
+        actualPercent: obs.actualPercent,
+        actualStart: obs.actualStart,
+        actualFinish: obs.actualFinish,
+        status: obs.status,
+        asOfDate: obs.asOfDate
+      };
+      const existingList = obsByReportId.get(obs.progressUpdateId) || [];
+      existingList.push(dashboardObs);
+      obsByReportId.set(obs.progressUpdateId, existingList);
+    }
+
+    const evidenceByReportId = new Map<string, DashboardEvidenceItem[]>();
+    for (const e of batchEvidenceRaw) {
+      if (!e.progressUpdateId) continue;
+      const dashboardEvidence: DashboardEvidenceItem = {
         id: e.id,
         fileName: e.fileName,
         fileType: e.fileType,
         fileSizeBytes: e.fileSizeBytes,
         uploadedAt: e.uploadedAt
-      }));
+      };
+      const existingList = evidenceByReportId.get(e.progressUpdateId) || [];
+      existingList.push(dashboardEvidence);
+      evidenceByReportId.set(e.progressUpdateId, existingList);
+    }
 
+    const recentUpdates: DashboardRecentUpdateItem[] = boundedUpdates.map((updItem) => {
       return {
         id: updItem.id,
         reportDate: updItem.reportDate,
@@ -393,9 +396,9 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
         sourceType: updItem.sourceType,
         rawText: updItem.rawText,
         status: updItem.status,
-        matches: dashboardMatches,
-        canonicalObservations: dashboardObs,
-        evidenceList
+        matches: matchesByReportId.get(updItem.id) || [],
+        canonicalObservations: obsByReportId.get(updItem.id) || [],
+        evidenceList: evidenceByReportId.get(updItem.id) || []
       };
     });
 

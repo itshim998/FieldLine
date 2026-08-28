@@ -378,5 +378,84 @@ describe('SqliteActivityProgressRepository', () => {
       progressRepo.getLatestByActivityIdAsOfDate(testActivityId, testProject2Id, '2026-09-01')
     ).toBeNull();
   });
+
+  describe('listByProgressUpdateIds (Batch Query & Project Isolation)', () => {
+    it('should return empty array for empty update IDs without executing query', () => {
+      const results = progressRepo.listByProgressUpdateIds([], testProjectId);
+      expect(results).toEqual([]);
+    });
+
+    it('should batch query progress observations for multiple updates deterministically and enforce project isolation', () => {
+      // Create second update for project 1
+      const update2 = updateRepo.create({
+        projectId: testProjectId,
+        reportDate: '2026-08-27',
+        reporterName: 'Worker 2',
+        sourceType: 'manual',
+        rawText: 'Report 2'
+      });
+
+      // Observations for Project 1 Update 1
+      progressRepo.create({
+        projectId: testProjectId,
+        activityId: testActivityId,
+        progressUpdateId: testUpdateId,
+        actualPercent: 40,
+        asOfDate: '2026-08-26'
+      });
+
+      // Observations for Project 1 Update 2
+      progressRepo.create({
+        projectId: testProjectId,
+        activityId: testActivity2Id,
+        progressUpdateId: update2.id,
+        actualPercent: 60,
+        asOfDate: '2026-08-27'
+      });
+
+      // Project 2 with separate update and observation
+      const scheduleP2 = scheduleRepo.create({
+        projectId: testProject2Id,
+        name: 'Schedule P2',
+        sourceType: 'manual'
+      });
+      const actP2 = activityRepo.create({
+        projectId: testProject2Id,
+        scheduleId: scheduleP2.id,
+        externalId: 'ACT-P2-01',
+        name: 'P2 Activity',
+        plannedStart: '2026-08-01',
+        plannedFinish: '2026-08-20'
+      });
+      const updateP2 = updateRepo.create({
+        projectId: testProject2Id,
+        reportDate: '2026-08-28',
+        reporterName: 'Worker P2',
+        sourceType: 'manual',
+        rawText: 'Report P2'
+      });
+      progressRepo.create({
+        projectId: testProject2Id,
+        activityId: actP2.id,
+        progressUpdateId: updateP2.id,
+        actualPercent: 100,
+        asOfDate: '2026-08-28'
+      });
+
+      // Batch query across Project 1 update IDs
+      const p1Results = progressRepo.listByProgressUpdateIds([testUpdateId, update2.id], testProjectId);
+      expect(p1Results).toHaveLength(2);
+      expect(p1Results.every((obs) => obs.projectId === testProjectId)).toBe(true);
+
+      // Verify Project 2 cannot read Project 1 updates even if passed Project 1 update IDs
+      const p2Results = progressRepo.listByProgressUpdateIds([testUpdateId, update2.id], testProject2Id);
+      expect(p2Results).toHaveLength(0);
+
+      // Verify Project 2 can read its own update ID
+      const p2OwnResults = progressRepo.listByProgressUpdateIds([updateP2.id], testProject2Id);
+      expect(p2OwnResults).toHaveLength(1);
+      expect(p2OwnResults[0].projectId).toBe(testProject2Id);
+    });
+  });
 });
 

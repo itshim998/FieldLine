@@ -361,6 +361,38 @@ describe('Progress Snapshot Calculator (Pure Engine)', () => {
       expect(snapshot.summary.ahead).toBe(1); // act-2
       expect(snapshot.summary.onPlan).toBe(2); // act-1, act-4
       expect(snapshot.summary.behind).toBe(1); // act-3
+
+      // Canonical aggregate progress assertions
+      expect(snapshot.summary.overallActualProgress).toBe(60);
+      expect(snapshot.summary.overallPlannedProgress).toBe(62.5);
+      expect(snapshot.summary.progressVariance).toBe(-2.5);
+      expect(snapshot.summary.varianceState).toBe('behind');
+
+      expect(snapshot.overallActualProgress).toBe(60);
+      expect(snapshot.overallPlannedProgress).toBe(62.5);
+      expect(snapshot.progressVariance).toBe(-2.5);
+      expect(snapshot.varianceState).toBe('behind');
+    });
+
+    it('should return 0s and on_plan for empty project activity set', () => {
+      const snapshot = calculateProjectSnapshot(
+        'proj-empty',
+        '2026-08-16',
+        [],
+        new Map(),
+        '2026-08-16T12:00:00Z'
+      );
+
+      expect(snapshot.summary.totalActivities).toBe(0);
+      expect(snapshot.summary.overallActualProgress).toBe(0);
+      expect(snapshot.summary.overallPlannedProgress).toBe(0);
+      expect(snapshot.summary.progressVariance).toBe(0);
+      expect(snapshot.summary.varianceState).toBe('on_plan');
+
+      expect(snapshot.overallActualProgress).toBe(0);
+      expect(snapshot.overallPlannedProgress).toBe(0);
+      expect(snapshot.progressVariance).toBe(0);
+      expect(snapshot.varianceState).toBe('on_plan');
     });
   });
 });

@@ -692,6 +692,14 @@ frontend/
       - `MilestoneSummary.tsx`: Key project milestones grouped into Upcoming (days until), Completed, and Overdue/Late.
       - `RecentUpdates.tsx`: Bounded chronological report cards with format source badges (manual, xlsx, pdf, image, text, voice), match review state badges (Confirmed, Suggested, Unresolved, Rejected), canonical progress notes, and evidence provenance buttons.
       - `ProjectDashboardView.tsx`: Main view coordinating API fetch, state management, snapshot date selector, loading skeleton, error banner, and seamless tab transitions.
-
-
-
+22. **Post-Pass 20 — Dashboard Data Access Hardening**:
+    - **Single Source of Truth for Progress Aggregates**:
+      - Moved `overallActualProgress`, `overallPlannedProgress`, `progressVariance`, and `varianceState` calculations from `ProjectDashboardService` into the canonical `ProgressSnapshotCalculator` (`calculateSnapshotSummary`, `calculateProjectSnapshot`).
+      - `ProjectDashboardService` directly consumes snapshot summary metrics without duplicate `reduce(...)` calculations, eliminating metric drift risk between the Progress Snapshot and Dashboard views.
+    - **N+1 Query Elimination for Recent Updates**:
+      - Added batch retrieval methods with strict project scoping to repositories:
+        - `ActivityMatchRepository.listByProgressUpdateIds(progressUpdateIds, projectId)`
+        - `ActivityProgressRepository.listByProgressUpdateIds(progressUpdateIds, projectId)`
+        - `EvidenceRepository.listByProgressUpdateIds(progressUpdateIds, projectId)`
+      - Replaced sequential `listByProgressUpdateId` calls inside the recent updates mapping loop with 3 bounded batch queries executed once per dashboard render, grouped in-memory via `Map` lookups.
+      - Preserved full security invariants, deterministic SQL ordering, client privacy (stripping `filePath`), and empty list fast-paths (`[]`).

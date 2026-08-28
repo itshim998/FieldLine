@@ -215,9 +215,12 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
           }
         ] as ActivityMatch[];
       }),
-      listByProgressUpdateId: vi.fn().mockImplementation((updId: string) => {
-        if (updId === 'upd-1') {
-          return [
+      listByProgressUpdateId: vi.fn().mockReturnValue([]),
+      listByProgressUpdateIds: vi.fn().mockImplementation((updIds: string[], pId: string) => {
+        if (pId !== projectId) return [];
+        const matches: ActivityMatch[] = [];
+        if (updIds.includes('upd-1')) {
+          matches.push(
             {
               id: 'match-1',
               projectId,
@@ -254,9 +257,9 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
               createdAt: '2026-08-28T09:00:00.000Z',
               updatedAt: '2026-08-28T09:00:00.000Z'
             }
-          ] as ActivityMatch[];
+          );
         }
-        return [];
+        return matches;
       }),
       create: vi.fn(),
       createMany: vi.fn(),
@@ -273,8 +276,10 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
     };
 
     fakeActivityProgressRepo = {
-      listByProgressUpdateId: vi.fn().mockImplementation((updId: string) => {
-        if (updId === 'upd-1') {
+      listByProgressUpdateId: vi.fn().mockReturnValue([]),
+      listByProgressUpdateIds: vi.fn().mockImplementation((updIds: string[], pId: string) => {
+        if (pId !== projectId) return [];
+        if (updIds.includes('upd-1')) {
           return [
             {
               id: 'obs-1',
@@ -306,8 +311,10 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
 
     fakeEvidenceRepo = {
       listByProjectId: vi.fn().mockImplementation((pId: string) => (pId === projectId ? [] : [])),
-      listByProgressUpdateId: vi.fn().mockImplementation((updId: string) => {
-        if (updId === 'upd-2') {
+      listByProgressUpdateId: vi.fn().mockReturnValue([]),
+      listByProgressUpdateIds: vi.fn().mockImplementation((updIds: string[], pId: string) => {
+        if (pId !== projectId) return [];
+        if (updIds.includes('upd-2')) {
           return [
             {
               id: 'ev-1',
@@ -333,7 +340,11 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
       findBySha256AndProject: vi.fn(),
       countByProjectId: vi.fn(),
       delete: vi.fn(),
-      deleteByIdAndProjectId: vi.fn()
+      deleteByIdAndProjectId: vi.fn(),
+      listByActivityId: vi.fn().mockReturnValue([]),
+      listUnreconciledLegacyEvidence: vi.fn().mockReturnValue([]),
+      updateContentSha256: vi.fn().mockReturnValue(true),
+      attachToProgressUpdate: vi.fn().mockReturnValue(true)
     };
 
     fakeSnapshotService = {
@@ -341,6 +352,10 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
         projectId,
         asOfDate: '2026-08-28',
         generatedAt: '2026-08-28T10:00:00.000Z',
+        overallActualProgress: 57.5,
+        overallPlannedProgress: 97.5,
+        progressVariance: -40,
+        varianceState: 'behind',
         activities: [
           {
             activityId: 'act-1',
@@ -417,7 +432,11 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
           overdue: 0,
           ahead: 0,
           onPlan: 2,
-          behind: 2
+          behind: 2,
+          overallActualProgress: 57.5,
+          overallPlannedProgress: 97.5,
+          progressVariance: -40,
+          varianceState: 'behind'
         }
       })
     };
@@ -576,6 +595,42 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
       expect(dashboard.activityStatus.onTrack).toBe(0);
       expect(dashboard.activityStatus.ahead).toBe(0);
     });
+
+    it('directly consumes canonical snapshot aggregate progress without recomputing from activities', () => {
+      fakeSnapshotService.getProgressSnapshot = vi.fn().mockReturnValue({
+        projectId,
+        asOfDate: '2026-08-28',
+        generatedAt: '2026-08-28T10:00:00.000Z',
+        overallActualProgress: 88.5,
+        overallPlannedProgress: 92.0,
+        progressVariance: -3.5,
+        varianceState: 'behind',
+        activities: [], // Empty activities: if dashboard recalculated by averaging, it would yield 0
+        summary: {
+          totalActivities: 0,
+          notStarted: 0,
+          started: 0,
+          inProgress: 0,
+          completed: 0,
+          delayed: 0,
+          overdue: 0,
+          ahead: 0,
+          onPlan: 0,
+          behind: 0,
+          overallActualProgress: 88.5,
+          overallPlannedProgress: 92.0,
+          progressVariance: -3.5,
+          varianceState: 'behind'
+        }
+      });
+
+      const dashboard = service.getDashboard(projectId, { asOfDate: '2026-08-28' });
+
+      expect(dashboard.health.overallActualProgress).toBe(88.5);
+      expect(dashboard.health.overallPlannedProgress).toBe(92.0);
+      expect(dashboard.health.progressVariance).toBe(-3.5);
+      expect(dashboard.health.varianceState).toBe('behind');
+    });
   });
 
   describe('Needs Attention Summary', () => {
@@ -638,6 +693,25 @@ describe('ProjectDashboardService (Pass 20 Backend Composition)', () => {
       expect(upd2.evidenceList[0].fileName).toBe('daily_report_27aug.pdf');
       // Ensure raw server filesystem path is not exposed
       expect((upd2.evidenceList[0] as any).filePath).toBeUndefined();
+    });
+
+    it('executes single bounded batch queries for matches, observations, and evidence across recent updates', () => {
+      service.getDashboard(projectId, { asOfDate: '2026-08-28', recentLimit: 10 });
+
+      // Verifying batch query methods were called exactly once with bounded update IDs
+      expect(fakeActivityMatchRepo.listByProgressUpdateIds).toHaveBeenCalledTimes(1);
+      expect(fakeActivityMatchRepo.listByProgressUpdateIds).toHaveBeenCalledWith(['upd-1', 'upd-2'], projectId);
+
+      expect(fakeActivityProgressRepo.listByProgressUpdateIds).toHaveBeenCalledTimes(1);
+      expect(fakeActivityProgressRepo.listByProgressUpdateIds).toHaveBeenCalledWith(['upd-1', 'upd-2'], projectId);
+
+      expect(fakeEvidenceRepo.listByProgressUpdateIds).toHaveBeenCalledTimes(1);
+      expect(fakeEvidenceRepo.listByProgressUpdateIds).toHaveBeenCalledWith(['upd-1', 'upd-2'], projectId);
+
+      // Verifying per-update queries are NOT executed in the loop
+      expect(fakeActivityMatchRepo.listByProgressUpdateId).not.toHaveBeenCalled();
+      expect(fakeActivityProgressRepo.listByProgressUpdateId).not.toHaveBeenCalled();
+      expect(fakeEvidenceRepo.listByProgressUpdateId).not.toHaveBeenCalled();
     });
   });
 });

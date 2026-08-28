@@ -21,6 +21,7 @@ export interface EvidenceRepository {
   listUnreconciledLegacyEvidence(): Evidence[];
   listByProjectId(projectId: string): Evidence[];
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): Evidence[];
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): Evidence[];
   listByActivityId(activityId: string, projectId: string): Evidence[];
   countByProjectId(projectId: string): number;
   attachToProgressUpdate(evidenceId: string, progressUpdateId: string, projectId: string): boolean;
@@ -282,6 +283,28 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
       }
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to list evidence for progress update '${progressUpdateId}': ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): Evidence[] {
+    if (progressUpdateIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const db = this.getDb();
+      const placeholders = progressUpdateIds.map(() => '?').join(',');
+      const stmt = db.prepare(`
+        SELECT * FROM evidence
+        WHERE project_id = ? AND progress_update_id IN (${placeholders})
+        ORDER BY progress_update_id ASC, uploaded_at DESC, created_at DESC, id ASC
+      `);
+      const rows = stmt.all(projectId, ...progressUpdateIds) as EvidenceDbRow[];
+      return rows.map(mapRowToEvidence);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list evidence for progress update batch: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 

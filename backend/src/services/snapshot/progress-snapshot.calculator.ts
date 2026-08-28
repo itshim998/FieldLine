@@ -188,13 +188,31 @@ export function calculateActivitySnapshot(
 }
 
 /**
- * Aggregates summary counts across snapshot activity items.
+ * Aggregates summary counts and canonical aggregate progress metrics across snapshot activity items.
  */
 export function calculateSnapshotSummary(
   activities: ActivityProgressSnapshotItem[]
 ): ProgressSnapshotSummary {
+  const totalActivities = activities.length;
+
+  let overallActualProgress = 0;
+  let overallPlannedProgress = 0;
+  let progressVariance = 0;
+  let varianceState: VarianceState = 'on_plan';
+
+  if (totalActivities > 0) {
+    const sumActual = activities.reduce((sum, a) => sum + a.actualProgress, 0);
+    const sumPlanned = activities.reduce((sum, a) => sum + a.plannedProgress, 0);
+    overallActualProgress = Math.round((sumActual / totalActivities) * 100) / 100;
+    overallPlannedProgress = Math.round((sumPlanned / totalActivities) * 100) / 100;
+
+    const varianceResult = calculateVariance(overallActualProgress, overallPlannedProgress);
+    progressVariance = varianceResult.progressVariance;
+    varianceState = varianceResult.varianceState;
+  }
+
   const summary: ProgressSnapshotSummary = {
-    totalActivities: activities.length,
+    totalActivities,
     notStarted: 0,
     started: 0,
     inProgress: 0,
@@ -203,7 +221,11 @@ export function calculateSnapshotSummary(
     overdue: 0,
     ahead: 0,
     onPlan: 0,
-    behind: 0
+    behind: 0,
+    overallActualProgress,
+    overallPlannedProgress,
+    progressVariance,
+    varianceState
   };
 
   for (const act of activities) {
@@ -273,6 +295,10 @@ export function calculateProjectSnapshot(
     asOfDate,
     generatedAt: generatedAt || new Date().toISOString(),
     activities: activitySnapshots,
-    summary
+    summary,
+    overallActualProgress: summary.overallActualProgress,
+    overallPlannedProgress: summary.overallPlannedProgress,
+    progressVariance: summary.progressVariance,
+    varianceState: summary.varianceState
   };
 }

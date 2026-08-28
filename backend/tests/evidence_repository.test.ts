@@ -473,4 +473,65 @@ describe('SqliteEvidenceRepository', () => {
       }).toThrow(ConflictError);
     });
   });
+
+  describe('listByProgressUpdateIds (Batch Query & Project Isolation)', () => {
+    it('should return empty array for empty update IDs without executing query', () => {
+      const results = evidenceRepo.listByProgressUpdateIds([], project1Id);
+      expect(results).toEqual([]);
+    });
+
+    it('should batch query evidence for multiple updates deterministically and enforce project isolation', () => {
+      // Create second update for project 1
+      const update1b = progressUpdateRepo.create({
+        projectId: project1Id,
+        reportDate: '2026-08-27',
+        reporterName: 'Worker 2',
+        sourceType: 'manual',
+        rawText: 'Report 1b'
+      });
+
+      // Evidence for Project 1 Update 1
+      const ev1 = evidenceRepo.create({
+        projectId: project1Id,
+        progressUpdateId: update1Id,
+        fileName: 'ev1.pdf',
+        filePath: `${project1Id}/ev1.pdf`,
+        fileType: 'pdf'
+      });
+
+      // Evidence for Project 1 Update 1b
+      const ev2 = evidenceRepo.create({
+        projectId: project1Id,
+        progressUpdateId: update1b.id,
+        fileName: 'ev2.jpg',
+        filePath: `${project1Id}/ev2.jpg`,
+        fileType: 'image'
+      });
+
+      // Evidence for Project 2 Update 2
+      const evP2 = evidenceRepo.create({
+        projectId: project2Id,
+        progressUpdateId: update2Id,
+        fileName: 'ev_p2.png',
+        filePath: `${project2Id}/ev_p2.png`,
+        fileType: 'image'
+      });
+
+      // Batch query across Project 1 update IDs
+      const p1Results = evidenceRepo.listByProgressUpdateIds([update1Id, update1b.id], project1Id);
+      expect(p1Results).toHaveLength(2);
+      expect(p1Results.map((e) => e.id)).toEqual(expect.arrayContaining([ev1.id, ev2.id]));
+      expect(p1Results.every((e) => e.projectId === project1Id)).toBe(true);
+
+      // Verify Project 2 cannot read Project 1 updates even if passed Project 1 update IDs
+      const p2Results = evidenceRepo.listByProgressUpdateIds([update1Id, update1b.id], project2Id);
+      expect(p2Results).toHaveLength(0);
+
+      // Verify Project 2 can read its own update ID
+      const p2OwnResults = evidenceRepo.listByProgressUpdateIds([update2Id], project2Id);
+      expect(p2OwnResults).toHaveLength(1);
+      expect(p2OwnResults[0].id).toBe(evP2.id);
+      expect(p2OwnResults[0].projectId).toBe(project2Id);
+    });
+  });
 });

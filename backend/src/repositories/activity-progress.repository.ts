@@ -18,6 +18,7 @@ export interface ActivityProgressRepository {
   getByIdAndProjectId(id: string, projectId: string): ActivityProgress | null;
   listByActivityId(activityId: string, projectId?: string): ActivityProgress[];
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityProgress[];
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityProgress[];
   listByProjectId(projectId: string): ActivityProgress[];
   getLatestByActivityId(activityId: string, projectId?: string): ActivityProgress | null;
   getLatestByActivityIdAsOfDate(
@@ -292,6 +293,28 @@ export class SqliteActivityProgressRepository implements ActivityProgressReposit
     } catch (err: unknown) {
       throw new DatabaseError(
         `Failed to list activity progress by progress update ID: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityProgress[] {
+    if (progressUpdateIds.length === 0) {
+      return [];
+    }
+
+    try {
+      const db = this.getDb();
+      const placeholders = progressUpdateIds.map(() => '?').join(',');
+      const stmt = db.prepare(`
+        SELECT * FROM activity_progress 
+        WHERE project_id = ? AND progress_update_id IN (${placeholders}) 
+        ORDER BY progress_update_id ASC, as_of_date DESC, created_at DESC, id DESC
+      `);
+      const rows = stmt.all(projectId, ...progressUpdateIds) as ActivityProgressDbRow[];
+      return rows.map(mapRowToActivityProgress);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list activity progress for progress update batch: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
