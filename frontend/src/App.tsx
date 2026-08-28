@@ -249,6 +249,7 @@ export interface AssistantQueryResponse {
   resolvedActivity: ResolvedActivityInfo | null;
   ambiguousCandidates: ResolvedActivityInfo[] | null;
   answer: string;
+  claims?: { text: string; factRefs: string[] }[];
   factRefs: string[];
   grounded: boolean;
   status: 'success' | 'activity_not_found' | 'ambiguous_activity' | 'insufficient_data' | 'unsupported';

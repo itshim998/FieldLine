@@ -18,6 +18,7 @@ describe('Assistant Router (Pass 18)', () => {
         resolvedActivity: null,
         ambiguousCandidates: null,
         answer: 'Activity ACT-001 is delayed.',
+        claims: [{ text: 'Activity ACT-001 is delayed.', factRefs: ['delayed:ACT-001'] }],
         factRefs: ['delayed:ACT-001'],
         grounded: true,
         status: 'success',

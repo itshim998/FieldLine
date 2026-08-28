@@ -205,8 +205,12 @@ describe('Assistant Security & Tenant Isolation Tests (Pass 18)', () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
-        answer: 'Alpha Tunnel Boring is delayed.',
-        factRefs: ['delayed:ACT-A1']
+        claims: [
+          {
+            text: 'Alpha Tunnel Boring is delayed.',
+            factRefs: ['delayed:ACT-A1']
+          }
+        ]
       })
     };
 

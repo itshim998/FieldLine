@@ -69,6 +69,32 @@ export class MockAIProvider implements AIProvider {
       return defaultFieldProgressPayload;
     }
 
+    // Default valid assistant grounded answer payload (Pass 18 Corrective)
+    const defaultAssistantAnswerPayload = {
+      answer: 'Mock grounded assistant answer.',
+      claims: [
+        {
+          text: 'Mock grounded assistant answer.',
+          factRefs: ['mock-ref']
+        }
+      ]
+    };
+
+    if (_schema.safeParse(defaultAssistantAnswerPayload).success) {
+      return defaultAssistantAnswerPayload;
+    }
+
+    // Default valid assistant intent payload
+    const defaultAssistantIntentPayload = {
+      intent: 'delayed',
+      activityQuery: null,
+      explicitDate: null
+    };
+
+    if (_schema.safeParse(defaultAssistantIntentPayload).success) {
+      return defaultAssistantIntentPayload;
+    }
+
     // Default valid generic mock extraction contract
     return {
       summary: 'Mock extracted summary of field progress',

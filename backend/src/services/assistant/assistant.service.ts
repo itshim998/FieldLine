@@ -37,6 +37,40 @@ import {
 import { NotFoundError, ValidationError, AIProviderError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
+interface SpeculativePattern {
+  name: string;
+  pattern: RegExp;
+  keywords: string[];
+}
+
+const UNSUPPORTED_SPECULATIVE_PATTERNS: SpeculativePattern[] = [
+  {
+    name: 'workforce / labor / staffing',
+    pattern: /\b(understaff(?:ed|ing)?|shortage of (?:workers|staff|labor|manpower)|labor shortage|staff shortage|insufficient (?:workers|staff|labor|manpower)|lack of (?:workers|staff|labor|manpower)|manpower shortage|strike|strikes|worker dispute)\b/i,
+    keywords: ['staff', 'worker', 'labor', 'manpower', 'strike', 'workforce', 'understaff']
+  },
+  {
+    name: 'materials / supply chain',
+    pattern: /\b(material shortage|lack of materials|supply chain (?:issue|delay|disruption|problem)|delayed (?:shipment|delivery)|supplier (?:delay|issue|problem)|out of stock|steel shortage|concrete shortage)\b/i,
+    keywords: ['material', 'supply chain', 'supplier', 'shipment', 'delivery', 'concrete shortage', 'steel shortage']
+  },
+  {
+    name: 'weather / environmental',
+    pattern: /\b(severe weather|bad weather|heavy rain(?:storm)?|storm|flooding|flood|extreme (?:heat|cold|temperature)|snowstorm|typhoon|hurricane|inclement weather)\b/i,
+    keywords: ['weather', 'rain', 'storm', 'flood', 'snow', 'wind', 'typhoon', 'hurricane']
+  },
+  {
+    name: 'equipment / machinery failure',
+    pattern: /\b(equipment failure|equipment breakdown|machinery (?:failure|breakdown)|machine (?:failure|breakdown)|crane (?:failure|breakdown)|mechanical (?:failure|breakdown)|broken (?:equipment|machinery))\b/i,
+    keywords: ['equipment', 'machinery', 'breakdown', 'crane', 'mechanical failure']
+  },
+  {
+    name: 'legal / disputes / financial',
+    pattern: /\b(contractor dispute|legal dispute|lawsuit|permit delay|permits pending|budget cut|funding (?:delay|shortage|issue)|bankruptcy|insolvency|contractor negligence|contractor (?:problem|issue)s?)\b/i,
+    keywords: ['dispute', 'lawsuit', 'permit', 'budget', 'funding', 'bankruptcy', 'negligence']
+  }
+];
+
 export function buildGroundedAnswerPrompt(
   question: string,
   intent: AssistantIntent,
@@ -53,19 +87,26 @@ export function buildGroundedAnswerPrompt(
     'GROUNDING RULES & CONSTRAINTS:',
     '1. You are NOT the source of truth. The VERIFIED FACTS below are the ONLY project facts available.',
     '2. You MUST answer ONLY from the supplied VERIFIED FACTS.',
-    '3. Preserve numeric values (percentages, variances, days) exactly as given in the facts.',
-    '4. Preserve calendar dates exactly as given in the facts.',
-    '5. Preserve activity names and external IDs exactly as given.',
-    '6. Cite all factual statements in your answer by including the corresponding fact reference strings in the "factRefs" array.',
-    '7. You must NOT invent project facts, percentages, dates, causes, or activity identities.',
-    '8. You must NOT infer unsupported contractor, labor, weather, or supply chain causes unless explicitly stated in the facts.',
-    '9. You must NOT perform new project calculations or recalculate variances.',
-    '10. If the VERIFIED FACTS are insufficient to answer the question, state clearly that available project data is insufficient.',
+    '3. Return a list of factual claims. Every factual claim MUST cite one or more supplied fact references in its "factRefs" array.',
+    '4. Preserve numeric values (percentages, variances, days) exactly as given in the facts.',
+    '5. Preserve calendar dates exactly as given in the facts.',
+    '6. Preserve activity names and external IDs exactly as given.',
+    '7. Never create or invent a fact reference. Only cite references copied directly from the supplied VERIFIED FACTS.',
+    '8. Never cite a fact that does not support the claim.',
+    '9. You must NOT invent project facts, percentages, dates, causes, or activity identities.',
+    '10. You must NOT infer unsupported contractor, labor/staffing shortages, weather, material shortages, or equipment failure causes unless explicitly stated in the verified facts.',
+    '11. If the VERIFIED FACTS do not establish a requested explanation (such as root causes), explicitly state that available project data does not establish the cause.',
+    '12. You must NOT perform new project calculations or recalculate variances.',
     '',
     'Return ONLY a valid JSON object matching this schema:',
     '{',
-    '  "answer": "Concise, professional grounded answer grounded exclusively in the facts",',
-    '  "factRefs": ["ref1", "ref2"]',
+    '  "claims": [',
+    '    {',
+    '      "text": "Specific factual claim directly supported by cited facts",',
+    '      "factRefs": ["ref1", "ref2"]',
+    '    }',
+    '  ],',
+    '  "answer": "Concise, professional grounded answer assembled exclusively from the validated claims"',
     '}',
     '',
     '--- MANAGER QUESTION ---',
@@ -160,6 +201,7 @@ export class AssistantService {
         ambiguousCandidates: null,
         answer:
           'This question cannot be answered from project tracking data. Supported queries include delayed activities, at-risk activities, completed tasks, behind-schedule activities, upcoming milestones, stale activities, recent changes, and activity status.',
+        claims: [],
         factRefs: [],
         grounded: false,
         status: 'unsupported',
@@ -180,6 +222,7 @@ export class AssistantService {
           resolvedActivity: null,
           ambiguousCandidates: null,
           answer: `No activity matching "${intent.activityQuery}" was found in project "${project.name}".`,
+          claims: [],
           factRefs: [],
           grounded: false,
           status: 'activity_not_found',
@@ -198,6 +241,7 @@ export class AssistantService {
           resolvedActivity: null,
           ambiguousCandidates: resolution.candidates,
           answer: `Multiple activities matched "${intent.activityQuery}": ${candidateNames}. Please specify the exact activity ID or complete activity name.`,
+          claims: [],
           factRefs: [],
           grounded: false,
           status: 'ambiguous_activity',
@@ -212,7 +256,7 @@ export class AssistantService {
     // 7. Compile verified facts from Project Intelligence layer
     const facts = this.factBuilder.buildFacts(projectId, intent, canonicalDate, resolvedActivity);
 
-    // 8. Safe insufficient data response if fact set is empty
+    // 8. Safe deterministic insufficient data response if fact set is empty
     if (facts.length === 0) {
       let emptyMsg = `The available project data contains no recorded facts for this query as of ${canonicalDate}.`;
       if (intent.intent === 'delayed') {
@@ -237,6 +281,7 @@ export class AssistantService {
         resolvedActivity,
         ambiguousCandidates: null,
         answer: emptyMsg,
+        claims: [],
         factRefs: [],
         grounded: false,
         status: 'insufficient_data',
@@ -245,7 +290,7 @@ export class AssistantService {
       };
     }
 
-    // 9. Generate Grounded Answer from Verified Facts
+    // 9. Generate Grounded Structured Claims from Verified Facts
     const prompt = buildGroundedAnswerPrompt(trimmedQuestion, intent, canonicalDate, facts);
     logger.debug(`AssistantService: Generating grounded answer with ${facts.length} verified facts`);
 
@@ -254,27 +299,86 @@ export class AssistantService {
       assistantAnswerSchema
     );
 
-    // 10. Strict Fact-Reference Validation (Section 15)
-    const validRefIds = new Set(facts.map((f) => f.ref));
-    const citedRefs = rawAnswer.factRefs || [];
-    const unknownRefs = citedRefs.filter((ref) => !validRefIds.has(ref));
-
-    if (unknownRefs.length > 0) {
-      logger.warn(`Assistant answer cited unknown fact references: ${unknownRefs.join(', ')}`);
+    // 10. Strict Claim-Level Fact Reference & Grounding Validation (Pass 18 Corrective)
+    if (!rawAnswer.claims || !Array.isArray(rawAnswer.claims) || rawAnswer.claims.length === 0) {
       throw new AIProviderError(
-        `Grounded answer validation failed: response cited unverified fact references: ${unknownRefs.join(', ')}`
+        'Grounded answer validation failed: model produced zero factual claims'
       );
     }
 
-    // Ensure valid cited factRefs or map all available factRefs if none cited
-    const finalFactRefs = citedRefs.length > 0 ? citedRefs : facts.map((f) => f.ref);
+    const validFactsMap = new Map<string, VerifiedFact>();
+    for (const f of facts) {
+      validFactsMap.set(f.ref, f);
+    }
+
+    const citedFactRefsSet = new Set<string>();
+
+    for (const claim of rawAnswer.claims) {
+      if (!claim.text || typeof claim.text !== 'string' || claim.text.trim().length === 0) {
+        throw new AIProviderError(
+          'Grounded answer validation failed: factual claim text must not be empty'
+        );
+      }
+
+      if (!claim.factRefs || !Array.isArray(claim.factRefs) || claim.factRefs.length === 0) {
+        throw new AIProviderError(
+          `Grounded answer validation failed: factual claim "${claim.text}" has no fact references`
+        );
+      }
+
+      const citedFactsForClaim: VerifiedFact[] = [];
+      for (const ref of claim.factRefs) {
+        const fact = validFactsMap.get(ref);
+        if (!fact) {
+          logger.warn(`Assistant answer cited unknown fact reference: ${ref}`);
+          throw new AIProviderError(
+            `Grounded answer validation failed: response cited unverified fact references: ${ref}`
+          );
+        }
+        citedFactsForClaim.push(fact);
+        citedFactRefsSet.add(ref);
+      }
+
+      // Check for unsupported speculative causes (e.g. understaffed, weather, equipment, material)
+      const factualCorpus = citedFactsForClaim
+        .map((f) => `${f.summary} ${f.activityName || ''} ${f.category} ${JSON.stringify(f.data)}`)
+        .join(' ')
+        .toLowerCase();
+
+      for (const spec of UNSUPPORTED_SPECULATIVE_PATTERNS) {
+        if (spec.pattern.test(claim.text)) {
+          const isCorpusSupported = spec.keywords.some((kw) =>
+            factualCorpus.includes(kw.toLowerCase())
+          );
+          if (!isCorpusSupported) {
+            logger.warn(
+              `Assistant claim asserts unsupported ${spec.name} speculation without fact backing: "${claim.text}"`
+            );
+            throw new AIProviderError(
+              `Grounded answer validation failed: claim asserts unsupported ${spec.name} causes not present in cited verified facts: "${claim.text}"`
+            );
+          }
+        }
+      }
+    }
+
+    const finalFactRefs = Array.from(citedFactRefsSet);
+    if (finalFactRefs.length === 0) {
+      throw new AIProviderError(
+        'Grounded answer validation failed: zero valid fact references cited'
+      );
+    }
+
+    // 11. Final Answer Assembly: Construct exclusively from validated claims
+    const constructedAnswer = rawAnswer.claims.map((c) => c.text.trim()).join(' ');
 
     return {
       question: trimmedQuestion,
       intent,
       resolvedActivity,
       ambiguousCandidates: null,
-      answer: rawAnswer.answer,
+      answer: constructedAnswer,
+      claims: rawAnswer.claims,
       factRefs: finalFactRefs,
       grounded: true,
       status: 'success',

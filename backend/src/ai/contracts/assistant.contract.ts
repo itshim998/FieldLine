@@ -29,11 +29,25 @@ export const assistantIntentSchema = z.object({
 export type AssistantIntent = z.infer<typeof assistantIntentSchema>;
 
 /**
- * Structured grounded assistant answer schema
+ * Structured factual claim with mandatory fact citations (Pass 18 Corrective)
+ */
+export const assistantClaimSchema = z.object({
+  text: z.string().min(1, 'Claim text must not be empty'),
+  factRefs: z
+    .array(z.string().min(1, 'Fact reference string must not be empty'))
+    .min(1, 'Each factual claim must cite at least one verified fact reference')
+});
+
+export type AssistantClaim = z.infer<typeof assistantClaimSchema>;
+
+/**
+ * Structured grounded assistant answer schema (Pass 18 Corrective)
  */
 export const assistantAnswerSchema = z.object({
-  answer: z.string().min(1, 'Answer must not be empty'),
-  factRefs: z.array(z.string())
+  answer: z.string().min(1, 'Answer must not be empty').optional(),
+  claims: z
+    .array(assistantClaimSchema)
+    .min(1, 'At least one verified claim must be provided in the answer')
 });
 
 export type AssistantAnswer = z.infer<typeof assistantAnswerSchema>;

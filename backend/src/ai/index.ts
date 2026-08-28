@@ -27,12 +27,14 @@ export type {
 export {
   assistantIntentTypeEnum,
   assistantIntentSchema,
+  assistantClaimSchema,
   assistantAnswerSchema
 } from './contracts/assistant.contract.js';
 
 export type {
   AssistantIntentType,
   AssistantIntent,
+  AssistantClaim,
   AssistantAnswer
 } from './contracts/assistant.contract.js';
 

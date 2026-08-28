@@ -1,4 +1,4 @@
-import { AssistantIntent, AssistantIntentType } from '../../ai/contracts/assistant.contract.js';
+import { AssistantIntent, AssistantIntentType, AssistantClaim } from '../../ai/contracts/assistant.contract.js';
 
 export interface VerifiedFact {
   ref: string;
@@ -44,6 +44,7 @@ export interface AssistantQueryResponse {
   resolvedActivity: ResolvedActivityInfo | null;
   ambiguousCandidates: ResolvedActivityInfo[] | null;
   answer: string;
+  claims?: AssistantClaim[];
   factRefs: string[];
   grounded: boolean;
   status: AssistantResponseStatus;

@@ -189,8 +189,12 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
-        answer: 'Foundation B Pouring (ACT-001) is currently delayed with 60% completion against planned finish 2026-08-15.',
-        factRefs: ['delayed:ACT-001']
+        claims: [
+          {
+            text: 'Foundation B Pouring (ACT-001) is currently delayed with 60% completion against planned finish 2026-08-15.',
+            factRefs: ['delayed:ACT-001']
+          }
+        ]
       })
     };
 
@@ -222,8 +226,12 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
-        answer: 'Foundation B Pouring (ACT-001) is at risk due to a strong negative variance of -40% (planned finish was 2026-08-15).',
-        factRefs: ['at_risk:ACT-001']
+        claims: [
+          {
+            text: 'Foundation B Pouring (ACT-001) is at risk due to a strong negative variance of -40% (planned finish was 2026-08-15).',
+            factRefs: ['at_risk:ACT-001']
+          }
+        ]
       })
     };
 
@@ -254,8 +262,12 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
-        answer: 'Today, progress of 60% was recorded for Foundation B Pouring.',
-        factRefs: ['event:evt-1']
+        claims: [
+          {
+            text: 'Today, progress of 60% was recorded for Foundation B Pouring.',
+            factRefs: ['event:evt-1']
+          }
+        ]
       })
     };
 
@@ -285,8 +297,12 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     const fakeAIService: AIService = {
       generateText: vi.fn(),
       extractStructured: vi.fn().mockResolvedValue({
-        answer: 'Foundation B Pouring (ACT-001) is most behind schedule with a progress variance of -40%.',
-        factRefs: ['behind_schedule:ACT-001']
+        claims: [
+          {
+            text: 'Foundation B Pouring (ACT-001) is most behind schedule with a progress variance of -40%.',
+            factRefs: ['behind_schedule:ACT-001']
+          }
+        ]
       })
     };
 
