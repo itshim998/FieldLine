@@ -55,9 +55,8 @@ describe('DocumentIngestionService', () => {
     const sched = scheduleRepository.create({
       projectId,
       name: 'Baseline Schedule',
-      sourceFileName: 'baseline.csv',
-      sourceType: 'csv',
-      status: 'active'
+      sourceFilename: 'baseline.csv',
+      sourceType: 'csv'
     });
 
     const act = activityRepository.create({

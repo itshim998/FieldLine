@@ -292,6 +292,7 @@ describe('SqliteEvidenceRepository', () => {
       // 3. Evidence 2: Linked via ActivityProgress -> progressUpdateId -> Evidence
       const u1b = progressUpdateRepo.create({
         projectId: project1Id,
+        sourceType: 'manual',
         reportDate: '2026-08-25',
         rawText: 'Pier P-12 reached 80% completion.'
       });
@@ -342,6 +343,7 @@ describe('SqliteEvidenceRepository', () => {
       // Update 1 with Evidence E1 (linked to rejected match)
       const uRejected = progressUpdateRepo.create({
         projectId: project1Id,
+        sourceType: 'manual',
         reportDate: '2026-08-02',
         rawText: 'Rejected match progress update'
       });
@@ -367,6 +369,7 @@ describe('SqliteEvidenceRepository', () => {
       // Update 2 with Evidence E2 (linked to suggested match)
       const uSuggested = progressUpdateRepo.create({
         projectId: project1Id,
+        sourceType: 'manual',
         reportDate: '2026-08-03',
         rawText: 'Suggested match progress update'
       });

@@ -41,7 +41,7 @@ describe('Pass 16 — Transactional Failure Safety and State Preservation', () =
     const schedule = scheduleRepository.create({
       projectId,
       name: 'Baseline Schedule',
-      sourceFileName: 'baseline.csv',
+      sourceFilename: 'baseline.csv',
       sourceType: 'csv',
       isBaseline: true
     });

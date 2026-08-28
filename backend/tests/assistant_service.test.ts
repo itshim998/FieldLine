@@ -64,9 +64,10 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     create: vi.fn(),
     getById: vi.fn().mockImplementation((id: string) => (id === projectId ? mockProject : null)),
     getByCode: vi.fn(),
-    list: vi.fn(),
+    listAll: vi.fn(),
     update: vi.fn(),
-    delete: vi.fn()
+    delete: vi.fn(),
+    count: vi.fn()
   };
 
   const fakeActivityRepo: ActivityRepository = {

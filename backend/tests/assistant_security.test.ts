@@ -85,9 +85,10 @@ describe('Assistant Security & Tenant Isolation Tests (Pass 18)', () => {
       return null;
     }),
     getByCode: vi.fn(),
-    list: vi.fn(),
+    listAll: vi.fn(),
     update: vi.fn(),
-    delete: vi.fn()
+    delete: vi.fn(),
+    count: vi.fn()
   };
 
   const fakeActivityRepo: ActivityRepository = {

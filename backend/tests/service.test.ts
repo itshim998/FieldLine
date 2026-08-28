@@ -9,7 +9,9 @@ describe('HealthService', () => {
     NODE_ENV: 'test',
     DATABASE_PATH: ':memory:',
     UPLOAD_DIR: './test-uploads',
-    VITE_PORT: 3000
+    VITE_PORT: 3000,
+    AI_PROVIDER: 'mock',
+    GEMINI_MODEL: 'gemini-3.7-flash'
   };
 
   it('should assemble healthy response when repository reports healthy status', () => {

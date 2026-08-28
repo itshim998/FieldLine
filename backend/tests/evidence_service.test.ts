@@ -56,6 +56,7 @@ describe('EvidenceService', () => {
 
     const u1 = progressUpdateRepo.create({
       projectId: project1Id,
+      sourceType: 'manual',
       reportDate: '2026-08-22',
       rawText: 'Girder launch at station 4 started.'
     });
@@ -63,6 +64,7 @@ describe('EvidenceService', () => {
 
     const u2 = progressUpdateRepo.create({
       projectId: project2Id,
+      sourceType: 'manual',
       reportDate: '2026-08-23',
       rawText: 'Paving completed for section 2.'
     });

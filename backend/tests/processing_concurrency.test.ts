@@ -40,7 +40,7 @@ describe('Pass 16 — Backend-Level Concurrent Processing Protection', () => {
     const schedule = scheduleRepository.create({
       projectId,
       name: 'Baseline Schedule',
-      sourceFileName: 'baseline.csv',
+      sourceFilename: 'baseline.csv',
       sourceType: 'csv',
       isBaseline: true
     });
