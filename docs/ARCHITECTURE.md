@@ -703,3 +703,39 @@ frontend/
         - `EvidenceRepository.listByProgressUpdateIds(progressUpdateIds, projectId)`
       - Replaced sequential `listByProgressUpdateId` calls inside the recent updates mapping loop with 3 bounded batch queries executed once per dashboard render, grouped in-memory via `Map` lookups.
       - Preserved full security invariants, deterministic SQL ordering, client privacy (stripping `filePath`), and empty list fast-paths (`[]`).
+23. **Pass 21 — Activity Detail View & Operational Truth**:
+    - **Purpose & Architectural Role**:
+      - Provides a read-only, project-scoped activity detail composition layer that gives every schedule activity a complete, trustworthy history without creating new truth engines, mutating state, or duplicating domain calculations.
+      - Composes 6 distinct sections:
+        - `activity` &rarr; Activity Identity from `ActivityRepository` (`activityId`, `externalId`, `name`, `description`, `wbsCode`, `location`, `scheduleId`, `plannedStart`, `plannedFinish`, `plannedQuantity`, `unit`, `baselineProgress`).
+        - `current` &rarr; Authoritative snapshot from `ProgressSnapshotService` + `RiskClassificationService` evaluated deterministically as-of `asOfDate`.
+        - `timeline` &rarr; Chronological history of verified progress observations from `ActivityProgressRepository` (bounded strictly by `asOfDate <= D`, sorted `asOfDate ASC, createdAt ASC, id ASC`), enriched with originating source type.
+        - `progressUpdates` &rarr; Provenance records of originating field reports looked up in a single batch query via `ProgressUpdateRepository.listByIds(ids, projectId)`.
+        - `matches` &rarr; AI candidate matches and human review decisions from `ActivityMatchRepository.listByActivityId(activityId, projectId)` with explicit `canonicalProgressEligible: boolean` flag (`confirmed` = true, `suggested`/`rejected` = false).
+        - `evidence` &rarr; Traceable evidence files from `EvidenceRepository.listByActivityId(activityId, projectId)` deduplicated and sanitized with zero filesystem paths exposed.
+    - **Data Flow & Composition Pipeline**:
+      ```text
+      GET /api/projects/:projectId/activities/:activityId?asOfDate=YYYY-MM-DD
+          ↓
+      activityDetailRouter (Thin Controller, Zod Parameter & Query Validation)
+          ↓
+      ActivityDetailService.getActivityDetail(projectId, activityId, options)
+          ├── 1. Project Verification (ProjectRepository)
+          ├── 2. Project-Scoped Activity Verification (ActivityRepository.getByIdAndProjectId)
+          ├── 3. Canonical AsOfDate Resolution (validateSnapshotDate)
+          ├── 4. Current State Delegation (ProgressSnapshotService + RiskClassificationService)
+          ├── 5. Chronological Observations Query & Boundary Filtering (ActivityProgressRepository)
+          ├── 6. Activity Match Mapping (ActivityMatchRepository)
+          ├── 7. Batch ProgressUpdate Lookup (ProgressUpdateRepository.listByIds)
+          ├── 8. Traceable Evidence Query & Sanitization (EvidenceRepository.listByActivityId)
+          └── 9. Activity Identity Composition
+          ↓
+      Typed ActivityDetail DTO
+          ↓
+      React Frontend (<ActivityHeader />, <ActivityCurrentState />, <ActivityTimeline />, <ActivityProgressSources />, <ActivityReviewContext />, <ActivityEvidence />)
+      ```
+    - **Security & Provenance Invariants**:
+      - **Strict Project Isolation**: Requesting an activity belonging to Project A under Project B's URL path throws `404 Not Found`.
+      - **Filesystem Security**: Absolute server paths (`filePath`) are never serialized; files are viewed safely via `/api/projects/:projectId/evidence/:evidenceId/content`.
+      - **Canonical Truth Protection**: Only `confirmed` matches are marked `canonicalProgressEligible: true`.
+      - **No N+1 Queries**: Progress update records are retrieved via a single batch lookup `listByIds(ids, projectId)`.

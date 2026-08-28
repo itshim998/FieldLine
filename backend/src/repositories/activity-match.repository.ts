@@ -68,6 +68,7 @@ export interface ActivityMatchRepository {
   getByIdAndProjectId(id: string, projectId: string): ActivityMatch | null;
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityMatch[];
   listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityMatch[];
+  listByActivityId(activityId: string, projectId: string): ActivityMatch[];
   listByProjectId(projectId: string): ActivityMatch[];
   updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null;
   confirmMatchAtomically(input: ConfirmMatchAtomicInput): ActivityMatch;
@@ -834,6 +835,23 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     } catch (err: unknown) {
       throw new DatabaseError(
         `Failed to list activity matches for progress update batch: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  listByActivityId(activityId: string, projectId: string): ActivityMatch[] {
+    try {
+      const db = this.getDb();
+      const stmt = db.prepare(`
+        SELECT * FROM activity_matches
+        WHERE activity_id = ? AND project_id = ?
+        ORDER BY created_at DESC, confidence_score DESC, id ASC
+      `);
+      const rows = stmt.all(activityId, projectId) as ActivityMatchDbRow[];
+      return rows.map(mapRowToActivityMatch);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list activity matches for activity '${activityId}': ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }

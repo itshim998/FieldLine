@@ -1,920 +1,1155 @@
-# FieldLine — POST-PASS 20 DASHBOARD HARDENING
+# FieldLine — PASS 21: ACTIVITY DETAIL VIEW
 
-The current FieldLine `main` contains the approved Pass 20 dashboard.
+Implement **Pass 21 — Activity Detail View** in the existing FieldLine repository.
 
-Make ONLY the following two architectural improvements:
+Work from the actual current `main`.
 
-1. Move dashboard aggregate actual/planned progress calculation into the canonical Progress Snapshot layer.
-2. Remove the recent-update N+1 query pattern in `ProjectDashboardService` using bounded batch repository queries.
+Passes 13–20 are approved.
 
-This is a **targeted refactor/hardening task**, not a new product pass.
-
-Do NOT implement Pass 21+.
+Do NOT implement Pass 22+.
 
 ---
 
-# 1. Current baseline
+# 1. Objective
 
-Current Pass 20 dashboard commit:
+Give every schedule activity a complete, trustworthy history.
 
-```text id="base20"
-4f312c97ba47716a836a9cbe228cec85f12113d2
-feat: implement Pass 20 - Primary Project Dashboard
+For an activity such as:
+
+```text
+Foundation — Block B
 ```
 
-Before editing:
+the user must be able to see:
 
-1. inspect the actual current `main`
-2. inspect all current snapshot types/calculators/services
-3. inspect dashboard service/repositories
-4. inspect existing tests
-5. preserve the currently approved behavior
+```text
+Current state
+────────────────────────
+Planned: 75%
+Actual: 60%
+Variance: -15 pts
+Status: AT_RISK
 
-Do not assume the walkthrough is more authoritative than the current repository.
+Timeline
+────────────────────────
+Aug 20 — planned start
+Aug 22 — started
+Aug 23 — 35%
+Aug 24 — 60%
+
+Evidence
+────────────────────────
+Report-001.pdf
+Report-004.txt
+```
+
+The page must make the product feel like a real project-management system rather than a collection of AI demos.
 
 ---
 
-# 2. HARD REQUIREMENT — DO NOT CHANGE PRODUCT SEMANTICS
+# 2. Architectural principle
 
-The resulting dashboard must display the same values as before for identical project data.
+Pass 21 is a **read-only activity detail composition layer**.
 
-Do not change:
+It must NOT create new project truth.
 
-```text id="semantics20"
-risk classification
-activity classification
-milestone semantics
-stale-update semantics
-recent-update ordering
-asOfDate semantics
-project isolation
-evidence semantics
-review-state semantics
-```
+Architecture:
 
-This task is about:
-
-```text id="refactor20"
-canonical ownership
+```text id="arch21"
+Activity Detail Request
+        ↓
+ActivityDetailService
+        ↓
+canonical Activity
 +
-query efficiency
+canonical Snapshot/Risk
++
+ActivityProgress history
++
+ProgressUpdate context
++
+Match/review context
++
+Evidence provenance
+        ↓
+typed ActivityDetail response
+        ↓
+React Activity Detail View
 ```
 
-not changing business rules.
+Do NOT duplicate domain logic.
+
+Do NOT create a second risk engine.
+
+Do NOT create a second progress engine.
 
 ---
 
-# 3. Improvement A — canonical aggregate progress
+# 3. Existing canonical sources
 
-## Current issue
+Reuse the existing services/repositories.
 
-The dashboard currently derives:
+Important current sources:
 
-```text id="agg-old20"
-overallActualProgress
-overallPlannedProgress
-```
-
-directly by averaging:
-
-```ts
-snapshot.activities.reduce(...)
-```
-
-inside:
-
-```text
-backend/src/services/dashboard/project-dashboard.service.ts
-```
-
-This means the dashboard is reimplementing an aggregate that belongs conceptually to the canonical snapshot.
-
-The current ProgressSnapshot model exposes:
-
-```text
-activities
-summary
-```
-
-but does not expose explicit aggregate actual/planned progress values.
-
----
-
-# 4. Required design
-
-Add canonical aggregate fields to:
-
-```text
-backend/src/services/snapshot/progress-snapshot.types.ts
-```
-
-and/or the canonical snapshot domain type, whichever is the actual authoritative model in the current repository.
-
-Suggested fields:
-
-```ts id="agg-fields20"
-overallActualProgress: number;
-overallPlannedProgress: number;
-progressVariance: number;
-varianceState: VarianceState;
-```
-
-Do NOT add duplicate semantics if the current `summary` already owns these values.
-
-First inspect the current snapshot calculator.
-
----
-
-# 5. Canonical calculation location
-
-The aggregate must be calculated in the existing pure deterministic snapshot calculator:
-
-```text
-backend/src/services/snapshot/progress-snapshot.calculator.ts
-```
-
-Do NOT calculate it in:
-
-```text
-ProjectDashboardService
-React components
-route handlers
-```
-
-The snapshot calculator already receives the canonical activity set and historical observations.
-
-Use that existing input.
-
----
-
-# 6. Exact semantic requirement
-
-The aggregate must preserve the CURRENT dashboard formula exactly unless inspection proves the current dashboard formula itself is incorrect.
-
-Current behavior is conceptually:
-
-```text
-overallActualProgress
-=
-mean(activity.actualProgress)
-
-overallPlannedProgress
-=
-mean(activity.plannedProgress)
-
-progressVariance
-=
-overallActualProgress - overallPlannedProgress
-```
-
-with the same rounding currently used by the dashboard.
-
-For empty projects preserve:
-
-```text id="emptyagg20"
-overallActualProgress = 0
-overallPlannedProgress = 0
-progressVariance = 0
-varianceState = on_plan
-```
-
-Do not silently switch to a weighted average.
-
-Do not introduce quantity-based weighting.
-
-Do not invent a new aggregation formula.
-
----
-
-# 7. Single source of truth
-
-After this refactor:
-
-```text id="singleowner20"
-ProgressSnapshot
-    ↓
-owns aggregate progress metrics
-
-Dashboard
-    ↓
-consumes snapshot aggregate fields
-```
-
-The dashboard must NOT contain another implementation such as:
-
-```ts
-snapshot.activities.reduce(...)
-```
-
-for overall progress.
-
-Remove that calculation completely from the dashboard service.
-
----
-
-# 8. Risk remains separately canonical
-
-Do NOT combine aggregate progress and risk classification into one new engine.
-
-Continue using:
-
-```text id="riskowner20"
+```text id="sources21"
+ActivityRepository
+ActivityProgressRepository
+ProgressService
+ProgressSnapshotService
 RiskClassificationService
+ProgressUpdateRepository
+ActivityMatchRepository
+EvidenceRepository
+ProjectIntelligenceService
 ```
 
-for:
+The existing ProgressService already provides:
 
 ```text
-overallRiskClassification
-activity status counts
+listActivityProgress(projectId, activityId)
+getLatestActivityProgress(projectId, activityId)
 ```
 
-The snapshot owns:
+with project/activity validation.
 
-```text
-overall actual
-overall planned
-variance
-variance state
+The Evidence router already provides:
+
+```http
+GET /api/projects/:projectId/activities/:activityId/evidence
 ```
 
-Risk service owns:
+The snapshot/risk layers already provide deterministic current state.
 
-```text
-risk classification
-```
-
-This separation must remain.
+Do not bypass those canonical semantics.
 
 ---
 
-# 9. Tests for aggregate ownership
+# 4. New API
 
-Update/add tests proving:
+Add:
 
-```text id="aggtests20"
-[ ] snapshot exposes overall actual progress
-[ ] snapshot exposes overall planned progress
-[ ] snapshot exposes variance
-[ ] snapshot exposes variance state
-[ ] values match previous dashboard behavior
-[ ] empty project behavior is preserved
-[ ] rounding remains identical
-[ ] dashboard simply consumes snapshot aggregate fields
+```http
+GET /api/projects/:projectId/activities/:activityId
 ```
 
-Add a test that deliberately makes the dashboard's activity array unsuitable for recalculation if practical, proving the dashboard uses the canonical aggregate fields rather than recomputing them.
+This should return the complete activity detail read model.
 
-Do not make the test artificial merely for coverage; prefer a meaningful service-level assertion.
+Use a thin Express route.
+
+Validate:
+
+```text id="params21"
+projectId
+activityId
+```
+
+using existing validation conventions.
+
+Cross-project activity IDs must return the existing not-found/project-isolation behavior.
 
 ---
 
-# 10. Improvement B — remove dashboard recent-update N+1 queries
+# 5. Activity Detail response
 
-## Current issue
-
-The dashboard currently:
-
-1. fetches progress updates
-2. loops over updates
-3. for EACH update fetches:
-
-   * matches
-   * ActivityProgress observations
-   * evidence
-
-This creates a query pattern approximately:
+Create:
 
 ```text
-1 query for updates
-+
-N queries for matches
-+
-N queries for observations
-+
-N queries for evidence
+backend/src/services/activity-detail/activity-detail.types.ts
 ```
 
-For the default 10 updates, that is roughly:
+with a typed DTO.
 
-```text
-31 queries
+Suggested shape:
+
+```ts id="dto21"
+interface ActivityDetail {
+  activity: ActivityDetailActivity;
+  current: ActivityDetailCurrentState;
+  timeline: ActivityDetailTimelineItem[];
+  progressUpdates: ActivityDetailProgressUpdate[];
+  matches: ActivityDetailMatch[];
+  evidence: ActivityDetailEvidence[];
+}
 ```
 
-for the recent-update section alone.
+Adapt naming to current repository conventions.
 
-This is unnecessary even in local SQLite.
+Do not copy the entire database schema into the DTO.
 
 ---
 
-# 11. Required batch repository APIs
+# 6. Activity identity section
 
-Add project-scoped batch methods to existing repositories.
+Return:
 
-Do NOT create a new data-access layer.
-
-Recommended methods:
-
-```ts id="batchapis20"
-ActivityMatchRepository.listByProgressUpdateIds(
-  progressUpdateIds: string[],
-  projectId: string
-): ActivityMatch[]
-
-ActivityProgressRepository.listByProgressUpdateIds(
-  progressUpdateIds: string[],
-  projectId: string
-): ActivityProgress[]
-
-EvidenceRepository.listByProgressUpdateIds(
-  progressUpdateIds: string[],
-  projectId: string
-): Evidence[]
+```text id="identity21"
+activityId
+externalId
+name
+description
+wbsCode
+location
+scheduleId
+plannedStart
+plannedFinish
+plannedQuantity
+unit
+baselineProgress
 ```
 
-Use names consistent with the repository conventions if slightly different.
-
-The critical requirement is:
-
-```text
-one bounded batch query per repository
-```
-
-rather than one query per progress update.
+Do not expose unnecessary internal database fields.
 
 ---
 
-# 12. SQL requirements for batch methods
+# 7. Current state
+
+Current state must use existing canonical snapshot/risk semantics.
+
+Return:
+
+```text id="current21"
+plannedProgress
+actualProgress
+progressVariance
+varianceState
+status
+overdue
+riskClassification
+riskReasons
+actualStart
+actualFinish
+asOfDate
+```
 
 Use:
 
-```text id="sql20"
-WHERE project_id = ?
-AND progress_update_id IN (...)
+```text ProgressSnapshotService
+RiskClassificationService
 ```
 
-or the equivalent safe SQL.
+Do NOT recalculate:
 
-Do NOT construct SQL by concatenating user-controlled values.
-
-Generate placeholders programmatically.
-
-Handle:
-
-```text id="emptybatch20"
-progressUpdateIds.length === 0
+```text variance
+overdue
+risk
+planned progress
 ```
 
-by returning:
-
-```text
-[]
-```
-
-without running a useless SQL query.
+inside ActivityDetailService.
 
 ---
 
-# 13. Project isolation
+# 8. Optional `asOfDate`
 
-Every batch query MUST remain project scoped.
+Support:
 
-Never use:
-
-```sql
-WHERE progress_update_id IN (...)
+```http
+GET /api/projects/:projectId/activities/:activityId?asOfDate=YYYY-MM-DD
 ```
 
-without:
+Use the same canonical date validation already used by Pass 17 and Pass 20.
 
-```text
-project_id = ?
+If omitted:
+
+```text current canonical date = existing snapshot service behavior
 ```
 
-This is especially important because IDs are not sufficient authorization boundaries.
+If supplied:
 
-Add tests that verify:
-
-```text id="batchisolation20"
-Project A batch request
-→ cannot return Project B matches
-
-Project A batch request
-→ cannot return Project B observations
-
-Project A batch request
-→ cannot return Project B evidence
+```text all current-state fields are evaluated as of that date
 ```
+
+Do not use wall-clock timestamps for historical project semantics.
 
 ---
 
-# 14. Deterministic ordering
-
-Batch repository methods must return deterministic order.
-
-For example:
-
-```text id="matchorder20"
-ORDER BY progress_update_id, confidence_score DESC, id ASC
-```
-
-and appropriate equivalents for:
-
-```text
-ActivityProgress
-Evidence
-```
-
-The dashboard can then group them in memory.
-
-Do not depend on SQLite's implicit row order.
-
----
-
-# 15. Dashboard implementation
-
-Change:
-
-```text
-backend/src/services/dashboard/project-dashboard.service.ts
-```
-
-so that it first obtains the bounded recent updates:
-
-```text id="recentbatch20"
-const boundedUpdates = updatesAll.slice(0, recentLimit);
-```
-
-Then extract IDs:
-
-```text
-const updateIds = boundedUpdates.map(u => u.id);
-```
-
-Perform:
-
-```text id="batchcalls20"
-matches = activityMatchRepo.listByProgressUpdateIds(updateIds, projectId)
-
-observations =
-    activityProgressRepo.listByProgressUpdateIds(updateIds, projectId)
-
-evidence =
-    evidenceRepo.listByProgressUpdateIds(updateIds, projectId)
-```
-
-Then group:
-
-```text id="group20"
-matchesByUpdateId
-observationsByUpdateId
-evidenceByUpdateId
-```
-
-using Maps.
-
-The per-update loop must perform only in-memory lookups.
-
----
-
-# 16. Important — preserve output exactly
-
-The resulting:
-
-```text id="output20"
-DashboardRecentUpdateItem[]
-```
-
-must remain semantically identical.
-
-Each item still contains:
-
-```text
-id
-reportDate
-createdAt
-reporterName
-reporterRole
-sourceType
-rawText
-status
-matches
-canonicalObservations
-evidenceList
-```
-
-Do not remove fields.
-
-Do not change source labels.
-
-Do not change match/review states.
-
-Do not change evidence metadata.
-
----
-
-# 17. Preserve recent-update ordering
-
-The repository already returns progress updates in:
-
-```text
-report_date DESC,
-created_at DESC,
-id DESC
-```
-
-or the current canonical ordering.
-
-Do not replace this with client-side sorting unless necessary.
-
-The dashboard's `recentLimit` must continue to mean:
-
-```text
-first N canonical recent progress updates
-```
-
-not:
-
-```text
-first N joined rows
-```
-
-This is important.
-
----
-
-# 18. Do not load unbounded data unnecessarily
-
-The current dashboard default is:
-
-```text
-DEFAULT_DASHBOARD_RECENT_LIMIT = 10
-```
-
-and maximum:
-
-```text
-MAX_DASHBOARD_RECENT_LIMIT = 50
-```
-
-Preserve these limits.
-
-Only batch-fetch related entities for the selected update IDs.
-
-Do not fetch all matches/evidence/observations for the entire project just to build the dashboard.
-
----
-
-# 19. Avoid a fake optimization
-
-Do NOT implement:
-
-```text
-SELECT *
-FROM everything
-WHERE project_id = ?
-```
-
-and then filter in memory.
-
-The optimization must actually be bounded to the selected update IDs.
-
----
-
-# 20. Optional: activity lookup remains in memory
-
-The dashboard already loads:
-
-```text id="activitymap20"
-activities = activityRepo.listByProjectId(projectId)
-```
-
-and builds:
-
-```text
-activityMap
-```
-
-Keep this unless inspection reveals a better existing mechanism.
-
-Do not add more per-item activity queries.
-
----
-
-# 21. Suggested repository implementation strategy
+# 9. Current state must be internally consistent
 
 For:
 
-```text
-IN (?, ?, ?, ...)
+```text id="consistency21"
+asOfDate = D
 ```
 
-use the existing better-sqlite3 statement preparation conventions.
-
-Example concept:
-
-```ts
-const placeholders = ids.map(() => '?').join(',');
-const stmt = db.prepare(`
-  SELECT *
-  FROM activity_matches
-  WHERE project_id = ?
-    AND progress_update_id IN (${placeholders})
-  ORDER BY progress_update_id ASC, confidence_score DESC, id ASC
-`);
-```
-
-with parameters:
+the following must all describe the same state:
 
 ```text
-[projectId, ...ids]
+actualProgress
+plannedProgress
+variance
+varianceState
+status
+overdue
+riskClassification
+reasons
 ```
 
-Use the same project-scoped row mapping already used by the repository.
+Do not mix:
 
-Do not duplicate entity-to-domain mapping logic unnecessarily.
+```text current risk
++
+historical progress
+```
+
+inside the same current-state object.
 
 ---
 
-# 22. Tests for query reduction
+# 10. Timeline
 
-Do not rely only on a code review.
+The timeline must come primarily from canonical `ActivityProgress` history.
 
-Add a dashboard service test using spy/fake repository implementations proving that:
+Use:
 
-```text id="querycount20"
-listByProgressUpdateIds(...)
+```text id="history21"
+ActivityProgressRepository.listByActivityId(activityId, projectId)
 ```
 
-is called once per repository
+or the existing ProgressService wrapper.
 
-and:
+Sort deterministically:
 
-```text
-listByProgressUpdateId(...)
+```text id="timeline-sort21"
+asOfDate ASC
+createdAt ASC
+id ASC
 ```
 
-is NOT called repeatedly inside the recent-update loop.
+or another canonical chronological ordering consistent with existing repository semantics.
 
-If repository spies are awkward, add focused repository tests plus a service-level test asserting the three batch methods receive the full selected ID set.
+Do not rely on SQLite implicit order.
 
 ---
 
-# 23. Preserve evidence privacy
+# 11. Timeline item
 
-The batch Evidence API must still return only the dashboard-safe metadata.
+Each timeline item should expose enough information for a manager:
+
+```text id="timelineitem21"
+progressId
+progressUpdateId
+date
+actualPercent
+actualQuantity
+actualStart
+actualFinish
+status
+notes
+createdAt
+source
+```
+
+Where source is available, resolve it from the originating ProgressUpdate:
+
+```text
+manual
+voice
+pdf
+xlsx
+image
+text
+```
+
+Do not infer source from filenames.
+
+---
+
+# 12. Timeline semantics
+
+A timeline item represents a canonical ActivityProgress observation.
+
+Example:
+
+```text id="timelineexample21"
+Aug 22
+started
+0%
+
+Aug 23
+in progress
+35%
+
+Aug 24
+in progress
+60%
+```
+
+Do NOT create timeline events for every `project_event`.
+
+Do NOT turn evidence upload events into progress observations.
+
+Project events can be included as auxiliary audit context later, but they are not the canonical activity progress timeline.
+
+---
+
+# 13. Historical boundary
+
+When:
+
+```text id="boundary21"
+asOfDate = D
+```
+
+the timeline should not include canonical ActivityProgress observations after D.
+
+Use:
+
+```text observation.asOfDate <= D
+```
+
+as the semantic boundary.
+
+Do not use:
+
+```text createdAt <= D
+```
+
+as a substitute.
+
+Creation time and effective progress date are different concepts.
+
+---
+
+# 14. Progress update context
+
+For each ActivityProgress item with:
+
+```text progressUpdateId
+```
+
+resolve the originating ProgressUpdate.
+
+Expose compact report context:
+
+```text id="updatecontext21"
+progressUpdateId
+reportDate
+reporterName
+reporterRole
+sourceType
+status
+```
+
+Do not return the entire project's progress update list.
+
+Only return update records relevant to this activity's history.
+
+---
+
+# 15. Match/review context
+
+For matches associated with this activity, return:
+
+```text id="matchcontext21"
+matchId
+progressUpdateId
+confidenceScore
+confidenceTier
+reviewState
+status
+matchMethod
+matchedText
+rationale
+reviewedBy
+reviewedAt
+```
+
+Preserve Pass 19 semantics.
+
+The detail view should visibly distinguish:
+
+```text
+confirmed
+suggested / awaiting review
+suggested / unresolved
+rejected
+```
+
+Do not reinterpret the states.
+
+---
+
+# 16. Canonical progress eligibility
+
+For every match/context item, make it obvious whether it represents canonical truth.
+
+Current invariant:
+
+```text id="canonical21"
+confirmed match
+→ eligible for existing ProgressService
+
+suggested
+→ not canonical
+
+unresolved
+→ not canonical
+
+rejected
+→ not canonical
+```
+
+Do not introduce another boolean truth system if the existing status/review state already determines this.
+
+A derived UI field such as:
+
+```text
+canonicalProgressEligible: boolean
+```
+
+is acceptable only if it is deterministically derived from current status semantics.
+
+---
+
+# 17. Evidence
+
+Return evidence connected to this activity through the existing provenance graph.
+
+At minimum:
+
+```text id="evidence21"
+evidenceId
+fileName
+fileType
+fileSizeBytes
+uploadedAt
+progressUpdateId
+```
 
 Do NOT expose:
 
 ```text
 filePath
-filesystem paths
-raw server storage locations
+absolute filesystem path
+server storage location
 ```
 
-The dashboard currently maps evidence to:
-
-```text
-id
-fileName
-fileType
-fileSizeBytes
-uploadedAt
-```
-
-Preserve that exact privacy boundary.
+The existing Evidence content endpoint should be used to open the actual file.
 
 ---
 
-# 24. Performance target
+# 18. Evidence relationship
 
-For a dashboard with:
+Do not simply query:
 
-```text
-recentLimit = 10
+```text id="bad21"
+all project evidence
 ```
 
-the recent-update data path should be approximately:
+Instead use:
 
-```text
-1 query → progress updates
-1 query → matches
-1 query → observations
-1 query → evidence
+```text id="good21"
+EvidenceRepository.listByActivityId(activityId, projectId)
 ```
 
-plus the already-existing project/activity/intelligence/snapshot queries.
+or an equivalent project-scoped provenance query.
 
-It must NOT be:
-
-```text
-1 + N + N + N
-```
-
-Do not promise a precise total project-wide query count because existing canonical services may legitimately execute multiple reads.
-
-The relevant requirement is removal of per-update repository calls.
+The returned Evidence list must represent actual activity provenance.
 
 ---
 
-# 25. No caching
+# 19. Do not duplicate evidence
 
-Do NOT add:
+An evidence item referenced by several updates should not appear as uncontrolled duplicates in the final DTO.
 
-```text id="nocache20"
-Redis
-in-memory dashboard cache
-TTL cache
-memoization of project state
+Deduplicate by:
+
+```text id="dedupe21"
+evidenceId
 ```
 
-The project is local-first SQLite.
+while preserving deterministic ordering.
 
-The simpler deterministic batch approach is preferable.
+Prefer newest upload first for the evidence section unless existing repository semantics dictate otherwise.
 
 ---
 
-# 26. No schema migration
+# 20. Repository efficiency
 
-This optimization should require:
+Do not introduce an N+1 query pattern inside ActivityDetailService.
 
-```text id="nomigration20"
-NO database migration
+The target activity detail is one activity, so a small number of bounded queries is acceptable.
+
+Use:
+
+```text id="queries21"
+1 activity lookup
+1 current snapshot/risk composition
+1 activity progress-history query
+1 relevant match query
+1 relevant evidence query
+bounded ProgressUpdate lookup
 ```
 
-Do not add new database tables or columns.
+If there are multiple progressUpdateIds, prefer a batch lookup for their ProgressUpdates rather than one query per history item.
 
-We are only changing:
+Do NOT issue:
+
+```text id="n1-21"
+N progress-update queries
+```
+
+inside the timeline loop.
+
+---
+
+# 21. Preferred batch method
+
+If `ProgressUpdateRepository` does not already support it, add:
+
+```ts id="batch21"
+listByIds(ids: string[], projectId: string): ProgressUpdate[]
+```
+
+or an equivalent project-scoped batch query.
+
+Requirements:
 
 ```text
-snapshot DTO/calculation
-repository read APIs
-dashboard composition
-tests
-documentation if needed
+project_id = ?
+id IN (...)
+```
+
+with deterministic ordering.
+
+Empty IDs:
+
+```text
+[]
+```
+
+must return cleanly without unnecessary SQL.
+
+Do not introduce a generic data-access framework.
+
+---
+
+# 22. Frontend component
+
+Add:
+
+```text
+frontend/src/components/activity/
+```
+
+with a main component such as:
+
+```text id="component21"
+ActivityDetailView.tsx
+```
+
+Use the existing design system.
+
+Do not rewrite the entire `App.tsx`.
+
+Extract additional subcomponents only where useful:
+
+```text
+ActivityHeader
+ActivityCurrentState
+ActivityTimeline
+ActivityEvidence
+ActivityReviewContext
+```
+
+The final layout should remain visually coherent with the current dashboard.
+
+---
+
+# 23. Detail-page hierarchy
+
+Recommended structure:
+
+```text id="hierarchy21"
+[Back]
+
+Foundation — Block B
+External ID: ACT-1042
+WBS: 03.02
+Location: East Wing
+
+┌─────────────────────────────────────────────┐
+│ CURRENT STATUS                              │
+│ 60% Actual   75% Planned   -15 pts         │
+│ AT RISK                                     │
+│ Planned: Aug 20 → Aug 30                    │
+└─────────────────────────────────────────────┘
+
+TIMELINE
+──────────────────────────────────────────────
+Aug 22   Started
+Aug 23   35%
+Aug 24   60%
+
+PROGRESS SOURCES
+──────────────────────────────────────────────
+Report-003   XLSX   Aug 23
+Report-004   PDF    Aug 24
+
+EVIDENCE
+──────────────────────────────────────────────
+Report-004.pdf
+Report-003.xlsx
+
+MATCH / REVIEW
+──────────────────────────────────────────────
+Confirmed
+Suggested — Medium
+```
+
+Adapt to the current UI style rather than blindly reproducing this wireframe.
+
+---
+
+# 24. Timeline UX
+
+The timeline should make change over time visually obvious.
+
+Each observation should show:
+
+```text id="timelineui21"
+date
+progress/status
+optional quantity
+source/update
+```
+
+Use a vertical timeline or similarly clear chronology.
+
+Avoid giant tables.
+
+Make the latest observation visually distinct.
+
+Do not use color as the only status signal.
+
+---
+
+# 25. Progress trend
+
+A small simple progress trend visualization is allowed if it can be rendered from existing ActivityProgress observations.
+
+Example:
+
+```text
+35% ───── 60% ───── 72%
+```
+
+Do NOT introduce:
+
+```text id="noforecast21"
+forecasting
+regression
+trend prediction
+schedule prediction
+AI trend interpretation
+```
+
+This is historical visualization only.
+
+---
+
+# 26. Current vs history distinction
+
+Clearly label:
+
+```text id="currenthistory21"
+CURRENT STATE
+```
+
+versus:
+
+```text
+ACTIVITY HISTORY
+```
+
+Do not allow a historical 35% observation to look like today's 35% state.
+
+---
+
+# 27. Navigation into activity detail
+
+The Activity Detail View should be reachable from existing surfaces:
+
+```text id="nav21"
+Dashboard
+Project Intelligence
+Schedule/activity listings
+Recent Updates where activity identity exists
+```
+
+Use existing callbacks/state patterns.
+
+Do not introduce a large routing framework if the application currently uses local workspace state.
+
+---
+
+# 28. Navigation back
+
+Provide a clear:
+
+```text id="back21"
+Back to Project
+```
+
+or:
+
+```text Back to Dashboard
+```
+
+that returns to the previous project workspace context.
+
+Do not lose the selected project.
+
+---
+
+# 29. Loading / empty / error states
+
+Handle:
+
+```text id="states21"
+loading
+activity not found
+no progress history
+no evidence
+no matches
+network/API failure
+```
+
+Examples:
+
+```text
+No progress observations yet.
+No evidence is linked to this activity.
+No AI matches are associated with this activity.
+```
+
+Do not render misleading blank sections.
+
+---
+
+# 30. Project isolation
+
+Every request must enforce:
+
+```text id="isolation21"
+activity.projectId === requested projectId
+progress.projectId === requested projectId
+matches.projectId === requested projectId
+updates.projectId === requested projectId
+evidence.projectId === requested projectId
+```
+
+Add tests for cross-project access.
+
+---
+
+# 31. `asOfDate` semantics
+
+If the detail view allows an as-of selector, pass that date to the backend.
+
+If omitted, use canonical current date behavior.
+
+For historical views:
+
+```text id="historical21"
+current state = as-of snapshot
+timeline = progress observations <= asOfDate
+```
+
+Evidence itself may have upload timestamps after the snapshot date.
+
+Do not incorrectly rewrite evidence upload dates or hide provenance simply because the user is inspecting historical activity state.
+
+If this distinction creates ambiguity, label it clearly rather than inventing historical evidence availability.
+
+---
+
+# 32. Tests — service
+
+Add:
+
+```text id="servicetests21"
+[ ] activity exists
+[ ] missing activity → NotFound
+[ ] cross-project activity → NotFound
+[ ] current snapshot state is correct
+[ ] risk classification matches canonical service
+[ ] full progress history returned
+[ ] progress history is deterministic
+[ ] historical asOfDate excludes future observations
+[ ] progress updates are correctly associated
+[ ] matches are project-scoped
+[ ] evidence is project/activity-scoped
+[ ] evidence is deduplicated
 ```
 
 ---
 
-# 27. Regression tests
+# 33. Tests — router
 
-Run the full suite.
+Add:
 
-At minimum prove:
-
-```text id="regression20"
-[ ] snapshot aggregate tests pass
-[ ] dashboard health values remain unchanged
-[ ] recent update contents remain unchanged
-[ ] recent update ordering remains unchanged
-[ ] recentLimit remains enforced
-[ ] evidence privacy remains intact
-[ ] project isolation remains intact
-[ ] milestones remain unchanged
-[ ] attention summary remains unchanged
+```text id="routertests21"
+[ ] GET activity detail returns 200
+[ ] project/activity validation
+[ ] invalid asOfDate rejected
+[ ] cross-project access rejected
+[ ] response shape correct
 ```
 
 ---
 
-# 28. Build verification
+# 34. Tests — frontend
+
+If the repository has an existing frontend test framework, add:
+
+```text id="uitests21"
+[ ] loading state
+[ ] current state rendered
+[ ] timeline rendered chronologically
+[ ] latest observation visually distinguished
+[ ] evidence links/actions rendered
+[ ] review state visible
+[ ] back navigation works
+[ ] empty states work
+```
+
+Do not introduce a large frontend testing framework solely for this pass.
+
+---
+
+# 35. Integration scenario
+
+Create a realistic activity:
+
+```text id="scenario21"
+Foundation — Block B
+
+planned = 75%
+observations:
+Aug 22 → 0%, started
+Aug 23 → 35%
+Aug 24 → 60%
+
+risk = AT_RISK
+
+evidence:
+Report-003.xlsx
+Report-004.pdf
+```
+
+Verify the complete API response and UI.
+
+Then verify:
+
+```text id="historicalscenario21"
+asOfDate = Aug 23
+```
+
+shows:
+
+```text
+current actual = 35%
+```
+
+and does not expose Aug 24 as a current progress observation.
+
+---
+
+# 36. Preserve canonical semantics
+
+Do not modify:
+
+```text id="preserve21"
+ProgressSnapshotService
+RiskClassificationService
+ProgressService normalization rules
+ActivityProgress semantics
+Evidence provenance
+Match review semantics
+```
+
+unless a very small adapter is necessary.
+
+This pass should consume those systems.
+
+---
+
+# 37. Documentation
+
+Update:
+
+```text id="docs21"
+README.md
+docs/ARCHITECTURE.md
+```
+
+to document:
+
+```text
+Activity Detail
+    ↓
+canonical Activity
+    +
+current Snapshot/Risk
+    +
+historical ActivityProgress
+    +
+ProgressUpdate provenance
+    +
+Match/review context
+    +
+Evidence provenance
+```
+
+Explicitly state:
+
+```text
+Activity Detail is read-only.
+It does not create or alter project truth.
+```
+
+---
+
+# 38. Scope guard
+
+Do NOT implement:
+
+```text id="scope21"
+voice input
+activity editing
+activity mutation
+activity dependencies
+forecasting
+AI activity summaries
+chat changes
+notifications
+new analytics
+new risk formulas
+new progress formulas
+Pass 22+
+```
+
+A small historical progress visualization is allowed.
+
+Nothing predictive.
+
+---
+
+# 39. Definition of done
+
+Pass 21 is complete only when:
+
+```text id="done21"
+[ ] A project-scoped activity-detail endpoint exists.
+
+[ ] The activity's canonical identity is shown.
+
+[ ] Current actual progress is shown.
+
+[ ] Current planned progress is shown.
+
+[ ] Current variance is shown.
+
+[ ] Current risk/status is shown.
+
+[ ] Planned dates are shown.
+
+[ ] Actual start/finish are shown where available.
+
+[ ] Complete ActivityProgress history is visible.
+
+[ ] History is chronologically deterministic.
+
+[ ] Historical asOfDate semantics are correct.
+
+[ ] ProgressUpdate source/context is visible.
+
+[ ] Match/review state is visible.
+
+[ ] Evidence provenance is visible.
+
+[ ] Evidence filesystem paths remain hidden.
+
+[ ] Evidence can be opened through existing safe APIs.
+
+[ ] Cross-project access is rejected.
+
+[ ] Current state and historical state are clearly distinguished.
+
+[ ] Dashboard/intelligence/schedule can navigate to an activity detail.
+
+[ ] Back navigation works.
+
+[ ] Loading/empty/error states work.
+
+[ ] No new business-truth engine is introduced.
+
+[ ] No mutation is introduced.
+
+[ ] Existing Pass 13–20 behavior remains intact.
+
+[ ] Full regression suite passes.
+
+[ ] npm run build passes.
+
+[ ] No Pass 22+ functionality is implemented.
+```
+
+---
+
+# 40. Final verification
+
+Before committing, inspect the diff specifically for:
+
+```text id="review21"
+duplicate risk calculations
+duplicate variance calculations
+N+1 ProgressUpdate queries
+unbounded activity history queries
+future observations leaking into asOfDate views
+cross-project evidence leakage
+filesystem path exposure
+suggested/rejected matches displayed as canonical
+new mutation endpoints
+forecasting
+AI-generated activity summaries
+Pass 22+ scope leakage
+```
 
 Run:
 
-```bash id="build20"
+```bash id="verify21"
 npm test
 npm run build
 ```
 
-Both must pass.
+Commit:
 
-Do not weaken existing tests.
-
-Do not delete tests merely because repository interfaces changed.
-
----
-
-# 29. Diff review
-
-Before committing inspect the diff for:
-
-```text id="diff20"
-dashboard reimplementing aggregate math
-per-update repository calls remaining
-unbounded batch query
-missing project_id predicates
-changed ordering
-changed recentLimit semantics
-filesystem path leakage
-schema changes
-cache introduction
-Pass 21+ scope leakage
-```
-
----
-
-# 30. Documentation
-
-Only make documentation changes necessary to reflect the new canonical ownership.
-
-The architecture should describe:
-
-```text id="doc20"
-Progress Snapshot
-    └── canonical aggregate progress metrics
-
-Project Dashboard
-    └── presentation/aggregation over snapshot + intelligence
-
-Recent update data
-    └── bounded batch repository reads
-```
-
-Do not rewrite unrelated documentation.
-
----
-
-# 31. Definition of done
-
-This hardening task is complete only when:
-
-```text id="done20"
-[ ] Overall actual progress is canonicalized in ProgressSnapshot.
-
-[ ] Overall planned progress is canonicalized in ProgressSnapshot.
-
-[ ] Progress variance is canonicalized in ProgressSnapshot.
-
-[ ] Variance state remains canonical and unchanged semantically.
-
-[ ] Dashboard consumes those snapshot fields instead of recalculating them.
-
-[ ] Recent update matches are loaded in one batch query.
-
-[ ] Recent update observations are loaded in one batch query.
-
-[ ] Recent update evidence is loaded in one batch query.
-
-[ ] No per-update repository calls remain in dashboard recent-update assembly.
-
-[ ] Batch queries are project-scoped.
-
-[ ] Batch queries are bounded to selected progressUpdateIds.
-
-[ ] Empty batch inputs are handled cleanly.
-
-[ ] Deterministic ordering is preserved.
-
-[ ] Dashboard output is unchanged semantically.
-
-[ ] Evidence filesystem paths remain hidden.
-
-[ ] Existing project isolation is preserved.
-
-[ ] No database migration is introduced.
-
-[ ] No caching layer is introduced.
-
-[ ] Existing Pass 13–20 behavior remains intact.
-
-[ ] Full test suite passes.
-
-[ ] npm run build passes.
-
-[ ] No Pass 21+ functionality is implemented.
-```
-
----
-
-# 32. Commit
-
-Use:
-
-```text id="commit-hard20"
-refactor: harden FieldLine dashboard data access
+```text id="commit21"
+feat: implement FieldLine activity detail view
 ```
 
 Push to:
 
-```text
+```text id="main21"
 main
 ```
 
 Report:
 
-```text id="report-hard20"
+```text id="report21"
 1. exact files changed
-2. new canonical snapshot aggregate fields
-3. how dashboard now consumes them
-4. batch repository methods added
-5. previous vs new recent-update query pattern
-6. project isolation behavior
-7. tests added
-8. npm test result
-9. npm run build result
-10. commit SHA
-11. remaining limitations
+2. activity-detail API contract
+3. current-state data sources
+4. historical timeline source
+5. asOfDate behavior
+6. match/review presentation
+7. evidence provenance behavior
+8. navigation integration
+9. tests added
+10. npm test result
+11. npm run build result
+12. commit SHA
+13. known limitations
 ```
-
-Do NOT mark this as a new numbered product pass.
-
-It is a post-Pass-20 architectural hardening change.

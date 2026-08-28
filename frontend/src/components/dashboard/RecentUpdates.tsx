@@ -72,13 +72,15 @@ export interface RecentUpdatesProps {
   onSelectUpdateReview?: (updateId: string) => void;
   onTraceEvidence?: (evidenceId?: string) => void;
   onViewAllUpdates?: () => void;
+  onSelectActivity?: (activityId: string) => void;
 }
 
 export function RecentUpdates({
   updates,
   onSelectUpdateReview,
   onTraceEvidence,
-  onViewAllUpdates
+  onViewAllUpdates,
+  onSelectActivity
 }: RecentUpdatesProps): React.JSX.Element {
   const getSourceBadge = (sourceType: string) => {
     switch (sourceType.toLowerCase()) {
@@ -200,7 +202,13 @@ export function RecentUpdates({
                   </div>
                   <div className="obs-chips-list">
                     {upd.canonicalObservations.map((obs) => (
-                      <span key={obs.id} className="obs-progress-chip">
+                      <span
+                        key={obs.id}
+                        className="obs-progress-chip"
+                        style={{ cursor: onSelectActivity ? 'pointer' : 'default' }}
+                        onClick={() => onSelectActivity && onSelectActivity(obs.activityId)}
+                        title="View complete activity history"
+                      >
                         <strong>[{obs.activityExternalId}]</strong> {obs.activityName} &bull;{' '}
                         <span className="obs-pct">{obs.actualPercent}%</span>
                       </span>
@@ -227,7 +235,9 @@ export function RecentUpdates({
                         <div
                           key={m.id}
                           className={`match-mini-pill ${m.status} ${m.reviewState || ''}`}
-                          title={m.rationale || undefined}
+                          style={{ cursor: onSelectActivity ? 'pointer' : 'default' }}
+                          onClick={() => onSelectActivity && onSelectActivity(m.activityId)}
+                          title={m.rationale || 'View activity detail'}
                         >
                           <span className="match-mini-ext-id">[{m.activityExternalId}]</span>
                           <span className="match-mini-name">{m.activityName}</span>

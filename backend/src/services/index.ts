@@ -199,3 +199,20 @@ export type {
   ProjectDashboardQueryOptions,
   ProjectDashboardService
 } from './dashboard/dashboard.types.js';
+
+export {
+  DefaultActivityDetailService,
+  activityDetailService
+} from './activity-detail/activity-detail.service.js';
+export type {
+  ActivityDetailActivity,
+  ActivityDetailCurrentState,
+  ActivityDetailTimelineItem,
+  ActivityDetailProgressUpdateItem,
+  ActivityDetailMatch,
+  ActivityDetailEvidence,
+  ActivityDetail,
+  ActivityDetailQueryOptions,
+  ActivityDetailService
+} from './activity-detail/activity-detail.types.js';
+

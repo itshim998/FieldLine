@@ -92,9 +92,25 @@ ProjectDashboardService (Deterministic Read-Only Composition)
 Single Typed Response DTO (ProjectDashboard)
     ↓
 React Frontend Dashboard Components (<ProjectHealth />, <ActivityStatusSummary />, <AttentionSummary />, <MilestoneSummary />, <RecentUpdates />)
+### Activity Detail View Layer (Pass 21)
+
+```text
+GET /api/projects/:projectId/activities/:activityId?asOfDate=YYYY-MM-DD
+    ↓
+ActivityDetailService (Deterministic Read-Only Composition)
+    ├── Activity Identity   → ActivityRepository (strictly project-scoped)
+    ├── Current State       → ProgressSnapshotService + RiskClassificationService (canonical evaluation as of D)
+    ├── Timeline            → ActivityProgressRepository (bounded by obs.asOfDate <= D, sorted chronologically)
+    ├── Progress Reports    → Batch lookup ProgressUpdateRepository via unique update IDs
+    ├── Match & Review      → ActivityMatchRepository (confirmed = canonical eligible, suggested/rejected = non-canonical)
+    └── Originating Evidence → EvidenceRepository (deduplicated, sanitized: zero server file paths exposed)
+    ↓
+Single Typed Response DTO (ActivityDetail)
+    ↓
+React Frontend Activity Components (<ActivityHeader />, <ActivityCurrentState />, <ActivityTimeline />, <ActivityProgressSources />, <ActivityReviewContext />, <ActivityEvidence />)
 ```
 
-> **Fundamental Principle:** The Project Dashboard is purely a **PRESENTATION** layer. It does **NOT** define project truth, invent new metrics, or mutate database state. All data is composed deterministically from canonical engines.
+> **Fundamental Principle:** The Activity Detail View is a read-only composition layer providing a single pane of glass into the complete, trustworthy execution history of every schedule activity without duplicating domain logic or creating new truth engines.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural details and layer boundaries.
 

@@ -133,16 +133,18 @@ export interface ProjectDashboardData {
 export interface ProjectDashboardViewProps {
   projectId: string;
   onNavigateTab: (
-    tab: 'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence',
+    tab: 'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence' | 'activity-detail',
     extra?: { updateId?: string; activityId?: string; statusFilter?: string }
   ) => void;
   onTraceEvidence?: (evidenceId?: string) => void;
+  onSelectActivity?: (activityId: string) => void;
 }
 
 export function ProjectDashboardView({
   projectId,
   onNavigateTab,
-  onTraceEvidence
+  onTraceEvidence,
+  onSelectActivity
 }: ProjectDashboardViewProps): React.JSX.Element {
   const [dashboardData, setDashboardData] = useState<ProjectDashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -279,7 +281,14 @@ export function ProjectDashboardView({
           unresolvedMatches={dashboardData.attention.unresolvedMatches}
           onNavigateToIntelligence={() => onNavigateTab('intelligence')}
           onNavigateToProgressReview={(updateId) => onNavigateTab('progress', { updateId })}
-          onNavigateToActivities={(activityId) => onNavigateTab('schedules', { activityId })}
+          onNavigateToActivities={(activityId) => {
+            if (activityId) {
+              if (onSelectActivity) onSelectActivity(activityId);
+              else onNavigateTab('activity-detail', { activityId });
+            } else {
+              onNavigateTab('schedules');
+            }
+          }}
         />
 
         {/* Right Column: Key Milestones */}
@@ -287,7 +296,10 @@ export function ProjectDashboardView({
           upcoming={dashboardData.milestones.upcoming}
           completed={dashboardData.milestones.completed}
           late={dashboardData.milestones.late}
-          onSelectMilestone={(activityId) => onNavigateTab('schedules', { activityId })}
+          onSelectMilestone={(activityId) => {
+            if (onSelectActivity) onSelectActivity(activityId);
+            else onNavigateTab('activity-detail', { activityId });
+          }}
         />
       </div>
 
@@ -297,6 +309,10 @@ export function ProjectDashboardView({
         onSelectUpdateReview={(updateId) => onNavigateTab('progress', { updateId })}
         onTraceEvidence={onTraceEvidence}
         onViewAllUpdates={() => onNavigateTab('progress')}
+        onSelectActivity={(activityId) => {
+          if (onSelectActivity) onSelectActivity(activityId);
+          else onNavigateTab('activity-detail', { activityId });
+        }}
       />
     </div>
   );

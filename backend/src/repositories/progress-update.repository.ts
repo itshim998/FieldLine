@@ -25,6 +25,7 @@ export interface ProgressUpdateRepository {
   commitDocumentIngestionTransaction(input: DocumentProcessingTxInput): DocumentProcessingTxResult;
   getById(id: string): ProgressUpdate | null;
   getByIdAndProjectId(id: string, projectId: string): ProgressUpdate | null;
+  listByIds(ids: string[], projectId: string): ProgressUpdate[];
   listByProjectId(projectId: string): ProgressUpdate[];
   countByProjectId(projectId: string): number;
   delete(id: string): boolean;
@@ -317,6 +318,28 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       return row ? mapRowToProgressUpdate(row) : null;
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to fetch progress update for project: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  listByIds(ids: string[], projectId: string): ProgressUpdate[] {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    try {
+      const db = this.getDb();
+      const placeholders = ids.map(() => '?').join(',');
+      const stmt = db.prepare(`
+        SELECT * FROM progress_updates
+        WHERE project_id = ? AND id IN (${placeholders})
+        ORDER BY report_date DESC, created_at DESC, id DESC
+      `);
+      const rows = stmt.all(projectId, ...ids) as ProgressUpdateDbRow[];
+      return rows.map(mapRowToProgressUpdate);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list progress updates for ID batch: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 

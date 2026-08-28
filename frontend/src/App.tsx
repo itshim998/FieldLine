@@ -37,6 +37,7 @@ import {
   LayoutDashboard
 } from 'lucide-react';
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
+import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 
@@ -318,6 +319,10 @@ export function App(): React.JSX.Element {
 
   // Workspace View State
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<
+    'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence' | 'activity-detail'
+  >('overview');
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
+  const [previousWorkspaceTab, setPreviousWorkspaceTab] = useState<
     'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence'
   >('overview');
 
@@ -637,15 +642,34 @@ export function App(): React.JSX.Element {
     setAssistantQuestion('');
     setAssistantError(null);
     setAssistantResponse(null);
+    setSelectedActivityId(null);
     fetchSchedules(project.id);
     fetchProgressUpdates(project.id);
     fetchEvidence(project.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Handle Opening Activity Detail View (PASS 21)
+  const handleOpenActivityDetail = (activityId: string) => {
+    if (activeWorkspaceTab !== 'activity-detail') {
+      setPreviousWorkspaceTab(activeWorkspaceTab as any);
+    }
+    setSelectedActivityId(activityId);
+    setActiveWorkspaceTab('activity-detail');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Handle Returning from Activity Detail View
+  const handleBackFromActivityDetail = () => {
+    setSelectedActivityId(null);
+    setActiveWorkspaceTab(previousWorkspaceTab || 'overview');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // Handle Returning to Project Selector
   const handleBackToProjects = () => {
     setSelectedProject(null);
+    setSelectedActivityId(null);
     setSelectedSchedule(null);
     setSchedules([]);
     setActivities([]);
@@ -1533,6 +1557,15 @@ export function App(): React.JSX.Element {
                 </span>
               )}
             </button>
+            {activeWorkspaceTab === 'activity-detail' && (
+              <button
+                id="tab-activity-detail"
+                className="workspace-tab active"
+              >
+                <TrendingUp size={16} />
+                <span>Activity Detail</span>
+              </button>
+            )}
           </div>
 
           {/* Tab Content */}
@@ -1541,6 +1574,10 @@ export function App(): React.JSX.Element {
             <ProjectDashboardView
               projectId={selectedProject.id}
               onNavigateTab={(tab, extra) => {
+                if (tab === 'activity-detail' && extra?.activityId) {
+                  handleOpenActivityDetail(extra.activityId);
+                  return;
+                }
                 setActiveWorkspaceTab(tab);
                 if (tab === 'progress' && selectedProject) {
                   fetchProgressUpdates(selectedProject.id);
@@ -1563,6 +1600,7 @@ export function App(): React.JSX.Element {
                   fetchEvidence(selectedProject.id);
                 }
               }}
+              onSelectActivity={handleOpenActivityDetail}
               onTraceEvidence={() => {
                 setActiveWorkspaceTab('evidence');
                 if (selectedProject) {
@@ -1826,16 +1864,31 @@ export function App(): React.JSX.Element {
                               <th>Planned Finish</th>
                               <th style={{ textAlign: 'right' }}>Quantity</th>
                               <th>Unit</th>
-                              <th style={{ textAlign: 'center' }}>Evidence</th>
+                              <th style={{ textAlign: 'center' }}>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {activities.map((act) => (
                               <tr key={act.id}>
                                 <td>
-                                  <span className="act-id-cell">{act.externalId}</span>
+                                  <span
+                                    className="act-id-cell"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => handleOpenActivityDetail(act.id)}
+                                    title="View full activity history"
+                                  >
+                                    {act.externalId}
+                                  </span>
                                 </td>
-                                <td style={{ fontWeight: 500 }}>{act.name}</td>
+                                <td style={{ fontWeight: 500 }}>
+                                  <span
+                                    style={{ cursor: 'pointer', color: 'var(--text-primary)' }}
+                                    onClick={() => handleOpenActivityDetail(act.id)}
+                                    title="View full activity history"
+                                  >
+                                    {act.name}
+                                  </span>
+                                </td>
                                 <td>
                                   {act.wbsCode ? (
                                     <span className="wbs-badge">{act.wbsCode}</span>
@@ -1865,16 +1918,28 @@ export function App(): React.JSX.Element {
                                   {act.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>}
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary btn-sm"
-                                    style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
-                                    onClick={() => handleOpenActivityTrace(act)}
-                                    title="Trace originating evidence for this activity"
-                                  >
-                                    <Paperclip size={12} />
-                                    <span>Trace</span>
-                                  </button>
+                                  <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
+                                      onClick={() => handleOpenActivityDetail(act.id)}
+                                      title="View complete activity history & current status"
+                                    >
+                                      <TrendingUp size={12} />
+                                      <span>Detail</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary btn-sm"
+                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
+                                      onClick={() => handleOpenActivityTrace(act)}
+                                      title="Trace originating evidence for this activity"
+                                    >
+                                      <Paperclip size={12} />
+                                      <span>Trace</span>
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -3044,8 +3109,25 @@ export function App(): React.JSX.Element {
                             <tbody>
                               {intelligence.delayed.map((d) => (
                                 <tr key={d.activityId}>
-                                  <td><span className="act-id-cell">{d.externalId}</span></td>
-                                  <td><strong>{d.name}</strong></td>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(d.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {d.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(d.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {d.name}
+                                    </strong>
+                                  </td>
                                   <td><span className="date-cell">{d.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{d.actualProgress}%</span></td>
                                   <td>
@@ -3101,8 +3183,25 @@ export function App(): React.JSX.Element {
                             <tbody>
                               {intelligence.atRisk.map((r) => (
                                 <tr key={r.activityId}>
-                                  <td><span className="act-id-cell">{r.externalId}</span></td>
-                                  <td><strong>{r.name}</strong></td>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(r.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {r.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(r.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {r.name}
+                                    </strong>
+                                  </td>
                                   <td><span className="date-cell">{r.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{r.actualProgress}%</span></td>
                                   <td>
@@ -3161,8 +3260,25 @@ export function App(): React.JSX.Element {
                             <tbody>
                               {intelligence.behindSchedule.map((b) => (
                                 <tr key={b.activityId}>
-                                  <td><span className="act-id-cell">{b.externalId}</span></td>
-                                  <td><strong>{b.name}</strong></td>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(b.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {b.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(b.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {b.name}
+                                    </strong>
+                                  </td>
                                   <td><span className="date-cell">{b.plannedProgress}%</span></td>
                                   <td><span className="qty-cell">{b.actualProgress}%</span></td>
                                   <td>
@@ -3213,8 +3329,25 @@ export function App(): React.JSX.Element {
                             <tbody>
                               {intelligence.completedToday.map((c) => (
                                 <tr key={c.activityId}>
-                                  <td><span className="act-id-cell">{c.externalId}</span></td>
-                                  <td><strong>{c.name}</strong></td>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.name}
+                                    </strong>
+                                  </td>
                                   <td><span className="mono" style={{ fontSize: '0.75rem', opacity: 0.8 }}>{c.progressUpdateId || 'Direct'}</span></td>
                                   <td><span className="date-cell">{c.asOfDate}</span></td>
                                   <td><span className="qty-cell">{c.actualPercent}%</span></td>
@@ -3260,8 +3393,25 @@ export function App(): React.JSX.Element {
                             <tbody>
                               {intelligence.approachingMilestones.map((m) => (
                                 <tr key={m.activityId}>
-                                  <td><span className="act-id-cell">{m.externalId}</span></td>
-                                  <td><strong>{m.name}</strong></td>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(m.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {m.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      style={{ cursor: 'pointer' }}
+                                      onClick={() => handleOpenActivityDetail(m.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {m.name}
+                                    </strong>
+                                  </td>
                                   <td><span className="date-cell">{m.milestoneDate}</span></td>
                                   <td>
                                     <span className="format-tag" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9', fontWeight: 700 }}>
@@ -3391,6 +3541,17 @@ export function App(): React.JSX.Element {
                 </>
               ) : null}
             </div>
+          ) : activeWorkspaceTab === 'activity-detail' && selectedActivityId ? (
+            <ActivityDetailView
+              projectId={selectedProject.id}
+              activityId={selectedActivityId}
+              onBack={handleBackFromActivityDetail}
+              onSelectUpdate={(updateId) => {
+                setActiveWorkspaceTab('progress');
+                setExpandedReportMatches((prev) => ({ ...prev, [updateId]: true }));
+                fetchReportMatches(selectedProject.id, updateId);
+              }}
+            />
           ) : null}
         </div>
       ) : projects.length === 0 ? (
