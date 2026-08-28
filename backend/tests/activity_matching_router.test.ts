@@ -227,7 +227,8 @@ describe('Activity Matching Router Endpoints', () => {
       expect(res.status).toBe(200);
       expect(res.body.matches).toBeDefined();
       expect(res.body.matches).toHaveLength(1);
-      expect(res.body.matches[0].status).toBe('suggested');
+      expect(res.body.matches[0].status).toBe('confirmed');
+      expect(res.body.matches[0].confidenceTier).toBe('high');
       expect(res.body.matches[0].projectId).toBe(testProjectId);
       expect(res.body.matches[0].progressUpdateId).toBe(testUpdateId);
 

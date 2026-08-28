@@ -148,9 +148,11 @@ describe('ActivityMatchingService', () => {
     const persisted = matchRepo.listByProgressUpdateId(testUpdateId, testProjectId);
     expect(persisted).toHaveLength(1);
     expect(persisted[0].activityId).toBe(m.bestMatch?.activityId);
-    expect(persisted[0].status).toBe('suggested'); // Crucial: NEVER confirmed automatically
+    expect(persisted[0].status).toBe('confirmed'); // Pass 19: High isolated match is auto-confirmed
+    expect(persisted[0].confidenceTier).toBe('high');
+    expect(persisted[0].reviewState).toBe('resolved');
 
-    // Verify activity_progress table is completely untouched (Pass 10 boundary)
+    // Verify activity_progress table is completely untouched (Pass 19 canonical truth protection)
     const progressCount = db.prepare('SELECT COUNT(*) as count FROM activity_progress').get() as { count: number };
     expect(progressCount.count).toBe(0);
   });
@@ -187,7 +189,7 @@ describe('ActivityMatchingService', () => {
     const extraction: FieldProgressExtraction = {
       items: [
         {
-          reference: 'foundation excavation',
+          reference: 'foundation work',
           location: 'Block B',
           progress_percent: 60,
           status: 'in_progress'
@@ -212,7 +214,7 @@ describe('ActivityMatchingService', () => {
     const extraction: FieldProgressExtraction = {
       items: [
         {
-          reference: 'foundation excavation',
+          reference: 'foundation work',
           location: 'Block B',
           progress_percent: 60,
           status: 'in_progress'
@@ -329,7 +331,7 @@ describe('ActivityMatchingService', () => {
     const extraction: FieldProgressExtraction = {
       items: [
         {
-          reference: 'foundation excavation',
+          reference: 'foundation work',
           location: 'Block B',
           progress_percent: 60,
           status: 'in_progress'

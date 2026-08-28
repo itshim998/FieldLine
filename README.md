@@ -47,7 +47,39 @@ FieldLine Assistant Engine (Pass 18: POST /api/projects/:projectId/assistant/que
 Grounded Manager Answer + Verified Fact References
 ```
 
-> **Key Invariant:** The LLM is NEVER the source of truth. All metrics, variances, risk classifications, and dates come exclusively from deterministic application logic.
+### Activity Matching & Human Review Workflow (Pass 19)
+
+```text
+Candidate Match Generation (Pass 10)
+    ↓
+Deterministic Confidence Classification (Pass 19: High ≥ 0.90, Medium ≥ 0.60, Low < 0.60)
+    ↓
+┌──────────────────────────────────────┬────────────────────────────────────────┐
+│ High Unambiguous (Separation ≥ 0.15) │ Ambiguous / Medium / Low Confidence   │
+├──────────────────────────────────────┼────────────────────────────────────────┤
+│ Status: 'confirmed'                  │ Status: 'suggested'                   │
+│ Review State: 'resolved'             │ Review State: 'awaiting_review' /      │
+│ Reviewed By: 'system'                │               'unresolved'             │
+│ Audit: 'match_auto_confirmed'        │ Audit: 'match_suggested'              │
+└──────────────────┬───────────────────┴───────────────────┬────────────────────┘
+                   │                                       │
+                   │                                       ▼
+                   │                           Human Review Action
+                   │                     ┌─────────────────┼──────────────────┐
+                   │                     ▼                 ▼                  ▼
+                   │                  /confirm          /reject            /resolve
+                   │                     │                 │                  │
+                   │                     ▼                 ▼                  ▼
+                   │             Status: confirmed  Status: rejected  Status: confirmed
+                   │             State: resolved    State: resolved   Method: manual
+                   │                     │                                    │
+                   └─────────────────────┼────────────────────────────────────┘
+                                         ▼
+                 Canonical Progress Truth (ProgressService)
+                 > Non-negotiable: Only CONFIRMED matches produce canonical ActivityProgress.
+```
+
+> **Key Invariant:** No ambiguous AI match silently becomes canonical project truth. All uncertain candidates require human review before progress can be normalized and recorded.
 
 AI Pipeline:
 ```text

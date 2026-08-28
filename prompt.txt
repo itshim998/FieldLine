@@ -1,1145 +1,1030 @@
-# FieldLine — PASS 18: FIELDLINE ASSISTANT
+# FieldLine — PASS 19: HUMAN REVIEW WORKFLOW
 
-Implement **Pass 18 — FieldLine Assistant** in the existing FieldLine repository.
+Implement **Pass 19 — Human Review Workflow** in the existing FieldLine repository.
 
 Approved base:
 
-```text id="b467base18"
-22467d7b5149b419b3ebae7bc39a549319ac2e7e
+```text id="base19"
+c4011ecdb2671a2c9f234168a6c5fc189dfc3185
 ```
 
-Current approved passes:
-
-```text id="approved18"
-Pass 13 — Evidence System
-Pass 14 — Document Ingestion
-Pass 15 — In-process Processing Jobs
-Pass 16 — Failure Isolation & Idempotency
-Pass 17 — Project Intelligence Query Layer
-```
-
-Do NOT implement Pass 19+.
+Do NOT implement Pass 20+.
 
 ---
 
 # 1. Objective
 
-Add natural-language interaction to FieldLine.
+Handle uncertain AI/activity matches safely.
 
-A manager should be able to ask:
+Required policy:
 
 ```text
-What is delayed?
+HIGH confidence
+    ↓
+automatic confirmation
 
-Why is Foundation B at risk?
+MEDIUM confidence
+    ↓
+suggested match
+    ↓
+human confirms/rejects
 
-What changed today?
-
-Which activities are most behind schedule?
-
-Which milestones are approaching?
-
-Which activities have no recent updates?
+LOW confidence
+    ↓
+unresolved
+    ↓
+human chooses activity
 ```
 
-and receive an answer grounded strictly in actual project data.
+Core invariant:
 
-Required architecture:
-
-```text id="arch18"
-Manager question
-      ↓
-AI structured intent interpretation
-      ↓
-application validation
-      ↓
-deterministic project/entity resolution
-      ↓
-ProjectIntelligenceService
-      ↓
-verified structured fact set
-      ↓
-AI structured answer generation
-      ↓
-validated grounded answer
+```text
+No ambiguous AI match silently becomes canonical project truth.
 ```
 
-The LLM is NEVER the source of project truth.
+The human review workflow must be project-scoped, auditable, deterministic, and compatible with the existing ActivityMatchingService and ProgressService.
 
 ---
 
-# 2. Critical architectural rule
+# 2. Current matching architecture
 
-DO NOT let the assistant query:
+The existing:
 
-* SQLite
-* repositories
-* filesystem
-* Evidence files
-* raw project tables
-
-The assistant receives only verified structured facts produced by application code.
-
-The architecture must remain:
-
-```text id="truth18"
-SQLite/project state
-      ↓
-deterministic domain services
-      ↓
-Project Intelligence
-      ↓
-Assistant
+```text id="match19"
+ActivityMatchingService
 ```
 
-not:
-
-```text
-LLM
- ↓
-database
-```
-
----
-
-# 3. Current AI layer
-
-The repository already contains:
-
-```text id="ai18"
-AIService
-AIProvider
-MockAIProvider
-FieldProgressExtractionService
-```
-
-The current `AIProvider` interface supports:
-
-```ts
-generateText(...)
-generateStructured(...)
-```
-
-Reuse this abstraction.
-
-Do NOT create an Assistant-specific AI interface that duplicates it.
-
-The existing AI architecture already separates provider communication from business logic.
-
-Preserve:
-
-```text id="provider18"
-AIProvider
-  ↓
-AIService
-  ↓
-application service
-```
-
----
-
-# 4. Add real Gemini provider
-
-The current repository contains only `MockAIProvider`.
-
-Add:
-
-```text id="gemini18"
-backend/src/ai/providers/gemini-ai.provider.ts
-```
-
-implementing the existing:
-
-```ts
-AIProvider
-```
-
-Use the current official Google Gemini JavaScript SDK/API.
-
-Target model configuration:
-
-```text
-GEMINI_MODEL
-```
-
-with default:
-
-```text
-gemini-3.7-flash
-```
-
-Do not hard-code API credentials.
-
-Use:
-
-```text
-GEMINI_API_KEY
-```
-
-from environment configuration.
-
-Add configuration:
-
-```text
-AI_PROVIDER=mock|gemini
-GEMINI_API_KEY=...
-GEMINI_MODEL=gemini-3.7-flash
-```
-
-Keep `MockAIProvider` available for tests and offline development.
-
-Do not force all existing AI tests to use a network provider.
-
-Do not commit real keys.
-
-The application must fail clearly if `AI_PROVIDER=gemini` is selected without a usable Gemini API key.
-
-Use the current official SDK contract and current Gemini 3.7 Flash API semantics; do not rely on stale Gemini API examples from old model generations.
-
----
-
-# 5. Preserve existing AI behavior
-
-Do not break:
-
-```text id="existingai18"
-FieldProgressExtractionService
-AIService
-MockAIProvider
-existing AI extraction tests
-```
-
-The existing Field Progress Extraction prompt must remain responsible for factual extraction from field reports.
-
-Pass 18 introduces assistant semantics separately.
-
-Do NOT merge assistant prompts into the field-progress extraction prompt.
-
----
-
-# 6. Assistant domain contracts
-
-Create:
-
-```text id="assistant18"
-backend/src/ai/contracts/assistant.contract.ts
-```
-
-or equivalent clean location.
-
-Define:
-
-## Intent
-
-Supported intent types:
-
-```text id="intent18"
-delayed
-at_risk
-completed_today
-behind_schedule
-approaching_milestones
-stale_activities
-recent_changes
-activity_status
-```
-
-Intent shape conceptually:
-
-```ts
-interface AssistantIntent {
-  intent: AssistantIntentType;
-  activityQuery?: string | null;
-  explicitDate?: string | null;
-}
-```
-
-Do NOT allow the model to output authoritative activity IDs.
-
-The model may return human text such as:
-
-```text
-Foundation B
-```
-
-The application resolves that text against the actual project.
-
----
-
-# 7. Intent interpretation
-
-Create:
-
-```text id="intentservice18"
-AssistantIntentService
-```
-
-that calls:
-
-```text
-AIService.extractStructured(...)
-```
-
-with the intent schema.
-
-Prompt the model to:
-
-* classify only into supported intents
-* extract an optional human activity reference
-* extract an optional explicit date
-* never invent activity IDs
-* never answer the question
-* never calculate project values
-
-Example:
-
-```text
-Question:
-"Why is Foundation B at risk?"
-
-Expected intent:
-
-{
-  "intent": "at_risk",
-  "activityQuery": "Foundation B",
-  "explicitDate": null
-}
-```
-
-Another:
-
-```text
-"Which activities are most behind schedule?"
-
-{
-  "intent": "behind_schedule",
-  "activityQuery": null,
-  "explicitDate": null
-}
-```
-
-Another:
-
-```text
-"What changed on 2026-08-25?"
-
-{
-  "intent": "recent_changes",
-  "activityQuery": null,
-  "explicitDate": "2026-08-25"
-}
-```
-
-Invalid intent output must fail validation.
-
----
-
-# 8. Application-controlled date semantics
-
-Do not trust the LLM with relative dates.
-
-If the user asks:
-
-```text
-today
-```
-
-the application determines the canonical date using existing snapshot/date semantics.
-
-If the LLM returns:
-
-```text
-explicitDate
-```
-
-validate it using the same date validation conventions already used by the ProgressSnapshotService.
-
-Do not invent dates.
-
-Do not use Evidence.uploadedAt or job timestamps for semantic project dates.
-
----
-
-# 9. Deterministic activity resolution
-
-Create a small deterministic resolver.
-
-Input:
-
-```text
-projectId
-activityQuery
-```
-
-Resolve against:
-
-```text
-ActivityRepository.listByProjectId(projectId)
-```
-
-Use deterministic matching only.
-
-Preferred resolution precedence:
-
-```text id="resolve18"
-1. exact externalId
-2. exact case-insensitive normalized activity name
-3. exact normalized name + location
-4. unique deterministic textual match
-```
-
-Normalization may include:
-
-* trim
-* lowercase
-* collapse whitespace
-
-Do not use an LLM for entity resolution.
-
-Do not invent an Activity ID.
-
-If no match:
-
-```text id="nomatch18"
-return a safe "activity not found" assistant result
-```
-
-If multiple equally valid matches:
-
-```text id="ambiguous18"
-do not guess
-return an ambiguity result containing the candidate activities
-```
-
-Do not silently choose one.
-
----
-
-# 10. Project Intelligence integration
-
-The assistant MUST reuse:
-
-```text id="intel18"
-ProjectIntelligenceService.getIntelligence(...)
-```
-
-for all supported operational intents.
-
-Do not recreate:
-
-* delayed logic
-* at-risk logic
-* variance logic
-* stale logic
-* milestone logic
-* completed-today logic
-* recent-change logic
-
-Pass 17 is the authoritative information layer.
-
----
-
-# 11. Build verified fact sets
-
-After intent resolution, application code obtains:
-
-```text id="verified18"
-ProjectIntelligence
-```
-
-and selects only the relevant facts.
-
-Examples:
-
-## "What is delayed?"
-
-Verified set:
-
-```text
-intelligence.delayed
-```
-
-## "Why is Foundation B at risk?"
-
-Verified set:
-
-```text
-intelligence.atRisk
-```
-
-filtered to the deterministically resolved activity.
-
-## "What changed today?"
-
-Verified set:
-
-```text
-intelligence.recentChanges
-```
-
-using the correct date/window.
-
-## "Which activities are most behind?"
-
-Verified set:
-
-```text
-intelligence.behindSchedule
-```
-
-preserving its deterministic sort order.
-
-Do not let the model choose which facts exist.
-
----
-
-# 12. Activity status questions
-
-For:
-
-```text
-"What is the status of Foundation B?"
-```
-
-resolve the activity deterministically.
-
-Then use the authoritative snapshot/risk/intelligence data for that activity.
-
-Do NOT ask the LLM to infer status from the activity name or from natural-language knowledge.
-
----
-
-# 13. Final assistant response contract
-
-Create:
-
-```ts
-interface AssistantAnswer {
-  answer: string;
-  factRefs: string[];
-}
-```
-
-Use:
-
-```text
-AIService.extractStructured(...)
-```
-
-rather than raw `generateText()` for the final response.
-
-The final response schema must validate:
-
-```text
-answer = non-empty string
-factRefs = array of strings
-```
-
-Keep the answer concise enough for a manager UI.
-
----
-
-# 14. Grounding enforcement
-
-The final answer prompt must state:
-
-```text id="ground18"
-You are not the source of truth.
-
-The VERIFIED FACTS below are the only project facts available.
-
-You must:
-- answer only from VERIFIED FACTS
-- preserve numeric values exactly
-- preserve dates exactly
-- preserve activity identity exactly
-- cite factual claims with factRefs
-
-You must not:
-- invent project facts
-- invent percentages
-- invent dates
-- invent causes
-- invent activities
-- infer unsupported contractor/personnel issues
-- perform new project calculations
-- contradict VERIFIED FACTS
-
-If the VERIFIED FACTS are insufficient:
-say that the available project data is insufficient.
-
-Every factual statement in the answer must be supported by one or more supplied factRefs.
-```
-
-The model receives:
-
-```text
-original question
-+
-resolved intent
-+
-verified fact set
-```
-
-and nothing else from the project.
-
----
-
-# 15. Validate returned fact references
-
-After the LLM response:
-
-```text id="factcheck18"
-answer.factRefs
-```
-
-must be checked against the application-generated verified fact set.
-
-If the model returns an unknown reference:
-
-```text id="badref18"
-do not accept the answer
-```
-
-Return a safe assistant error or regenerate once using the same verified facts.
-
-Do NOT silently accept unsupported references.
-
-Prefer deterministic rejection over hallucination.
-
----
-
-# 16. No unsupported causal reasoning
-
-For:
-
-```text
-"Why is Foundation B at risk?"
-```
-
-the model may explain:
-
-```text
-classification
-reasons
-planned progress
-actual progress
-variance
-planned finish
-```
-
-only if those facts are supplied.
-
-It must NOT invent:
-
-```text
-contractor shortage
-material shortage
-weather problems
-labor issues
-design problems
-```
-
-unless such facts actually appear in the supplied verified data.
-
----
-
-# 17. Ranking rule
-
-For:
-
-```text
-"Which activities are most behind schedule?"
-```
-
-the LLM must not perform ranking.
-
-The application uses the deterministic order from:
-
-```text id="behind18"
-ProjectIntelligence.behindSchedule
-```
-
-and the LLM only explains that ordered result.
-
-Never ask the model to recalculate variance.
-
----
-
-# 18. Assistant service
-
-Create:
-
-```text id="assistantservice18"
-backend/src/services/assistant/
-    assistant.service.ts
-    assistant.types.ts
-```
-
-Suggested workflow:
-
-```text id="serviceflow18"
-AssistantService.answerQuestion(...)
-        ↓
-Intent interpretation
-        ↓
-Intent validation
-        ↓
-date normalization
-        ↓
-deterministic activity resolution
-        ↓
-ProjectIntelligenceService
-        ↓
-verified fact selection
-        ↓
-structured LLM answer generation
-        ↓
-fact-reference validation
-        ↓
-AssistantResponse
-```
-
-The assistant service must not import Express types.
-
-The assistant service must not execute SQL.
-
----
-
-# 19. Assistant API
-
-Add:
-
-```text id="assistantroute18"
-POST /api/projects/:projectId/assistant/query
-```
-
-Request:
-
-```json
-{
-  "question": "Why is Foundation B at risk?"
-}
-```
-
-Optional:
-
-```json
-{
-  "question": "...",
-  "asOfDate": "2026-08-28"
-}
-```
-
-The application may use `asOfDate` as an explicit user/UI override, but must validate it.
-
-Response conceptually:
-
-```json
-{
-  "question": "Why is Foundation B at risk?",
-  "intent": {
-    "type": "at_risk",
-    "activityQuery": "Foundation B",
-    "explicitDate": null
-  },
-  "answer": "Foundation B is at risk because ...",
-  "factRefs": [
-    "activity-risk:ACT-123"
-  ],
-  "grounded": true,
-  "asOfDate": "2026-08-28"
-}
-```
-
-Exact contract may be refined consistently with existing API conventions.
-
-Do not expose raw LLM provider internals.
-
----
-
-# 20. Unsupported questions
-
-Support a safe unsupported path.
-
-If the intent model cannot confidently classify the question into the supported intent set:
-
-```text
-assistant result:
-unsupported
-```
-
-The application must not manufacture an answer.
-
-Examples:
-
-```text
-"What is the weather?"
-"Who is the best contractor?"
-"What should we build next year?"
-```
-
-should NOT result in invented project answers.
-
----
-
-# 21. Insufficient data
-
-If the question is valid but the verified data is insufficient:
-
-```text
-grounded = false
-```
-
-or an equivalent explicit status.
-
-Example:
-
-```text
-"What changed on 2025-01-01?"
-```
-
-when no relevant events exist.
-
-The assistant should say that the available project data does not contain the requested information.
-
-Do not fill the gap from general model knowledge.
-
----
-
-# 22. Evidence/provenance references
-
-Where useful, enrich verified facts with existing provenance references:
-
-```text id="prov18"
+already:
+
+* verifies the project
+* loads project activities
+* scores candidates
+* produces a `bestMatch`
+* produces alternatives
+* optionally uses LLM disambiguation
+* persists matches
+
+Current `CandidateMatch` contains:
+
+```text id="candidate19"
 activityId
-progressUpdateId
-evidenceId
+activityExternalId
+activityName
+confidenceScore
+matchMethod
+matchedText
+rationale
 ```
 
-Use existing Pass 13 APIs/services.
+Current `FieldFactMatchResult` contains:
 
-Do not redesign Evidence.
+```text id="result19"
+fact
+bestMatch
+alternatives
+```
 
-Do not expose filesystem paths.
+Current `MatchingOptions` contains:
 
-A future frontend should be able to use returned identifiers to navigate to existing activity/evidence surfaces.
+```text id="options19"
+persist
+minConfidenceThreshold
+alternativeScoreMargin
+maxAlternatives
+enableLlmDisambiguation
+```
+
+Reuse this architecture.
+
+Do NOT create another matching engine.
 
 ---
 
-# 23. Real Gemini configuration
+# 3. Current match persistence semantics
 
-Update:
+Current domain:
 
-```text id="env18"
-backend/src/config/env.ts
-.env.example
-README.md
+```ts
+type MatchMethod =
+  | 'exact_id'
+  | 'text_similarity'
+  | 'wbs_location'
+  | 'llm_assisted'
+  | 'manual';
+
+type MatchStatus =
+  | 'suggested'
+  | 'confirmed'
+  | 'rejected';
+```
+
+Preserve these human review semantics.
+
+Current `ActivityMatch` stores:
+
+```text id="matchfields19"
+confidenceScore
+matchMethod
+matchedText
+rationale
+status
+reviewedBy
+reviewedAt
+createdAt
+updatedAt
+```
+
+Do NOT reinterpret `status` as a confidence tier.
+
+---
+
+# 4. Introduce a separate confidence/review tier
+
+Pass 19 must distinguish:
+
+```text id="tier19"
+confidence
+```
+
+from:
+
+```text id="status19"
+review state
+```
+
+Introduce a deterministic:
+
+```ts
+type MatchConfidenceTier =
+  | 'high'
+  | 'medium'
+  | 'low';
+```
+
+Do NOT allow an LLM to choose this tier.
+
+It must be derived in deterministic application code from:
+
+```text
+confidenceScore
+runner-up score
+ambiguity margin
+match method
+```
+
+where applicable.
+
+---
+
+# 5. Threshold design
+
+Inspect the existing `scoreActivityCandidate()` distribution and current matching tests before selecting thresholds.
+
+Define centralized constants such as:
+
+```text id="threshold19"
+DEFAULT_HIGH_CONFIDENCE_THRESHOLD
+DEFAULT_MEDIUM_CONFIDENCE_THRESHOLD
+DEFAULT_AUTO_CONFIRM_MARGIN
+```
+
+The exact numerical values must be chosen based on the current scoring behavior, not guessed in multiple places.
+
+The final implementation must have one authoritative policy function:
+
+```text id="e4t2j8"
+classifyMatchConfidence(...)
+```
+
+or equivalent.
+
+It must be deterministic and directly unit-testable.
+
+---
+
+# 6. Required confidence policy
+
+Conceptually:
+
+```text id="policy19"
+HIGH:
+  score >= HIGH_THRESHOLD
+  AND top candidate is sufficiently separated from runner-up
+
+MEDIUM:
+  score >= MEDIUM_THRESHOLD
+  BUT does not satisfy HIGH/auto-confirm conditions
+
+LOW:
+  score < MEDIUM_THRESHOLD
+```
+
+The exact thresholds should be centralized constants.
+
+Additional hard rules:
+
+### Exact-ID matches
+
+An exact activity ID is the strongest existing match method.
+
+It may qualify for auto-confirmation when it uniquely identifies one project activity.
+
+Still preserve project isolation.
+
+### Ambiguous high scores
+
+Example:
+
+```text
+A = 0.91
+B = 0.90
+```
+
+must NOT automatically confirm A.
+
+Treat it as ambiguous and route it to human review.
+
+### Single strong candidate
+
+Example:
+
+```text
+A = 0.91
+next = none
+```
+
+may auto-confirm if the configured high-confidence policy permits it.
+
+---
+
+# 7. Create a central review-policy service
+
+Create a small module, for example:
+
+```text id="policyfile19"
+backend/src/services/matching/match-review-policy.ts
+```
+
+It should expose something like:
+
+```ts
+interface MatchReviewDecision {
+  tier: 'high' | 'medium' | 'low';
+  autoConfirm: boolean;
+  reason: string;
+}
+```
+
+or equivalent.
+
+Inputs should include:
+
+```text
+best candidate
+alternatives
+confidence score
+match method
+```
+
+Outputs should be deterministic.
+
+Do not put this policy inside the router.
+
+Do not put it inside the database repository.
+
+---
+
+# 8. High-confidence automatic confirmation
+
+When the review policy determines:
+
+```text id="high19"
+tier = high
+AND
+autoConfirm = true
+```
+
+the match must be persisted as:
+
+```text
+status = confirmed
+reviewedBy = 'system'
+reviewedAt = current timestamp
+```
+
+or an equivalent explicit system-review representation.
+
+Do NOT pretend this was a human review.
+
+Clearly distinguish:
+
+```text
+system confirmed
+```
+
+from:
+
+```text
+human confirmed
+```
+
+If the current domain model needs a deterministic representation, inspect existing audit/review conventions and choose the smallest compatible change.
+
+The project event should make the source explicit.
+
+---
+
+# 9. Medium-confidence behavior
+
+For:
+
+```text id="medium19"
+tier = medium
+```
+
+persist:
+
+```text
+status = suggested
 ```
 
 with:
 
 ```text
-AI_PROVIDER
-GEMINI_API_KEY
-GEMINI_MODEL
+confidenceTier = medium
 ```
 
-Suggested defaults:
+or equivalent persisted/derivable information.
 
-```text
-AI_PROVIDER=mock
-GEMINI_MODEL=gemini-3.7-flash
+The user must see:
+
+```text id="displaymedium19"
+Suggested match
+Medium confidence
 ```
 
-Do not require a Gemini key for existing test/offline workflows.
+and the candidate alternatives.
 
-When:
-
-```text
-AI_PROVIDER=gemini
-```
-
-is selected, validate that:
-
-```text
-GEMINI_API_KEY
-```
-
-is present.
-
-Do not log the API key.
-
-Do not return it in health checks or errors.
+Do NOT auto-confirm.
 
 ---
 
-# 24. AI provider error handling
+# 10. Low-confidence behavior
 
-Provider failures should become the existing AI application error type.
+For:
 
-Do not expose:
+```text id="low19"
+tier = low
+```
 
-* API keys
-* raw authorization headers
-* internal SDK stack traces
-* sensitive provider responses
+do NOT silently convert the best candidate into project truth.
 
-The assistant route should return a clean application-level error.
+A low-confidence candidate must be treated as unresolved.
 
-The existing AIService should remain the central wrapping layer where appropriate.
+Choose the minimal compatible architecture.
+
+Preferred approach:
+
+```text id="lowmodel19"
+persist candidate match as suggested
++
+persist confidenceTier = low
++
+mark reviewState = unresolved
+```
+
+Do not add a destructive or ambiguous interpretation of `suggested`.
+
+The UI must clearly indicate:
+
+```text id="lowdisplay19"
+Unresolved
+Low confidence
+Select activity
+```
+
+The user must be able to choose the correct activity from the project activities.
 
 ---
 
-# 25. Frontend integration
+# 11. Schema evolution
 
-The existing frontend already contains the Project Intelligence workspace.
+Inspect the existing database schema before modifying it.
 
-Add an Assistant panel/tab in that workspace.
+Add the minimum columns required to persist:
 
-UI:
-
-```text id="ui18"
-Ask FieldLine
-[ What is delayed?                         ]
-[ Ask ]
-
-Recent:
-"What is delayed?"
-"Why is Foundation B at risk?"
+```text id="schema19"
+confidence tier
+review resolution state
 ```
 
-Answer:
+if those values cannot be deterministically reconstructed.
 
-```text
-FieldLine
+Do NOT create a separate human-review table unless genuinely necessary.
 
-Foundation B is at risk because ...
-```
+Prefer extending `activity_matches` because it is already the canonical match-review entity.
 
-Then a compact:
+Add a new sequential migration.
 
-```text
-Verified facts
-```
+Do NOT modify previous migration files.
 
-section with relevant facts/identifiers.
-
-Do not build:
-
-```text
-chat history database
-multi-turn conversation memory
-voice assistant
-streaming tokens
-WebSockets
-SSE
-```
-
-Those are later passes.
+Preserve all existing foreign keys and cross-project triggers.
 
 ---
 
-# 26. Testing — intent interpretation
+# 12. Review states
 
-Add tests for:
+Preserve the existing status values:
 
-```text id="intenttests18"
-[ ] delayed
-[ ] at_risk
-[ ] completed_today
-[ ] behind_schedule
-[ ] approaching_milestones
-[ ] stale_activities
-[ ] recent_changes
-[ ] activity_status
-[ ] invalid intent rejected
-[ ] activityQuery preserved
-[ ] no activity ID accepted from model
+```text id="status19b"
+suggested
+confirmed
+rejected
 ```
 
-Use injected/fake AIService implementations.
+If an additional `review_state` is needed, define it explicitly and keep it orthogonal.
 
-Tests must not depend on a real Gemini API.
+For example:
+
+```text id="reviewstate19"
+unresolved
+awaiting_review
+resolved
+```
+
+Do not create unnecessary overlapping states.
+
+The final design must make these cases unambiguous:
+
+```text
+high confidence
+→ confirmed
+
+medium confidence
+→ suggested + awaiting human review
+
+low confidence
+→ suggested + unresolved
+```
+
+A rejected match remains rejected.
 
 ---
 
-# 27. Testing — deterministic resolution
+# 13. Human review API
+
+Add project-scoped review endpoints.
+
+Recommended:
+
+```text id="api19"
+POST /api/projects/:projectId/activity-matches/:matchId/confirm
+
+POST /api/projects/:projectId/activity-matches/:matchId/reject
+
+POST /api/projects/:projectId/activity-matches/:matchId/resolve
+```
+
+Resolve request:
+
+```json id="resolvebody19"
+{
+  "activityId": "..."
+}
+```
+
+All APIs must verify:
+
+```text id="verify19"
+match belongs to project
+target activity belongs to project
+progress update belongs to project
+```
+
+Cross-project operations must return 404/not-found semantics consistent with the existing application.
+
+---
+
+# 14. Confirm semantics
+
+Confirm should:
+
+```text id="confirm19"
+verify match
+verify project
+verify status permits confirmation
+update:
+  status = confirmed
+  reviewedBy = supplied reviewer identity
+  reviewedAt = now
+emit match_confirmed event
+```
+
+Do not let a rejected match be silently resurrected without an explicit rule.
+
+If the current application does not have authenticated user identity, use the existing reviewer field convention and document the limitation.
+
+Do not invent a full authentication system in Pass 19.
+
+---
+
+# 15. Reject semantics
+
+Reject should:
+
+```text id="reject19"
+verify match
+verify project
+update:
+  status = rejected
+  reviewedBy
+  reviewedAt
+emit match_rejected event if the event model is extended
+```
+
+Do not delete the match record.
+
+Historical review decisions must remain auditable.
+
+Do not automatically replace it with another candidate.
+
+---
+
+# 16. Resolve low-confidence match
+
+For unresolved low-confidence cases:
+
+```text id="resolve19"
+human selects Activity B
+```
+
+The application must:
+
+1. verify Activity B belongs to the same project
+2. verify the match belongs to the same project
+3. update the existing match to the appropriate resolved state
+4. set:
+
+```text
+reviewedBy
+reviewedAt
+matchMethod = 'manual'
+```
+
+5. preserve the original AI confidence/rationale
+6. emit a review event
+
+Do not overwrite the historical confidence score.
+
+The fact that a human resolved it must remain distinguishable from the original AI score.
+
+---
+
+# 17. Preserve alternatives
+
+The current matching engine already calculates:
+
+```text id="alts19"
+alternatives: CandidateMatch[]
+```
+
+Use these in the review experience.
+
+For medium/low confidence matches, expose:
+
+```text id="reviewdisplay19"
+best candidate
+confidence score
+confidence tier
+match method
+rationale
+alternative candidates
+```
+
+The user should be able to choose an alternative directly.
+
+Do not make the user manually type an activity ID when an existing candidate list is available.
+
+Manual activity selection must still be supported as a safe fallback.
+
+---
+
+# 18. No silent project truth
+
+The most important rule:
+
+```text id="truth19"
+suggested ≠ canonical truth
+
+low-confidence ≠ canonical truth
+
+unreviewed ≠ canonical truth
+```
+
+Only:
+
+```text id="confirmed19"
+confirmed match
+```
+
+is eligible for the existing ProgressService.
+
+Do NOT modify ProgressService's existing semantics to treat suggested or low-confidence matches as confirmed.
+
+---
+
+# 19. Progress integration
+
+The existing ProgressService remains the canonical mechanism for creating ActivityProgress.
+
+Pass 19 should only make review actions available.
+
+Do not create ActivityProgress in the review router/service.
+
+The safe flow is:
+
+```text id="progress19"
+AI extraction
+↓
+candidate matching
+↓
+confidence policy
+↓
+review
+↓
+confirmed match
+↓
+existing ProgressService
+↓
+ActivityProgress
+```
+
+Do not bypass the existing review/status rules.
+
+---
+
+# 20. Project events
+
+Extend the existing project event vocabulary only as necessary.
+
+At minimum, review actions should be auditable.
+
+Useful events:
+
+```text id="events19"
+match_auto_confirmed
+match_confirmed
+match_rejected
+match_resolved
+```
+
+The exact event names should follow the existing event naming convention.
+
+Payload should include bounded metadata:
+
+```text activityId
+matchId
+progressUpdateId
+confidenceScore
+confidenceTier
+review source
+```
+
+Do not store sensitive information.
+
+Do not store raw filesystem paths.
+
+---
+
+# 21. Matching output contract
+
+Update `FieldFactMatchResult` / `MatchReportResult` as necessary so the caller can see:
+
+```text id="output19"
+bestMatch
+alternatives
+confidenceTier
+reviewDecision
+```
+
+The API response should make uncertainty explicit.
+
+For example:
+
+```json id="outputexample19"
+{
+  "fact": {...},
+  "bestMatch": {
+    "activityId": "...",
+    "confidenceScore": 0.67,
+    "confidenceTier": "medium",
+    "status": "suggested"
+  },
+  "alternatives": [...]
+}
+```
+
+For a high-confidence exact match:
+
+```json id="highoutput19"
+{
+  "bestMatch": {
+    "confidenceScore": 0.96,
+    "confidenceTier": "high",
+    "status": "confirmed"
+  }
+}
+```
+
+For low confidence:
+
+```json id="lowoutput19"
+{
+  "bestMatch": {
+    "confidenceScore": 0.42,
+    "confidenceTier": "low",
+    "status": "suggested",
+    "reviewState": "unresolved"
+  }
+}
+```
+
+Exact response shape can follow current API conventions.
+
+---
+
+# 22. Existing LLM disambiguation
+
+The matching engine already supports:
+
+```text id="llm19"
+enableLlmDisambiguation
+```
+
+and uses `LLMActivityDisambiguator`.
+
+Do NOT allow this model to directly confirm project truth.
+
+LLM disambiguation can reorder/rank candidates only.
+
+The final confidence/review decision remains deterministic application logic.
+
+---
+
+# 23. Determinism
+
+Given:
+
+```text id="detinput19"
+same activities
+same extracted fact
+same scoring
+same options
+```
+
+the confidence tier and auto-confirm decision must be deterministic.
+
+Do not let model temperature/randomness determine whether a match becomes confirmed.
+
+If LLM disambiguation is enabled, the final review policy still decides status.
+
+---
+
+# 24. Frontend review workflow
+
+Extend the existing progress/matching UI.
+
+Do NOT build a new application shell.
+
+The UI must visually distinguish:
+
+```text id="uistates19"
+✓ Confirmed / Auto-confirmed
+⚠ Suggested / Medium confidence
+? Unresolved / Low confidence
+✕ Rejected
+```
+
+For suggested matches show:
+
+```text
+Confidence
+Candidate
+Rationale
+Alternatives
+Confirm
+Reject
+```
+
+For unresolved matches show:
+
+```text
+Low confidence
+Candidate suggestion
+Alternatives
+Choose activity
+```
+
+The UI must make it difficult to mistake a suggestion for canonical truth.
+
+---
+
+# 25. Activity review panel
+
+When a user opens a progress report, show its matches grouped by review state/tier.
+
+Example:
+
+```text id="group19"
+Confirmed
+  Foundation B
+
+Needs Review
+  Pier 4 — 72% confidence
+  Alternatives: Pier 3, Pier 5
+
+Unresolved
+  "North foundation wall" — 41% confidence
+  [Choose activity]
+```
+
+Do not hide low-confidence matches.
+
+Uncertainty is part of the product.
+
+---
+
+# 26. Activity-level indication
+
+When a confirmed match results in canonical ActivityProgress through the existing ProgressService, the activity can show its normal progress state.
+
+But:
+
+```text id="do-not19"
+suggested
+low-confidence
+unresolved
+```
+
+must not be shown as if it were confirmed project progress.
+
+This distinction must remain visible in the UI.
+
+---
+
+# 27. Tests — confidence policy
+
+Add unit tests for:
+
+```text id="policytests19"
+[ ] high isolated score → auto-confirm
+[ ] high score but close runner-up → NOT auto-confirm
+[ ] medium score → suggested
+[ ] low score → unresolved
+[ ] exact ID behavior
+[ ] boundary threshold values
+[ ] deterministic output
+```
+
+Use explicit numeric fixtures.
+
+Do not test only happy paths.
+
+---
+
+# 28. Tests — review actions
 
 Add:
 
-```text id="resolver18"
-[ ] exact externalId resolution
-[ ] exact activity-name resolution
-[ ] case-insensitive normalization
-[ ] unique location/name resolution if supported
-[ ] no match
-[ ] ambiguous match
-[ ] cross-project activity cannot resolve
-```
-
-Never allow an ambiguous activity to produce a confident answer.
-
----
-
-# 28. Testing — grounding
-
-Create deterministic verified fact fixtures.
-
-Test that:
-
-```text id="groundtests18"
-[ ] answer can only cite known factRefs
-[ ] unknown factRef is rejected
-[ ] unsupported claim is rejected
-[ ] missing facts produce insufficient-data response
-[ ] numeric values remain grounded
-```
-
-Use a fake AI provider whose final structured response intentionally contains:
-
-```text
-valid factRefs
-```
-
-and another test with:
-
-```text
-fake factRefs
-```
-
-which must fail.
-
----
-
-# 29. Testing — end-to-end
-
-Create realistic tests:
-
-### Query 1
-
-```text
-"What is delayed?"
-```
-
-Expected:
-
-```text
-intent = delayed
-verified facts = intelligence.delayed
-grounded answer
-```
-
-### Query 2
-
-```text
-"Why is Foundation B at risk?"
-```
-
-Expected:
-
-```text
-intent = at_risk
-deterministic activity resolution
-one matching fact
-grounded answer
-```
-
-### Query 3
-
-```text
-"What changed today?"
-```
-
-Expected:
-
-```text
-intent = recent_changes
-canonical date
-recent event facts
-```
-
-### Query 4
-
-```text
-"Which activities are most behind schedule?"
-```
-
-Expected:
-
-```text
-intent = behind_schedule
-existing deterministic order preserved
-```
-
-### Query 5
-
-```text
-"Tell me about imaginary activity X"
-```
-
-Expected:
-
-```text
-activity not found / insufficient data
-NO hallucinated answer
+```text id="reviewtests19"
+[ ] confirm suggested match
+[ ] reject suggested match
+[ ] resolve low-confidence match
+[ ] choose alternative candidate
+[ ] reviewedBy persisted
+[ ] reviewedAt persisted
+[ ] review event recorded
+[ ] rejected match remains auditable
+[ ] cross-project match confirmation rejected
+[ ] cross-project activity resolution rejected
 ```
 
 ---
 
-# 30. Security / isolation tests
+# 29. Tests — canonical truth protection
+
+Mandatory test:
+
+```text id="truthprotect19"
+low-confidence match
+↓
+no ActivityProgress
+```
+
+and:
+
+```text id="truthprotect19b"
+medium suggested match
+↓
+no ActivityProgress until confirmation
+```
+
+Then:
+
+```text id="truthprotect19c"
+human confirms
+↓
+existing ProgressService
+↓
+ActivityProgress created
+```
+
+Do not implement a second progress path for this test.
+
+---
+
+# 30. Tests — automatic confirmation
+
+Create realistic examples:
+
+### Safe
+
+```text
+top = 0.95
+second = 0.41
+method = exact_id
+```
+
+→ automatically confirmed.
+
+### Ambiguous
+
+```text
+top = 0.91
+second = 0.90
+```
+
+→ NOT automatically confirmed.
+
+### Medium
+
+```text
+top = 0.72
+second = 0.50
+```
+
+→ suggested.
+
+### Low
+
+```text
+top = 0.44
+second = 0.41
+```
+
+→ unresolved.
+
+Use the actual configured thresholds.
+
+---
+
+# 31. Tests — project isolation
 
 Verify:
 
-```text id="security18"
-[ ] Project A question cannot surface Project B activity
-[ ] Project A question cannot surface Project B events
-[ ] Project A question cannot surface Project B evidence references
-[ ] arbitrary activity IDs from the LLM are ignored/rejected
-[ ] absolute filesystem paths are never returned
-[ ] provider errors do not expose secrets
+```text id="isol19"
+Project A match cannot be confirmed through Project B.
+
+Project A match cannot resolve to Project B activity.
+
+Project A match cannot expose Project B alternatives.
+
+Project A review events cannot appear in Project B.
 ```
-
-The projectId from the route is authoritative.
-
-Never allow the LLM to choose a project.
 
 ---
 
-# 31. Resource limits
+# 32. Existing regression suite
 
-Bound:
+Run:
 
-```text id="limits18"
-maximum user question length
-maximum verified facts passed to final model
-maximum answer length
-maximum fact references
+```text id="run19"
+npm test
+npm run build
 ```
 
-Do not send the entire project's raw database state to the model.
+Preserve all existing:
 
-Only send the minimum relevant verified fact subset.
-
-This keeps latency and cost bounded.
-
----
-
-# 32. No assistant memory yet
-
-Pass 18 is intentionally stateless.
-
-Do not add:
-
-```text
-assistant_messages
-conversation_sessions
-conversation_embeddings
-RAG memory
-vector database
+```text id="preserve19"
+Pass 13 evidence tests
+Pass 14 ingestion tests
+Pass 15 job tests
+Pass 16 idempotency tests
+Pass 17 intelligence tests
+Pass 18 assistant grounding tests
 ```
 
-A later pass may introduce conversational memory.
+Do not weaken existing match/progress semantics.
 
 ---
 
@@ -1147,36 +1032,38 @@ A later pass may introduce conversational memory.
 
 Update:
 
-```text id="docs18"
+```text id="docs19"
 README.md
 docs/ARCHITECTURE.md
 ```
 
-to show:
+Document:
 
-```text
-Manager question
-      ↓
-Assistant intent interpretation
-      ↓
-Deterministic Project Intelligence
-      ↓
-Verified fact set
-      ↓
-Grounded LLM explanation
-      ↓
-Manager answer
+```text id="docflow19"
+AI extraction
+↓
+candidate scoring
+↓
+confidence policy
+↓
+high → auto-confirmed
+medium → suggested
+low → unresolved
+↓
+human review
+↓
+confirmed
+↓
+canonical ProgressService
 ```
 
-Explicitly document:
+Explicitly state:
 
-```text
-AI interprets and explains.
+```text id="truthdoc19"
+Only confirmed matches may become canonical progress.
 
-Application code determines project truth.
+AI uncertainty is never silently promoted to project truth.
 ```
-
-Update the Pass checklist so Pass 18 is marked complete.
 
 ---
 
@@ -1184,149 +1071,123 @@ Update the Pass checklist so Pass 18 is marked complete.
 
 DO NOT implement:
 
-```text id="scope18"
-Pass 19 human review workflow
-Pass 20 full dashboard redesign
-Pass 21 activity detail system
-Pass 22 voice input
-Pass 23 evaluation suite
-Pass 24 golden demo environment
-Pass 25 presentation polish
+```text id="scope19"
+new authentication system
+multi-user permissions
+notifications
+email review requests
+chat assistant changes
+new LLM matching architecture
+automatic retries
+background job redesign
+new progress engine
+new risk engine
+dashboard redesign
 ```
 
-Also do NOT implement:
-
-```text
-multi-turn memory
-RAG
-embeddings
-vector database
-agent tools
-function-calling workflow
-LLM-generated SQL
-LLM-generated filters
-automatic project mutations
-assistant-triggered progress updates
-assistant-triggered evidence processing
-```
-
-The assistant is strictly read-only in Pass 18.
+Pass 19 is the human review/control layer.
 
 ---
 
 # 35. Definition of done
 
-Pass 18 is complete only when:
+Pass 19 is complete only when:
 
-```text id="done18"
-[ ] Natural-language assistant endpoint exists.
+```text id="done19"
+[ ] Deterministic confidence tiers exist.
 
-[ ] Intent interpretation uses structured AI output.
+[ ] High-confidence unambiguous matches can auto-confirm.
 
-[ ] Supported intent set is explicitly validated.
+[ ] High-confidence ambiguous matches do not auto-confirm.
 
-[ ] Activity references are deterministically resolved.
+[ ] Medium-confidence matches become suggested.
 
-[ ] LLM cannot choose authoritative activity IDs.
+[ ] Low-confidence matches become explicitly unresolved.
 
-[ ] Project IntelligenceService is reused.
+[ ] Human users can confirm suggestions.
 
-[ ] Verified fact sets are created by application code.
+[ ] Human users can reject suggestions.
 
-[ ] Final LLM answer uses only verified facts.
+[ ] Human users can resolve low-confidence matches.
 
-[ ] Final answer uses structured output.
+[ ] Human users can choose an alternative candidate.
 
-[ ] Returned fact references are validated.
+[ ] Reviewer identity/time is recorded.
 
-[ ] Unknown fact references are rejected.
+[ ] Review actions are auditable.
 
-[ ] Unsupported questions are safely rejected.
+[ ] Only confirmed matches can enter canonical ProgressService.
 
-[ ] Insufficient data produces a grounded insufficiency response.
+[ ] Suggested matches cannot silently create ActivityProgress.
 
-[ ] Existing risk/progress/variance formulas are not duplicated.
+[ ] Low-confidence matches cannot silently create ActivityProgress.
 
-[ ] Project isolation remains enforced.
+[ ] LLM disambiguation cannot directly create canonical truth.
 
-[ ] Real Gemini provider exists behind AIProvider.
+[ ] Project isolation is preserved.
 
-[ ] Mock provider remains usable for tests/offline development.
+[ ] Existing match confidence scores remain auditable.
 
-[ ] GEMINI_API_KEY is configuration-only and never logged.
+[ ] Existing Pass 13–18 behavior remains intact.
 
-[ ] Frontend contains an Assistant panel.
-
-[ ] Assistant remains read-only.
+[ ] Frontend clearly communicates uncertainty.
 
 [ ] Full regression suite passes.
 
-[ ] Assistant unit/integration/security tests pass.
+[ ] New review/confidence/security tests pass.
 
 [ ] npm run build passes.
 
-[ ] Documentation is updated.
-
-[ ] No Pass 19+ functionality is implemented.
+[ ] No Pass 20+ functionality is implemented.
 ```
 
 ---
 
 # 36. Final verification
 
+Inspect the final diff for:
+
+```text id="review19"
+confidence logic duplicated in multiple places
+LLM-controlled confirmation
+suggested matches becoming ActivityProgress
+low-confidence matches masquerading as confirmed
+ambiguous high-score auto-confirmation
+lost review history
+cross-project review leakage
+destructive mutation of historical matches
+Pass 20+ scope leakage
+```
+
 Run:
 
-```text id="verify18"
+```bash id="verify19"
 npm test
 npm run build
 ```
 
-Inspect the final diff for:
-
-```text id="review18"
-LLM querying SQLite
-LLM choosing activity IDs
-hallucinated activity resolution
-duplicated intelligence formulas
-unsupported question leakage
-unknown fact references being accepted
-project isolation failures
-secrets in logs
-raw provider errors exposed
-excessive fact payloads
-multi-turn memory
-RAG/embeddings
-Pass 19+ scope leakage
-```
-
 Commit exactly:
 
-```text id="commit18"
-feat: implement FieldLine assistant
+```text id="commit19"
+feat: implement FieldLine human review workflow
 ```
 
-Push to:
+Push to `main`.
 
-```text id="push18"
-main
-```
+Report:
 
-After implementation report:
-
-```text id="report18"
+```text id="report19"
 1. exact files changed
-2. AI provider architecture
-3. intent schema
-4. activity resolution strategy
-5. Project Intelligence integration
-6. verified fact contract
-7. grounded answer contract
-8. fact-reference validation
-9. Gemini configuration
-10. frontend integration
-11. tests added
-12. npm test result
-13. npm run build result
-14. commit SHA
-15. known limitations
+2. confidence-tier policy
+3. auto-confirm policy
+4. medium-review behavior
+5. low-confidence resolution behavior
+6. review APIs
+7. frontend review experience
+8. project isolation behavior
+9. tests added
+10. npm test result
+11. npm run build result
+12. commit SHA
+13. known limitations
 ```

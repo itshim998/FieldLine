@@ -279,7 +279,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
         extraction: {
           items: [
             {
-              reference: 'Stormwater Drainage Trench',
+              reference: 'Stormwater trench work',
               location: 'Zone B',
               progress_percent: 50,
               status: 'in_progress'

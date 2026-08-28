@@ -181,9 +181,9 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -242,6 +242,8 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
           m.matchedText ?? null,
           m.rationale ?? null,
           m.status || 'suggested',
+          m.confidenceTier ?? null,
+          m.reviewState ?? null,
           m.reviewedBy ?? null,
           m.reviewedAt ?? null
         );
@@ -281,6 +283,8 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
         matchedText: r.matched_text,
         rationale: r.rationale,
         status: r.status,
+        confidenceTier: r.confidence_tier || null,
+        reviewState: r.review_state || null,
         reviewedBy: r.reviewed_by,
         reviewedAt: r.reviewed_at,
         createdAt: r.created_at,

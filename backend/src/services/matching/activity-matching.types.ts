@@ -1,5 +1,6 @@
-import { MatchMethod } from '../../models/domain.types.js';
+import { MatchMethod, MatchConfidenceTier } from '../../models/domain.types.js';
 import { FieldProgressItem } from '../../ai/contracts/field-progress-extraction.contract.js';
+import { MatchReviewDecision } from './match-review-policy.js';
 
 /**
  * Individual candidate activity match for a field progress fact.
@@ -21,6 +22,8 @@ export interface FieldFactMatchResult {
   fact: FieldProgressItem;
   bestMatch: CandidateMatch | null;
   alternatives: CandidateMatch[];
+  confidenceTier?: MatchConfidenceTier;
+  reviewDecision?: MatchReviewDecision;
 }
 
 /**

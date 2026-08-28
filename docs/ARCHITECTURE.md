@@ -626,3 +626,22 @@ frontend/
       - `POST /api/projects/:projectId/assistant/query`
       - Request Body: `{ question: string, asOfDate?: string }`
       - Response: `{ question, intent, resolvedActivity, ambiguousCandidates, answer, factRefs, grounded, status, asOfDate, verifiedFacts }`
+20. **Pass 19 — Activity Match Review Workflow & Confidence Tiers**:
+    - **Purpose**: Establishes a deterministic human-in-the-loop review pipeline that classifies AI candidate matches into clear confidence tiers, automatically confirms safe unambiguous matches, routes uncertain or ambiguous matches to human review, and strictly enforces canonical progress truth protection.
+    - **Match Confidence Tiers & Policy (`classifyMatchConfidence`)**:
+      - **High (`high`)**: Score &ge; 0.90 AND top candidate is separated from runner-up by at least 0.15 margin (or no runner-up). Auto-confirms with `status: 'confirmed'`, `reviewState: 'resolved'`, and `reviewedBy: 'system'`.
+      - **Medium (`medium`)**: Score &ge; 0.60, OR high score with close runner-up (ambiguous). Routes to `status: 'suggested'`, `reviewState: 'awaiting_review'`.
+      - **Low (`low`)**: Score < 0.60 or no candidate above minimum threshold (0.40). Routes to `status: 'suggested'`, `reviewState: 'unresolved'`.
+    - **Human Review Endpoints**:
+      - `POST /api/projects/:projectId/activity-matches/:matchId/confirm`: Confirms a suggested match, persisting reviewer identity (`reviewedBy`) and timestamp (`reviewedAt`).
+      - `POST /api/projects/:projectId/activity-matches/:matchId/reject`: Rejects a candidate match without deleting the record, preserving full audit history.
+      - `POST /api/projects/:projectId/activity-matches/:matchId/resolve`: Replaces the matched activity with a chosen target activity from the same project, setting `status: 'confirmed'`, `reviewState: 'resolved'`, `matchMethod: 'manual'`, and preserving historical AI confidence score.
+      - `GET /api/projects/:projectId/activity-matches/:matchId`: Retrieves a single match with full confidence tier and review metadata.
+    - **Canonical Truth Protection Invariant**:
+      - **Non-Negotiable Rule**: Only `status === 'confirmed'` matches are eligible to create canonical `ActivityProgress` records via `ProgressService.normalizeAndRecordProgress`.
+      - Suggested (`awaiting_review`) and unresolved (`unresolved`) matches throw `ValidationError` if progress recording is attempted before human review.
+    - **Audit Event Trail**:
+      - Emits structured events to `project_events`: `match_auto_confirmed`, `match_confirmed`, `match_rejected`, `match_resolved`, and `match_suggested`.
+    - **Database Migration (`0007_match_review_tiers.ts`)**:
+      - Adds `confidence_tier` (`high`, `medium`, `low`) and `review_state` (`unresolved`, `awaiting_review`, `resolved`) columns with indexes `idx_activity_matches_review_state` and `idx_activity_matches_confidence_tier`.
+

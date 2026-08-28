@@ -216,6 +216,8 @@ export interface CreateEvidenceInput {
 // ==========================================
 export type MatchMethod = 'exact_id' | 'text_similarity' | 'wbs_location' | 'llm_assisted' | 'manual';
 export type MatchStatus = 'suggested' | 'confirmed' | 'rejected';
+export type MatchConfidenceTier = 'high' | 'medium' | 'low';
+export type MatchReviewState = 'unresolved' | 'awaiting_review' | 'resolved';
 
 export interface ActivityMatch {
   id: string;
@@ -228,6 +230,8 @@ export interface ActivityMatch {
   matchedText: string | null;
   rationale: string | null;
   status: MatchStatus;
+  confidenceTier: MatchConfidenceTier | null;
+  reviewState: MatchReviewState | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdAt: string;
@@ -245,6 +249,8 @@ export interface CreateActivityMatchInput {
   matchedText?: string | null;
   rationale?: string | null;
   status?: MatchStatus;
+  confidenceTier?: MatchConfidenceTier | null;
+  reviewState?: MatchReviewState | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
 }
@@ -294,6 +300,9 @@ export type ProjectEventType =
   | 'progress_reported'
   | 'match_suggested'
   | 'match_confirmed'
+  | 'match_auto_confirmed'
+  | 'match_rejected'
+  | 'match_resolved'
   | 'progress_updated'
   | 'delay_detected'
   | 'variance_alert'

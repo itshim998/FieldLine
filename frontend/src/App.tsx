@@ -124,6 +124,30 @@ export interface Evidence {
   createdAt: string;
 }
 
+export type MatchMethod = 'exact_id' | 'text_similarity' | 'wbs_location' | 'llm_assisted' | 'manual';
+export type MatchStatus = 'suggested' | 'confirmed' | 'rejected';
+export type MatchConfidenceTier = 'high' | 'medium' | 'low';
+export type MatchReviewState = 'unresolved' | 'awaiting_review' | 'resolved';
+
+export interface ActivityMatch {
+  id: string;
+  projectId: string;
+  progressUpdateId: string;
+  evidenceId: string | null;
+  activityId: string;
+  confidenceScore: number;
+  matchMethod: MatchMethod;
+  matchedText: string | null;
+  rationale: string | null;
+  status: MatchStatus;
+  confidenceTier: MatchConfidenceTier | null;
+  reviewState: MatchReviewState | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RiskReason {
   code: string;
   message: string;
@@ -331,6 +355,13 @@ export function App(): React.JSX.Element {
   const [submittingReport, setSubmittingReport] = useState<boolean>(false);
   const [reportFormError, setReportFormError] = useState<string | null>(null);
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
+
+  // Human Review & Activity Matching State (PASS 19)
+  const [reportMatchesMap, setReportMatchesMap] = useState<Record<string, ActivityMatch[]>>({});
+  const [loadingReportMatchesMap, setLoadingReportMatchesMap] = useState<Record<string, boolean>>({});
+  const [expandedReportMatches, setExpandedReportMatches] = useState<Record<string, boolean>>({});
+  const [resolvingActivityMap, setResolvingActivityMap] = useState<Record<string, string>>({});
+  const [reviewActionLoadingMap, setReviewActionLoadingMap] = useState<Record<string, boolean>>({});
 
   // Evidence State (PASS 13 & PASS 14)
   const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
@@ -986,6 +1017,118 @@ export function App(): React.JSX.Element {
       showNotification('error', errorMsg);
     } finally {
       setSubmittingReport(false);
+    }
+  };
+
+  // Fetch matches for a specific report (PASS 19)
+  const fetchReportMatches = useCallback(async (projectId: string, updateId: string) => {
+    setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: true }));
+    try {
+      const res = await fetch(`/api/projects/${projectId}/progress-updates/${updateId}/matches`);
+      const data = await res.json();
+      if (res.ok) {
+        setReportMatchesMap((prev) => ({ ...prev, [updateId]: data.matches || [] }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: false }));
+    }
+  }, []);
+
+  // Toggle report matches panel (PASS 19)
+  const handleToggleReportMatches = (updateId: string) => {
+    if (!selectedProject) return;
+    const nextState = !expandedReportMatches[updateId];
+    setExpandedReportMatches((prev) => ({ ...prev, [updateId]: nextState }));
+    if (nextState && !reportMatchesMap[updateId]) {
+      fetchReportMatches(selectedProject.id, updateId);
+    }
+  };
+
+  // Confirm match (PASS 19)
+  const handleConfirmMatch = async (matchId: string, updateId: string) => {
+    if (!selectedProject) return;
+    setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: true }));
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/activity-matches/${matchId}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewer: 'Field Supervisor' })
+      });
+      const data = await res.json();
+      if (res.ok && data.match) {
+        setReportMatchesMap((prev) => ({
+          ...prev,
+          [updateId]: (prev[updateId] || []).map((m) => (m.id === matchId ? data.match : m))
+        }));
+        showNotification('success', 'Match successfully confirmed!');
+      } else {
+        showNotification('error', data.error?.message || data.message || 'Failed to confirm match');
+      }
+    } catch (err: unknown) {
+      showNotification('error', err instanceof Error ? err.message : 'Error confirming match');
+    } finally {
+      setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: false }));
+    }
+  };
+
+  // Reject match (PASS 19)
+  const handleRejectMatch = async (matchId: string, updateId: string, reason?: string) => {
+    if (!selectedProject) return;
+    setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: true }));
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/activity-matches/${matchId}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewer: 'Field Supervisor', reason: reason || 'Rejected during field observation review' })
+      });
+      const data = await res.json();
+      if (res.ok && data.match) {
+        setReportMatchesMap((prev) => ({
+          ...prev,
+          [updateId]: (prev[updateId] || []).map((m) => (m.id === matchId ? data.match : m))
+        }));
+        showNotification('info', 'Match rejected.');
+      } else {
+        showNotification('error', data.error?.message || data.message || 'Failed to reject match');
+      }
+    } catch (err: unknown) {
+      showNotification('error', err instanceof Error ? err.message : 'Error rejecting match');
+    } finally {
+      setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: false }));
+    }
+  };
+
+  // Resolve match to target activity (PASS 19)
+  const handleResolveMatch = async (matchId: string, updateId: string) => {
+    if (!selectedProject) return;
+    const targetActivityId = resolvingActivityMap[matchId];
+    if (!targetActivityId) {
+      showNotification('error', 'Please select an activity to resolve this match.');
+      return;
+    }
+    setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: true }));
+    try {
+      const res = await fetch(`/api/projects/${selectedProject.id}/activity-matches/${matchId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ activityId: targetActivityId, reviewer: 'Field Supervisor', reason: 'Manually resolved by field supervisor' })
+      });
+      const data = await res.json();
+      if (res.ok && data.match) {
+        setReportMatchesMap((prev) => ({
+          ...prev,
+          [updateId]: (prev[updateId] || []).map((m) => (m.id === matchId ? data.match : m))
+        }));
+        showNotification('success', 'Match successfully resolved and confirmed!');
+      } else {
+        showNotification('error', data.error?.message || data.message || 'Failed to resolve match');
+      }
+    } catch (err: unknown) {
+      showNotification('error', err instanceof Error ? err.message : 'Error resolving match');
+    } finally {
+      setReviewActionLoadingMap((prev) => ({ ...prev, [matchId]: false }));
     }
   };
 
@@ -1999,10 +2142,367 @@ export function App(): React.JSX.Element {
                           <p className="progress-raw-text">{update.rawText}</p>
                         </div>
 
-                        <div className="progress-item-footer">
-                          <span className="progress-record-id mono">ID: {update.id}</span>
-                          <span className="progress-pass-tag">Pass 7 Verified Raw Record &bull; Awaiting Pass 8 AI Extraction</span>
+                        <div className="progress-item-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <span className="progress-record-id mono">ID: {update.id}</span>
+                            <span className="progress-pass-tag">Pass 19 Human Review Enabled</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="report-matches-toggle-btn"
+                            onClick={() => handleToggleReportMatches(update.id)}
+                          >
+                            <ShieldCheck size={14} />
+                            <span>
+                              {expandedReportMatches[update.id] ? 'Hide Activity Matches' : 'Review Activity Matches'}
+                            </span>
+                            {reportMatchesMap[update.id] && (
+                              <span className="review-group-count">
+                                {reportMatchesMap[update.id].length}
+                              </span>
+                            )}
+                            {expandedReportMatches[update.id] ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          </button>
                         </div>
+
+                        {/* PASS 19 Activity Review Panel */}
+                        {expandedReportMatches[update.id] && (
+                          <div className="match-review-panel">
+                            <div className="match-review-panel-header">
+                              <div className="match-review-panel-title">
+                                <ShieldCheck size={18} color="#38bdf8" />
+                                <span>Activity Matching & Human Review Panel</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-sm"
+                                onClick={() => selectedProject && fetchReportMatches(selectedProject.id, update.id)}
+                                disabled={loadingReportMatchesMap[update.id]}
+                              >
+                                <RefreshCw size={12} className={loadingReportMatchesMap[update.id] ? 'pulse-dot' : ''} />
+                                <span>Refresh Matches</span>
+                              </button>
+                            </div>
+
+                            <div className="canonical-protection-banner">
+                              <Info size={16} style={{ flexShrink: 0 }} />
+                              <span>
+                                <strong>Canonical Truth Protection:</strong> Only <strong>Confirmed</strong> matches are eligible to produce canonical <em>ActivityProgress</em>. Suggested and unresolved matches never silently become project truth.
+                              </span>
+                            </div>
+
+                            {loadingReportMatchesMap[update.id] ? (
+                              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                                <RefreshCw size={20} className="pulse-dot" />
+                                <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activity matches...</p>
+                              </div>
+                            ) : !reportMatchesMap[update.id] || reportMatchesMap[update.id].length === 0 ? (
+                              <div style={{ padding: '1.5rem', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-sm)' }}>
+                                <AlertCircle size={24} color="#94a3b8" style={{ margin: '0 auto 0.5rem' }} />
+                                <p className="empty-desc">No candidate matches found for this progress update.</p>
+                              </div>
+                            ) : (
+                              <div className="match-review-groups">
+                                {(() => {
+                                  const matches = reportMatchesMap[update.id] || [];
+                                  const confirmed = matches.filter((m) => m.status === 'confirmed');
+                                  const suggested = matches.filter((m) => m.status === 'suggested' && m.reviewState !== 'unresolved');
+                                  const unresolved = matches.filter((m) => m.status === 'suggested' && m.reviewState === 'unresolved');
+                                  const rejected = matches.filter((m) => m.status === 'rejected');
+
+                                  const getActivityInfo = (actId: string) => {
+                                    return activities.find((a) => a.id === actId);
+                                  };
+
+                                  return (
+                                    <>
+                                      {/* 1. Confirmed / Auto-confirmed Matches */}
+                                      {confirmed.length > 0 && (
+                                        <div className="review-group">
+                                          <div className="review-group-header confirmed">
+                                            <CheckCircle2 size={14} />
+                                            <span>Confirmed Matches</span>
+                                            <span className="review-group-count">{confirmed.length}</span>
+                                          </div>
+                                          <div className="match-cards-list">
+                                            {confirmed.map((m) => {
+                                              const act = getActivityInfo(m.activityId);
+                                              return (
+                                                <div key={m.id} className="match-card status-confirmed">
+                                                  <div className="match-card-top">
+                                                    <div className="match-activity-name">
+                                                      <span className="code-pill">{act?.externalId || m.activityId}</span>
+                                                      <span>{act?.name || 'Activity Reference'}</span>
+                                                      {act?.location && (
+                                                        <span className="badge-source-manual" style={{ fontSize: '0.7rem' }}>
+                                                          Loc: {act.location}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                    <div className="match-meta-pills">
+                                                      <span className="match-tier-badge tier-high">
+                                                        {(m.confidenceTier || 'HIGH').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
+                                                      </span>
+                                                      <span className="match-status-badge confirmed">
+                                                        <Check size={12} />
+                                                        {m.reviewedBy === 'system' ? 'Auto-Confirmed (System)' : 'Confirmed (Human)'}
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
+                                                  <div className="match-card-actions">
+                                                    <div className="match-reviewer-info">
+                                                      <User size={12} />
+                                                      <span>Reviewer: {m.reviewedBy || 'System'}</span>
+                                                      {m.reviewedAt && (
+                                                        <>
+                                                          <span>&bull;</span>
+                                                          <Clock size={12} />
+                                                          <span>{new Date(m.reviewedAt).toLocaleString()}</span>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                    <span style={{ fontSize: '0.725rem', color: '#34d399', fontWeight: 600 }}>
+                                                      ✓ Canonical Progress Eligible
+                                                    </span>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* 2. Suggested / Needs Review Matches */}
+                                      {suggested.length > 0 && (
+                                        <div className="review-group">
+                                          <div className="review-group-header suggested">
+                                            <AlertTriangle size={14} />
+                                            <span>Needs Review / Suggested</span>
+                                            <span className="review-group-count">{suggested.length}</span>
+                                          </div>
+                                          <div className="match-cards-list">
+                                            {suggested.map((m) => {
+                                              const act = getActivityInfo(m.activityId);
+                                              const isLoading = reviewActionLoadingMap[m.id];
+                                              return (
+                                                <div key={m.id} className="match-card status-suggested">
+                                                  <div className="match-card-top">
+                                                    <div className="match-activity-name">
+                                                      <span className="code-pill">{act?.externalId || m.activityId}</span>
+                                                      <span>{act?.name || 'Candidate Activity'}</span>
+                                                      {act?.location && (
+                                                        <span className="badge-source-manual" style={{ fontSize: '0.7rem' }}>
+                                                          Loc: {act.location}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                    <div className="match-meta-pills">
+                                                      <span className={`match-tier-badge tier-${m.confidenceTier || 'medium'}`}>
+                                                        {(m.confidenceTier || 'MEDIUM').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
+                                                      </span>
+                                                      <span className="match-status-badge suggested">
+                                                        <AlertTriangle size={12} />
+                                                        Suggested Match
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
+                                                  
+                                                  <div className="match-card-actions">
+                                                    <div className="match-action-btn-group">
+                                                      <button
+                                                        type="button"
+                                                        className="btn-review-confirm"
+                                                        onClick={() => handleConfirmMatch(m.id, update.id)}
+                                                        disabled={isLoading}
+                                                      >
+                                                        <Check size={13} />
+                                                        <span>Confirm Match</span>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="btn-review-reject"
+                                                        onClick={() => handleRejectMatch(m.id, update.id)}
+                                                        disabled={isLoading}
+                                                      >
+                                                        <X size={13} />
+                                                        <span>Reject</span>
+                                                      </button>
+                                                    </div>
+
+                                                    <div className="match-resolve-dropdown-group" style={{ marginTop: '0.5rem' }}>
+                                                      <select
+                                                        className="match-activity-select"
+                                                        value={resolvingActivityMap[m.id] || ''}
+                                                        onChange={(e) =>
+                                                          setResolvingActivityMap((prev) => ({
+                                                            ...prev,
+                                                            [m.id]: e.target.value
+                                                          }))
+                                                        }
+                                                      >
+                                                        <option value="">-- Change / Choose Alternative Activity --</option>
+                                                        {activities.map((a) => (
+                                                          <option key={a.id} value={a.id}>
+                                                            [{a.externalId}] {a.name} {a.location ? `(${a.location})` : ''}
+                                                          </option>
+                                                        ))}
+                                                      </select>
+                                                      <button
+                                                        type="button"
+                                                        className="btn-review-resolve"
+                                                        onClick={() => handleResolveMatch(m.id, update.id)}
+                                                        disabled={isLoading || !resolvingActivityMap[m.id]}
+                                                      >
+                                                        <span>Resolve</span>
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* 3. Unresolved / Low Confidence Matches */}
+                                      {unresolved.length > 0 && (
+                                        <div className="review-group">
+                                          <div className="review-group-header unresolved">
+                                            <HelpCircle size={14} />
+                                            <span>Unresolved / Low Confidence</span>
+                                            <span className="review-group-count">{unresolved.length}</span>
+                                          </div>
+                                          <div className="match-cards-list">
+                                            {unresolved.map((m) => {
+                                              const act = getActivityInfo(m.activityId);
+                                              const isLoading = reviewActionLoadingMap[m.id];
+                                              return (
+                                                <div key={m.id} className="match-card status-unresolved">
+                                                  <div className="match-card-top">
+                                                    <div className="match-activity-name">
+                                                      <span className="code-pill" style={{ borderColor: '#8b5cf6', color: '#c084fc' }}>
+                                                        {act?.externalId || m.activityId}
+                                                      </span>
+                                                      <span>Initial Suggestion: {act?.name || 'Uncertain Activity'}</span>
+                                                    </div>
+                                                    <div className="match-meta-pills">
+                                                      <span className="match-tier-badge tier-low">
+                                                        LOW &bull; {Math.round(m.confidenceScore * 100)}%
+                                                      </span>
+                                                      <span className="match-status-badge unresolved">
+                                                        <HelpCircle size={12} />
+                                                        Unresolved
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  <p className="match-rationale-text" style={{ color: '#d8b4fe' }}>
+                                                    ⚠ Low confidence candidate match. Human supervisor must select the correct activity before progress can be recorded.
+                                                  </p>
+                                                  {m.rationale && (
+                                                    <p className="match-rationale-text" style={{ opacity: 0.8 }}>
+                                                      AI Rationale: {m.rationale}
+                                                    </p>
+                                                  )}
+
+                                                  <div className="match-card-actions">
+                                                    <div className="match-resolve-dropdown-group">
+                                                      <select
+                                                        className="match-activity-select"
+                                                        value={resolvingActivityMap[m.id] || ''}
+                                                        onChange={(e) =>
+                                                          setResolvingActivityMap((prev) => ({
+                                                            ...prev,
+                                                            [m.id]: e.target.value
+                                                          }))
+                                                        }
+                                                      >
+                                                        <option value="">-- Select Correct Project Activity --</option>
+                                                        {activities.map((a) => (
+                                                          <option key={a.id} value={a.id}>
+                                                            [{a.externalId}] {a.name} {a.location ? `(${a.location})` : ''}
+                                                          </option>
+                                                        ))}
+                                                      </select>
+                                                      <button
+                                                        type="button"
+                                                        className="btn-review-resolve"
+                                                        onClick={() => handleResolveMatch(m.id, update.id)}
+                                                        disabled={isLoading || !resolvingActivityMap[m.id]}
+                                                      >
+                                                        <span>Resolve Activity</span>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="btn-review-reject"
+                                                        onClick={() => handleRejectMatch(m.id, update.id)}
+                                                        disabled={isLoading}
+                                                      >
+                                                        <X size={13} />
+                                                        <span>Reject</span>
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {/* 4. Rejected Matches */}
+                                      {rejected.length > 0 && (
+                                        <div className="review-group">
+                                          <div className="review-group-header rejected">
+                                            <X size={14} />
+                                            <span>Rejected Matches</span>
+                                            <span className="review-group-count">{rejected.length}</span>
+                                          </div>
+                                          <div className="match-cards-list">
+                                            {rejected.map((m) => {
+                                              const act = getActivityInfo(m.activityId);
+                                              return (
+                                                <div key={m.id} className="match-card status-rejected">
+                                                  <div className="match-card-top">
+                                                    <div className="match-activity-name">
+                                                      <span className="code-pill">{act?.externalId || m.activityId}</span>
+                                                      <span>{act?.name || 'Rejected Candidate'}</span>
+                                                    </div>
+                                                    <div className="match-meta-pills">
+                                                      <span className="match-status-badge rejected">
+                                                        <X size={12} />
+                                                        Rejected
+                                                      </span>
+                                                    </div>
+                                                  </div>
+                                                  {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
+                                                  <div className="match-card-actions">
+                                                    <div className="match-reviewer-info">
+                                                      <User size={12} />
+                                                      <span>Reviewer: {m.reviewedBy || 'Human'}</span>
+                                                      {m.reviewedAt && (
+                                                        <>
+                                                          <span>&bull;</span>
+                                                          <Clock size={12} />
+                                                          <span>{new Date(m.reviewedAt).toLocaleString()}</span>
+                                                        </>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>

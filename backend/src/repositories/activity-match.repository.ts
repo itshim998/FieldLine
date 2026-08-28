@@ -1,8 +1,20 @@
 import { Database as DatabaseType } from 'better-sqlite3';
 import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
-import { ActivityMatch, CreateActivityMatchInput } from '../models/domain.types.js';
+import { ActivityMatch, CreateActivityMatchInput, MatchMethod, MatchStatus, MatchConfidenceTier, MatchReviewState } from '../models/domain.types.js';
 import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
+
+export interface UpdateMatchReviewInput {
+  id: string;
+  projectId: string;
+  status: MatchStatus;
+  reviewState?: MatchReviewState | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  activityId?: string;
+  matchMethod?: MatchMethod;
+  rationale?: string | null;
+}
 
 export interface ActivityMatchRepository {
   create(input: CreateActivityMatchInput): ActivityMatch;
@@ -11,6 +23,7 @@ export interface ActivityMatchRepository {
   getByIdAndProjectId(id: string, projectId: string): ActivityMatch | null;
   listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityMatch[];
   listByProjectId(projectId: string): ActivityMatch[];
+  updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null;
   delete(id: string, projectId?: string): boolean;
   deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): number;
   deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number;
@@ -27,6 +40,8 @@ interface ActivityMatchDbRow {
   matched_text: string | null;
   rationale: string | null;
   status: string;
+  confidence_tier: string | null;
+  review_state: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
   created_at: string;
@@ -45,6 +60,8 @@ function mapRowToActivityMatch(row: ActivityMatchDbRow): ActivityMatch {
     matchedText: row.matched_text,
     rationale: row.rationale,
     status: row.status as ActivityMatch['status'],
+    confidenceTier: (row.confidence_tier as ActivityMatch['confidenceTier']) || null,
+    reviewState: (row.review_state as ActivityMatch['reviewState']) || null,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
     createdAt: row.created_at,
@@ -63,14 +80,16 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     const db = this.getDb();
     const id = input.id || crypto.randomUUID();
     const status = input.status || 'suggested';
+    const confidenceTier = input.confidenceTier ?? null;
+    const reviewState = input.reviewState ?? null;
 
     const stmt = db.prepare(`
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -86,6 +105,8 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         input.matchedText ?? null,
         input.rationale ?? null,
         status,
+        confidenceTier,
+        reviewState,
         input.reviewedBy ?? null,
         input.reviewedAt ?? null
       );
@@ -121,9 +142,9 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -133,6 +154,8 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
       for (const input of inputs) {
         const id = input.id || crypto.randomUUID();
         const status = input.status || 'suggested';
+        const confidenceTier = input.confidenceTier ?? null;
+        const reviewState = input.reviewState ?? null;
 
         stmt.run(
           id,
@@ -145,6 +168,8 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
           input.matchedText ?? null,
           input.rationale ?? null,
           status,
+          confidenceTier,
+          reviewState,
           input.reviewedBy ?? null,
           input.reviewedAt ?? null
         );
@@ -176,6 +201,59 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     `);
     const rows = selectStmt.all(...insertedIds) as ActivityMatchDbRow[];
     return rows.map(mapRowToActivityMatch);
+  }
+
+  updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null {
+    const db = this.getDb();
+    const existing = this.getByIdAndProjectId(input.id, input.projectId);
+    if (!existing) {
+      return null;
+    }
+
+    const updatedActivityId = input.activityId ?? existing.activityId;
+    const updatedMatchMethod = input.matchMethod ?? existing.matchMethod;
+    const updatedRationale = input.rationale !== undefined ? input.rationale : existing.rationale;
+    const updatedReviewState = input.reviewState !== undefined ? input.reviewState : existing.reviewState;
+
+    const stmt = db.prepare(`
+      UPDATE activity_matches
+      SET
+        activity_id = ?,
+        status = ?,
+        match_method = ?,
+        rationale = ?,
+        review_state = ?,
+        reviewed_by = ?,
+        reviewed_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND project_id = ?
+    `);
+
+    try {
+      stmt.run(
+        updatedActivityId,
+        input.status,
+        updatedMatchMethod,
+        updatedRationale,
+        updatedReviewState,
+        input.reviewedBy ?? null,
+        input.reviewedAt ?? null,
+        input.id,
+        input.projectId
+      );
+    } catch (err: unknown) {
+      if (err instanceof Error && 'code' in err) {
+        const code = (err as { code: string }).code;
+        if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY' || code === 'SQLITE_CONSTRAINT_TRIGGER') {
+          throw new DatabaseError(
+            `Failed to update activity match review due to foreign key or cross-project constraint: ${err.message}`
+          );
+        }
+      }
+      throw new DatabaseError(`Failed to update activity match review: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    return this.getByIdAndProjectId(input.id, input.projectId);
   }
 
   getById(id: string): ActivityMatch | null {

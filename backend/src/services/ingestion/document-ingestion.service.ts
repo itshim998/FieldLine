@@ -218,18 +218,26 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
 
     // 7. Atomic transaction: create progress report, link evidence, and persist matches
     const mappedSourceType = mapSourceTypeToProgressUpdateType(normalizedDoc.sourceType);
+    const nowIso = new Date().toISOString();
     const toPersist = matchResults
       .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)
-      .map(r => ({
-        projectId,
-        evidenceId,
-        activityId: r.bestMatch.activityId,
-        confidenceScore: r.bestMatch.confidenceScore,
-        matchMethod: r.bestMatch.matchMethod,
-        matchedText: r.bestMatch.matchedText,
-        rationale: r.bestMatch.rationale,
-        status: 'suggested' as const
-      }));
+      .map(r => {
+        const isAutoConfirm = r.reviewDecision?.autoConfirm ?? false;
+        return {
+          projectId,
+          evidenceId,
+          activityId: r.bestMatch.activityId,
+          confidenceScore: r.bestMatch.confidenceScore,
+          matchMethod: r.bestMatch.matchMethod,
+          matchedText: r.bestMatch.matchedText,
+          rationale: r.bestMatch.rationale,
+          status: isAutoConfirm ? ('confirmed' as const) : ('suggested' as const),
+          confidenceTier: r.confidenceTier || (isAutoConfirm ? 'high' : 'medium'),
+          reviewState: r.reviewDecision?.reviewState || (isAutoConfirm ? 'resolved' : 'awaiting_review'),
+          reviewedBy: isAutoConfirm ? 'system' : null,
+          reviewedAt: isAutoConfirm ? nowIso : null
+        };
+      });
 
     const txResult = this.progressUpdateRepo.commitDocumentIngestionTransaction({
       progressUpdate: {
