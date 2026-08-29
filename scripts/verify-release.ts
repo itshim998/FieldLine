@@ -15,7 +15,7 @@ const steps: Step[] = [
   {
     name: '2. Complete Vitest Suite',
     command: 'npm test',
-    description: 'Execute full 91-file regression & evaluation test suite'
+    description: 'Execute full 93-file regression & evaluation test suite'
   },
   {
     name: '3. Golden Demo Environment Reset',
@@ -32,7 +32,7 @@ const steps: Step[] = [
 async function runReleaseVerification(): Promise<void> {
   const startTime = Date.now();
   console.log('================================================================');
-  console.log('🚀 FieldLine Release Verification Suite (Pass 25)');
+  console.log('🚀 FieldLine Release Verification Suite (Pass 26)');
   console.log('Orchestrating Build + Test + Demo Reset + Demo Verification');
   console.log('================================================================\n');
 

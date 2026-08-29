@@ -1,850 +1,682 @@
-# FieldLine Pass 25 — Final Integration, Release Hardening & Presentation Polish
+PASS 26 objective
 
-Repository:
+Replace the current real-AI path with Groq openai/gpt-oss-20b, backed by a robust 20-key sequential failover router, while preserving FieldLine's existing AIProvider abstraction, structured-output contracts, canonical-truth rules, deterministic calculations, offline MockAI mode, and regression suite.
 
-`itshim998/FieldLine`
+1. New architecture
 
-Branch:
+The final AI layer should become:
 
-`main`
+                         AIService
+                            │
+                            ▼
+                       AIProvider
+                            │
+                    ┌───────┴────────┐
+                    │                │
+                 MockAI             GroqAI
+                                      │
+                                      ▼
+                                GroqKeyRouter
+                                      │
+               ┌──────────┬──────────┼──────────┬──────────┐
+               ▼          ▼          ▼          ▼          ▼
+             Key 01     Key 02     Key 03     ...       Key 20
+               │          │          │                    │
+               └──────────┴──────────┴────────────────────┘
 
-## Canonical baseline
+The router belongs inside the Groq provider layer, not in AIService.
 
-The current canonical baseline is Pass 24:
+The rest of FieldLine should remain unaware that multiple credentials exist.
 
-`c31895deced67e47a883f9d2a6ea0d9ea20dfece`
+2. Configuration
 
-Commit:
+Use explicit numbered environment variables:
 
-`feat: add FieldLine golden demo environment`
+AI_PROVIDER=groq
 
-Verify the actual current HEAD before making changes. Do not assume the SHA above is still the latest commit.
+GROQ_MODEL=openai/gpt-oss-20b
 
-Pass 24 is approved and already provides:
+GROQ_API_KEY_01=...
+GROQ_API_KEY_02=...
+GROQ_API_KEY_03=...
+...
+GROQ_API_KEY_20=...
 
-* deterministic Golden Demo project: `Refinery Expansion — Unit 4`
-* project code: `REFINERY-U4`
-* 30 activities
-* six EPC work areas
-* multi-date historical evidence
-* physical evidence fixtures
-* deterministic canonical progress
-* review-state examples
-* delayed / at-risk / completed / on-track distribution
-* approaching milestones
-* `npm run demo:reset`
-* `npm run demo:verify`
-* machine-checkable demo invariants
-* offline MockAI assistant support
-* automatic selection of the sole golden project on fresh startup
+The environment layer should:
 
-Pass 23 is also approved and remains the canonical regression suite.
+detect configured keys
+preserve numeric ordering
+reject malformed/empty configured entries
+require at least one Groq key when AI_PROVIDER=groq
+expose the resulting configuration cleanly to the provider
 
-Pass 22 remains deliberately BENCHED.
+Do not expose the actual keys through logs, health responses, DTOs, or errors.
 
----
+3. Groq provider implementation
 
-# PASS 25 OBJECTIVE
+Add something like:
 
-Do NOT build another major product feature.
+backend/src/ai/providers/groq-ai.provider.ts
+backend/src/ai/providers/groq-key-router.ts
 
-The objective is:
+The exact names may follow current repository conventions.
 
-> Turn the current working FieldLine system into a coherent, release-ready, SIH-presentation-ready application.
+GroqAIProvider implements:
 
-Pass 24 established the golden environment.
+AIProvider
 
-Pass 25 must make that environment:
+and exposes the same:
 
-* polished
-* coherent
-* recoverable
-* documented
-* responsive
-* operationally reliable
+generateText(...)
+generateStructured(...)
 
-Think:
+methods already required by FieldLine.
 
-```text
-Pass 23 = prove the system
-Pass 24 = create the demo state
-Pass 25 = make the whole thing presentation-ready
-```
+Groq is compatible with OpenAI-style clients, and Groq documents its endpoint as OpenAI-compatible; use the supported TypeScript SDK/client approach that best fits the existing dependency structure.
 
----
+4. Stateful sticky key selection
 
-# FIRST TASK — AUDIT THE ACTUAL REPOSITORY
+The router needs one central state:
 
-Before editing:
+currentKeyIndex
 
-1. Inspect current `main` HEAD.
-2. Inspect frontend architecture.
-3. Inspect current dashboard components.
-4. Inspect Activity Detail components.
-5. Inspect assistant UI and data model.
-6. Inspect evidence/upload UI.
-7. Inspect review UI.
-8. Inspect all loading/error/empty-state handling.
-9. Inspect `scripts/setup.ts`.
-10. Inspect `scripts/demo-reset.ts`.
-11. Inspect `scripts/demo-verify.ts`.
-12. Inspect `demo/golden-demo-manifest.ts`.
-13. Inspect `demo/golden-demo-seeder.ts`.
-14. Inspect `package.json`.
-15. Inspect `docs/`.
-16. Search for:
+Initial state:
 
-* debug logs
-* TODO/FIXME
-* stale pass numbers
-* dead imports
-* dead components
-* temporary files
-* hardcoded demo values
-* absolute local paths
+0
 
-Do not perform a large rewrite.
+meaning Key 01.
 
----
+For every request:
 
-# SECTION 1 — FINAL DEMO JOURNEY
-
-Make this journey work smoothly:
-
-```text
-Open FieldLine
+currentKeyIndex
 ↓
-Golden Project automatically selected
+attempt that key
+
+On success:
+
+keep currentKeyIndex unchanged
+
+On a qualifying failure:
+
+currentKeyIndex = next configured key
+retry same request
+
+The same request continues advancing until:
+
+one key succeeds, or
+every configured key has been attempted once
+
+Then the request either succeeds or fails.
+
+5. Never restart the ring incorrectly
+
+This is one of the most important robustness requirements.
+
+Suppose:
+
+current = Key 07
+
+and Key 07 fails.
+
+Try:
+
+08 → 09 → 10
+
+If Key 10 succeeds:
+
+current = Key 10
+
+Do not reset to Key 01 after the success.
+
+Likewise, if Key 10 subsequently fails:
+
+11
+
+must be tried next.
+
+The state follows the successful key, not the request count.
+
+6. Failure classification
+
+The router should distinguish between:
+
+Failover-worthy provider failures
+
+Examples:
+
+429 Too Many Requests
+authentication/key failures
+expired/revoked key responses
+transient 5xx responses
+network failures
+request timeout
+provider unavailable
+other explicit provider-side failures
+Non-failover request failures
+
+For example, a request that is intrinsically invalid because the application sent an invalid payload should not cause the router to permanently rotate through all credentials unnecessarily.
+
+The implementation should classify errors based on actual Groq response/status information.
+
+Groq documents 429 for rate limits and 500/5xx-class provider errors separately from malformed requests.
+
+7. Retry semantics
+
+For a request:
+
+Key 05 → 429
+
+the request should immediately continue to:
+
+Key 06
+
+rather than waiting for Key 05's cooldown.
+
+For transient provider/network failures, continue to the next key according to the failover policy.
+
+When Groq supplies:
+
+retry-after
+
+or rate-limit headers, capture that metadata for diagnostics and router state where useful. Groq explicitly documents headers such as retry-after, x-ratelimit-remaining-*, and x-ratelimit-reset-*.
+
+Do not create an unbounded retry loop.
+
+8. Every key attempted at most once per request
+
+Suppose:
+
+20 configured keys
+current = 14
+
+and every key fails.
+
+The router must attempt:
+
+14
+15
+16
+17
+18
+19
+20
+01
+02
+03
+04
+05
+06
+07
+08
+09
+10
+11
+12
+13
+
+exactly once.
+
+Then return one aggregated AIProviderError.
+
+Never:
+
+14 → 15 → ... → 13 → 14 → 15 → ...
+
+for the same request.
+
+9. Concurrency safety
+
+This is critical.
+
+Multiple FieldLine requests may arrive concurrently.
+
+The router must not corrupt:
+
+currentKeyIndex
+
+through race conditions.
+
+Design the state transition so concurrent requests have deterministic and safe behavior.
+
+The important invariant is:
+
+A successful request establishes the active key for subsequent requests without another concurrent request accidentally resetting it.
+
+Gemini should specifically inspect the current Node execution model and select an implementation that is safe under concurrent async requests.
+
+10. Key health state
+
+Maintain lightweight runtime state per key:
+
+Key 01
+  healthy / failed
+  failureCount
+  lastFailureAt
+  lastSuccessAt
+  optional cooldownUntil
+
+Key 02
+  ...
+
+This state is in-memory runtime state, not SQLite application state.
+
+Do not create a database table for provider credentials.
+
+11. Temporarily unhealthy keys
+
+A key that repeatedly fails should not necessarily be hammered on every subsequent request.
+
+Implement a lightweight cooldown/health mechanism.
+
+For example:
+
+Key 01 → repeated 429s
+        ↓
+temporarily unavailable
+        ↓
+router proceeds through remaining keys
+
+After an appropriate cooldown, Key 01 becomes eligible again.
+
+Do not permanently blacklist a key because of one failure.
+
+The precise cooldown/backoff policy should be based on the provider error type and available reset metadata rather than arbitrary long delays.
+
+12. Expired/revoked credentials
+
+If:
+
+Key 03 → authentication failure
+
+the current request immediately moves to:
+
+Key 04
+
+and Key 03 should be marked unhealthy.
+
+A permanently invalid key should not cause every subsequent request to fail against Key 03 first.
+
+Keep enough state to avoid repeatedly selecting known-dead keys.
+
+13. Wrap-around behavior
+
+If:
+
+current = Key 20
+
+and Key 20 fails:
+
+Key 01
+
+becomes the next candidate.
+
+Likewise:
+
+current = Key 19
+19 fails
+20 fails
+01 succeeds
+
+then:
+
+14. Structured generation
+
+generateStructured() is mandatory because FieldLine's extraction path depends on it.
+
+The flow remains:
+
+Groq
 ↓
-Dashboard
+JSON response
 ↓
-Identify delayed / at-risk activity
+AIService
 ↓
-Open Activity Detail
+Zod safeParse()
 ↓
-Inspect execution history
-↓
-Inspect evidence/review context
-↓
-Return to dashboard
-↓
-Open Assistant
-↓
-Ask grounded question
-↓
-Show verified facts
-```
+typed FieldLine object
 
-Also ensure this core workflow remains demonstrable:
+The provider must not weaken or duplicate the existing Zod validation.
 
-```text
-Schedule
-↓
-Field Report
-↓
-Matching
-↓
-Review
-↓
-Canonical Progress
-↓
-Variance
-```
+FieldLine's current AIService already validates provider output against the supplied schema.
 
-Do not add new functionality solely for the demo.
+openai/gpt-oss-20b supports JSON Schema mode according to Groq's current model documentation.
 
----
+15. Preserve MockAI
 
-# SECTION 2 — LOADING STATES
+Never remove:
 
-Audit every asynchronous surface.
-
-Ensure visible feedback exists for:
-
-* initial application load
-* project list loading
-* project selection
-* dashboard loading
-* activity-detail loading
-* schedule loading
-* evidence loading
-* evidence upload
-* evidence processing
-* intelligence loading
-* assistant loading
-* schedule import
-* manual report submission
-* review mutations
-
-Avoid blank UI while requests are active.
-
-Reuse existing styling/components where possible.
-
-Do not build an unnecessarily complex skeleton framework.
-
----
-
-# SECTION 3 — EMPTY STATES
-
-Audit:
-
-* no projects
-* no schedules
-* no activities
-* no evidence
-* no reports
-* no pending reviews
-* no intelligence entries
-* no recent changes
-* no assistant response
-
-Each empty state should clearly explain what is missing and what action is relevant.
-
-Do not make empty states interfere with the golden demo first-load experience.
-
----
-
-# SECTION 4 — ERROR STATES
-
-Audit network/API/backend failure handling.
-
-Important cases:
-
-* backend unavailable
-* invalid project
-* invalid activity
-* upload failure
-* processing failure
-* assistant failure
-* invalid response
-* malformed input
-
-The UI should:
-
-* show a useful message
-* avoid raw stack traces
-* avoid misleading stale content
-* provide sensible recovery where appropriate
-
-Do not unnecessarily change API error contracts.
-
----
-
-# SECTION 5 — DASHBOARD POLISH
-
-Use the EXISTING dashboard architecture.
-
-Do not create another dashboard engine.
-
-The golden project deliberately contains:
-
-* 4 delayed
-* 4 at-risk
-* 4 completed
-* 18 on-track/ahead
-* 4 approaching milestones
-
-Make those distinctions obvious.
-
-Refine:
-
-* Project Health
-* Activity Status
-* Attention
-* Milestones
-* Recent Updates
-
-Make important information scannable within seconds.
-
-Do not hardcode any golden values into frontend components.
-
----
-
-# SECTION 6 — ACTIVITY DETAIL POLISH
-
-The current Activity Detail architecture already exposes:
-
-* identity
-* current state
-* timeline
-* progress sources
-* review context
-* evidence
-
-Make the page tell one coherent execution story.
-
-For rich golden activities such as:
-
-* `ACT-B02`
-* `ACT-C01`
-* `ACT-A02`
-
-the user should immediately understand:
-
-```text
-planned
-→ observed
-→ matched
-→ reviewed
-→ actual progress
-→ risk
-→ source evidence
-```
-
-Do not add new business calculations.
-
-Use current backend DTOs.
-
----
-
-# SECTION 7 — ASSISTANT UX
-
-Use the current Assistant API contract.
-
-The backend exposes:
-
-* intent
-* resolved activity
-* ambiguous candidates
-* answer
-* claims
-* factRefs
-* grounded
-* status
-* asOfDate
-* verifiedFacts
-
-Use these existing fields to make the UI trustworthy.
-
-The user should visually understand:
-
-```text
-AI-generated wording
-        vs
-Verified FieldLine fact
-```
-
-Improve:
-
-* suggested questions
-* loading state
-* response formatting
-* fact/claim display
-* grounded indicator
-* activity resolution
-* failure state
-* empty state
-* as-of-date context
-
-Do not weaken grounding.
-
-Do not add a parallel answer path.
-
----
-
-# SECTION 8 — EVIDENCE UX
-
-Make evidence traceability clear.
-
-Ensure:
-
-* filename is readable
-* evidence type is clear
-* originating report is understandable
-* Activity Detail shows the relevant source
-* no absolute filesystem paths are shown
-* unavailable evidence gets a clean error state
-
-Do not add a new document viewer unless the current architecture already supports it without scope expansion.
-
----
-
-# SECTION 9 — REVIEW UX
-
-Preserve current review semantics:
-
-```text
-suggested
-↓
-human action
-↓
-confirmed / rejected / resolved
-```
-
-Make the canonical-truth boundary visually clear.
-
-Do not automatically confirm matches merely to improve the demo.
-
-Do not introduce new review semantics.
-
----
-
-# SECTION 10 — PROCESSING UX
-
-The existing evidence-processing state should feel complete:
-
-```text
-uploaded
-→ queued
-→ processing
-→ completed
-```
-
-or:
-
-```text
-uploaded
-→ queued
-→ failed
-```
-
-Add visible progress/status feedback where appropriate using the current job architecture.
-
-Do not introduce a new job system.
-
----
-
-# SECTION 11 — RESPONSIVE UI
-
-Audit at:
-
-* 1440px
-* 1024px
-* 768px
-* 390–430px
-
-Prioritize:
-
-* dashboard
-* Activity Detail
-* project selector
-* review
-* evidence
-* assistant
-
-Fix:
-
-* horizontal overflow
-* clipped content
-* broken grids
-* overlapping buttons
-* unreadable tables
-* oversized cards
-* inaccessible controls
-
-Do not redesign the whole visual language.
-
----
-
-# SECTION 12 — ENVIRONMENT HARDENING
-
-The current environment schema already supports:
-
-```text
 AI_PROVIDER=mock
-AI_PROVIDER=gemini
-```
 
-with Gemini requiring `GEMINI_API_KEY`.
+MockAI remains essential for:
+
+npm test
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+
+The golden demo must remain offline-capable.
+
+Groq becomes the real-AI mode:
+
+AI_PROVIDER=groq
+16. Gemini can remain supported
+
+Do not delete the current Gemini provider unless the repository audit demonstrates a concrete reason.
+
+The provider factory should support:
+
+mock
+gemini
+groq
+
+with explicit validation.
+
+An unknown value must result in a clear configuration error rather than silently falling back to MockAI.
+
+17. Tests are mandatory
+
+Add focused tests for the router.
+
+At minimum:
+
+Sticky-success test
+Key 01 succeeds
+Request 1 → Key 01
+Request 2 → Key 01
+Request 3 → Key 01
+Failover test
+Key 01 fails
+Request → Key 02
+Consecutive failure test
+01 fails
+02 fails
+03 succeeds
+Persistent current-key test
+01 succeeds
+01 succeeds
+01 fails
+02 succeeds
+02 succeeds
+02 fails
+03 succeeds
+Wrap-around test
+20 fails
+01 succeeds
+Exhaustion test
+
+All 20 fail.
 
 Verify:
 
-### Offline
+every key attempted once
+no infinite loop
+one controlled provider error
+useful diagnostic metadata without exposing credentials
+Invalid-key health test
 
-Default/local MockAI works without credentials.
+Repeated 401/403 from a key causes it to be considered unhealthy.
 
-### Gemini
+Recovery test
 
-Missing API key fails clearly.
+Temporarily unhealthy key becomes eligible again after cooldown.
 
-### Invalid configuration
+Concurrent request test
 
-Produces a clear startup error.
+Several simultaneous requests must not corrupt router state.
 
-### Logging
+Structured-output test
 
-Never expose secrets.
+Real provider implementation is tested against the existing structured contract using mocked HTTP/API responses.
 
-Do not redesign the environment system unless the audit finds a real defect.
+Do not make the test suite dependent on live Groq.
 
----
+18. Observability
 
-# SECTION 13 — CLEAN INSTALLATION
+Provider logging should show:
 
-Verify the documented sequence from a clean runtime:
+Groq request
+key slot: 07
+model: openai/gpt-oss-20b
+attempt: 1
+result: 429
+failover: 08
 
-```bash
-npm install
-npm run setup
-npm run demo:reset
-npm run demo:verify
+but never:
+
+actual API key
+full authorization header
+secret
+
+Use key indices/slots rather than the secrets themselves.
+
+19. AI workload verification
+
+After implementation, test both major FieldLine AI workloads:
+
+Extraction
+field report
+↓
+Groq
+↓
+structured extraction
+↓
+Zod
+↓
+matching
+Assistant
+verified facts
+↓
+Groq
+↓
+natural language response
+↓
+existing grounding validation
+
+Do not change canonical progress, variance, risk, or intelligence calculations.
+
+20. Real-Groq acceptance test
+
+Add a clearly separated manual/optional command if useful, for example:
+
+npm run ai:smoke
+
+It should:
+
+verify Groq configuration
+send one small structured request
+use openai/gpt-oss-20b
+show provider/model/key-slot diagnostics without revealing secrets
+return nonzero on failure
+
+This should not run as part of npm test, because live provider calls must not become part of deterministic regression.
+
+21. Configuration documentation
+
+Update:
+
+.env.example
+README.md
+docs/AI-PIPELINE.md
+
+to explain:
+
+AI_PROVIDER=groq
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_API_KEY_01=...
+...
+GROQ_API_KEY_20=...
+
+Document the key-routing semantics clearly:
+
+FieldLine stays on the current Groq credential while requests succeed. When that credential fails, the router advances immediately through the configured credentials until a request succeeds or every credential has been attempted.
+
+Do not document secrets themselves.
+
+22. Demo behavior
+
+npm run demo:reset must continue to work without Groq.
+
+So:
+
+MockAI
+
+remains the deterministic golden-demo provider.
+
+For your real-AI local test, switch .env:
+
+AI_PROVIDER=groq
+
+then start normally:
+
 npm run dev
-```
 
-The system must not depend on:
+Now the UI should exercise the actual Groq path.
 
-* developer-specific absolute paths
-* pre-existing database state
-* old uploads
-* hidden files
-* undocumented API keys
+23. Verification
 
----
+Gemini must finish with:
 
-# SECTION 14 — RESET RELIABILITY
-
-The current Pass 24 reset pipeline is:
-
-```text
-delete runtime DB
-↓
-delete uploads
-↓
-recreate DB
-↓
-migrations
-↓
-golden seed
-↓
-verification
-```
-
-Preserve this.
-
-Verify repeated:
-
-```bash
-npm run demo:reset
-npm run demo:reset
-npm run demo:reset
-```
-
-produces the same logical golden state.
-
-No duplicates should accumulate.
-
----
-
-# SECTION 15 — DEMO VERIFICATION
-
-Keep `npm run demo:verify` focused on demo integrity.
-
-It must remain capable of detecting:
-
-* wrong golden project
-* wrong activity count
-* wrong risk counts
-* wrong milestone state
-* missing rich histories
-* missing evidence
-* missing physical evidence files
-* dashboard drift
-* assistant grounding drift
-* duplicate/unexpected golden state
-
-Do not turn it into a replacement for the complete Vitest suite.
-
----
-
-# SECTION 16 — RELEASE VERIFICATION COMMAND
-
-Add:
-
-```bash
-npm run verify:release
-```
-
-It should orchestrate:
-
-```text
-build
-+
-test
-+
-demo reset
-+
-demo verify
-```
-
-Use the repository's existing commands.
-
-Avoid recursive npm-script loops.
-
-Do not start long-running dev servers from this command.
-
-The purpose is:
-
-> One command determines whether the repository is ready for presentation.
-
----
-
-# SECTION 17 — DOCUMENTATION
-
-Create:
-
-## `docs/DEMO.md`
-
-Include:
-
-* SIH demo purpose
-* golden project
-* exact setup commands
-* demo reset
-* demo verification
-* recommended dashboard walkthrough
-* recommended Activity Detail walkthrough
-* recommended review demonstration
-* recommended assistant questions
-* recovery instructions
-
-## `docs/AI-PIPELINE.md`
-
-Document:
-
-```text
-Field Evidence
-↓
-Normalization
-↓
-AI Structured Extraction
-↓
-Zod Contract Validation
-↓
-Activity Matching
-↓
-Confidence / Review Policy
-↓
-Human Confirmation
-↓
-Canonical Progress
-↓
-Deterministic Intelligence
-↓
-Grounded Assistant
-```
-
-Explicitly explain:
-
-* what AI does
-* what AI does not do
-* why AI is not authoritative
-* MockAI vs Gemini
-* structured contracts
-* human-review boundary
-* grounding
-
-## `docs/ARCHITECTURE.md`
-
-Audit and update the existing architecture document.
-
-Do not replace it wholesale.
-
-Bring it into alignment with the ACTUAL Pass 24 codebase, including:
-
-* demo environment
-* demo verification
-* Activity Detail
-* current AI provider abstraction
-* worker pipeline
-* current frontend composition
-
----
-
-# SECTION 18 — FINAL ARCHITECTURE DIAGRAM
-
-Ensure documentation includes an accurate high-level architecture such as:
-
-```text
-                      Local Browser
-                           ↓
-                  FieldLine React UI
-                           ↓
-                  Node / Express API
-                           ↓
-        ┌──────────────────┼──────────────────┐
-        ↓                  ↓                  ↓
- Domain Services       AI Layer          Job Worker
-        ↓                  ↓                  ↓
-        │            Mock / Gemini            │
-        └──────────────────┼──────────────────┘
-                           ↓
-                        SQLite
-                       /      \
-                      /        \
-               Project State   Evidence Files
-```
-
-And the truth pipeline:
-
-```text
-Schedule
-↓
-Activities
-↓
-Field Evidence
-↓
-AI Extraction
-↓
-Activity Matching
-↓
-Human Review
-↓
-Canonical ActivityProgress
-↓
-Snapshot / Variance / Risk
-↓
-Project Intelligence
-├── Dashboard
-├── Activity Detail
-└── Grounded Assistant
-```
-
-Only document behavior that actually exists.
-
----
-
-# SECTION 19 — CODE HYGIENE
-
-Audit and clean:
-
-* dead imports
-* unused variables
-* stale comments
-* TODO/FIXME that no longer apply
-* debug logging
-* temporary artifacts
-* old pass-number text
-* dead components
-* unused dependencies
-* inconsistent naming
-
-Do NOT perform a broad refactor.
-
-Remove debris; preserve working architecture.
-
----
-
-# SECTION 20 — MOCKAI BOUNDARY
-
-Pass 24 expanded `MockAIProvider` so the offline assistant can interpret manager questions.
-
-Keep the abstraction:
-
-```text
-AIService
-    ↓
-AIProvider
-    ├── MockAIProvider
-    └── GeminiAIProvider
-```
-
-Do not move demo-specific behavior into:
-
-* AssistantService
-* domain services
-* repositories
-* controllers
-
-The domain must continue to operate independently of whether MockAI or Gemini is used.
-
----
-
-# SECTION 21 — NO PASS 22
-
-Do NOT implement voice input.
-
-Do NOT add:
-
-* microphone capture
-* speech recognition
-* transcription
-* audio APIs
-* voice UI
-
-Pass 22 remains benched.
-
----
-
-# SECTION 22 — NO DEMO-ONLY BUSINESS LOGIC
-
-Absolutely do NOT introduce:
-
-```ts
-if (demoMode) { ... }
-```
-
-to fake business behavior.
-
-Do NOT hardcode:
-
-* dashboard numbers
-* risk classifications
-* assistant answers
-* progress
-* canonical truth
-
-The golden demo must work because it is real valid FieldLine data.
-
----
-
-# SECTION 23 — VALIDATION
-
-Run:
-
-```bash
 npm test
 npm run build
 npm run demo:reset
 npm run demo:verify
 npm run verify:release
-```
 
-All must pass.
+plus the Groq smoke test using the real configured credentials.
 
-Then manually smoke-test:
+Expected principle:
 
-```text
-dashboard
-→ delayed activity
-→ Activity Detail
-→ evidence
-→ back
-→ assistant
-→ grounded question
-→ review/pending item
-```
+mock mode
+→ fully offline
+→ deterministic
 
----
+groq mode
+→ real GPT-OSS 20B
+→ sequential sticky key failover
+→ automatic advancement on failure
+24. Scope guard
 
-# DEFINITION OF DONE
+Do NOT implement:
 
-Pass 25 is complete when:
+voice input
+frontend redesign
+new AI business logic
+new canonical-truth rules
+LLM-generated calculations
+LLM-generated SQL
+database-backed API-key storage
+hardcoded Groq responses
+live-Groq calls inside normal Vitest regression
+ordinary request-count round robin
 
-1. Existing functionality remains intact.
-2. Full test suite passes.
-3. Production build passes.
-4. Golden demo reset passes.
-5. Golden demo verification passes.
-6. Release verification command passes.
-7. Fresh installation works.
-8. Dashboard is presentation-ready.
-9. Activity Detail is presentation-ready.
-10. Assistant UX clearly communicates grounding.
-11. Evidence/review flows are understandable.
-12. Loading/error/empty states are complete.
-13. Responsive behavior is acceptable.
-14. No obvious debug/dead-code debris remains.
-15. `docs/DEMO.md` exists.
-16. `docs/AI-PIPELINE.md` exists.
-17. `docs/ARCHITECTURE.md` reflects the actual current architecture.
-18. No voice input is added.
-19. No major feature is added.
-20. No demo-only business logic is added.
+The specific routing model is:
 
----
+STICKY CURRENT KEY
+        ↓
+keep using it
+        ↓
+failure
+        ↓
+NEXT KEY
+        ↓
+keep using successful key
+        ↓
+failure
+        ↓
+NEXT KEY
+        ↓
+...
+        ↓
+wrap around
 
-# COMMIT
+Not:
 
-Use:
+Request 1 → Key 01
+Request 2 → Key 02
+Request 3 → Key 03
 
-`feat: finalize FieldLine integration and presentation polish`
+That distinction must be encoded directly into the router tests.
+
+25. Definition of Done
+
+Pass 26 is complete when:
+
+Provider
+
+GroqAIProvider implements the existing AIProvider.
+
+Model
+
+Default Groq model is:
+
+openai/gpt-oss-20b.
+
+Configuration
+
+Up to 20 explicitly configured Groq credentials can be loaded deterministically.
+
+Sticky routing
+
+A successful key continues receiving requests.
+
+Failover
+
+Any qualifying failure immediately advances to the next available key.
+
+Cascading failure
+
+If multiple successive keys fail, the same request continues through the remaining keys.
+
+Exhaustion
+
+Every configured key is attempted at most once for a single request.
+
+Wrap-around
+
+Key 20 correctly falls through to Key 01.
+
+Health
+
+Repeatedly failing keys can be temporarily suppressed and later recovered.
+
+Concurrency
+
+Concurrent requests do not corrupt router state.
+
+Structured extraction
+
+Existing Zod contract remains authoritative.
+
+Assistant
+
+Real Groq responses remain constrained by existing FieldLine grounding.
+
+MockAI
+
+Offline deterministic mode remains intact.
+
+Gemini
+
+Existing Gemini support remains intact unless the repository audit identifies a concrete incompatibility.
+
+Security
+
+No API key is exposed through logs, UI, errors, DTOs, or documentation.
+
+Regression
+npm test
+npm run build
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+
+all pass.
+
+Real AI
+
+A separate Groq smoke test succeeds against the configured model.
+
+Recommended commit
+feat: integrate Groq GPT-OSS with robust key failover
+
+Commit and push changes to Github. 

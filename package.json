@@ -17,7 +17,8 @@
     "setup": "tsx scripts/setup.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "demo:verify": "tsx scripts/demo-verify.ts",
-    "verify:release": "tsx scripts/verify-release.ts"
+    "verify:release": "tsx scripts/verify-release.ts",
+    "ai:smoke": "tsx scripts/ai-smoke.ts"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",

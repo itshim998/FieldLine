@@ -37,4 +37,54 @@ describe('Environment Configuration Validation', () => {
 
     expect(() => getValidatedEnv(invalid)).toThrow('Environment validation failed');
   });
+
+  it('should support AI_PROVIDER=groq with sequential GROQ_API_KEY_01..20 keys preserving numeric order', () => {
+    const custom = {
+      AI_PROVIDER: 'groq',
+      GROQ_MODEL: 'openai/gpt-oss-20b',
+      GROQ_API_KEY_03: 'gsk-key-three',
+      GROQ_API_KEY_01: 'gsk-key-one',
+      GROQ_API_KEY_02: 'gsk-key-two'
+    };
+
+    const config = getValidatedEnv(custom);
+    expect(config.AI_PROVIDER).toBe('groq');
+    expect(config.GROQ_MODEL).toBe('openai/gpt-oss-20b');
+    expect(config.groqApiKeys).toEqual(['gsk-key-one', 'gsk-key-two', 'gsk-key-three']);
+  });
+
+  it('should throw an error when AI_PROVIDER=groq but no Groq API keys are provided', () => {
+    const custom = {
+      AI_PROVIDER: 'groq'
+    };
+
+    expect(() => getValidatedEnv(custom)).toThrow(/At least one Groq API key/);
+  });
+
+  it('should throw an error when empty or whitespace Groq API key is configured', () => {
+    const custom = {
+      AI_PROVIDER: 'groq',
+      GROQ_API_KEY_01: '   '
+    };
+
+    expect(() => getValidatedEnv(custom)).toThrow(/empty or malformed/);
+  });
+
+  it('should support single GROQ_API_KEY fallback when no numbered keys exist', () => {
+    const custom = {
+      AI_PROVIDER: 'groq',
+      GROQ_API_KEY: 'gsk-single-fallback-key'
+    };
+
+    const config = getValidatedEnv(custom);
+    expect(config.groqApiKeys).toEqual(['gsk-single-fallback-key']);
+  });
+
+  it('should reject unknown AI_PROVIDER values', () => {
+    const custom = {
+      AI_PROVIDER: 'unknown_provider'
+    };
+
+    expect(() => getValidatedEnv(custom)).toThrow('Environment validation failed');
+  });
 });

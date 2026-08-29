@@ -7,6 +7,7 @@ import { logger } from '../../config/logger.js';
 
 import { env } from '../../config/env.js';
 import { GeminiAIProvider } from '../providers/gemini-ai.provider.js';
+import { GroqAIProvider } from '../providers/groq-ai.provider.js';
 
 export interface AIService {
   generateText(prompt: string, options?: AIRequestOptions): Promise<string>;
@@ -14,13 +15,22 @@ export interface AIService {
 }
 
 export function createDefaultAIProvider(): AIProvider {
+  if (env.AI_PROVIDER === 'groq') {
+    return new GroqAIProvider({
+      apiKeys: env.groqApiKeys,
+      defaultModel: env.GROQ_MODEL
+    });
+  }
   if (env.AI_PROVIDER === 'gemini') {
     return new GeminiAIProvider({
       apiKey: env.GEMINI_API_KEY,
       defaultModel: env.GEMINI_MODEL
     });
   }
-  return new MockAIProvider();
+  if (env.AI_PROVIDER === 'mock') {
+    return new MockAIProvider();
+  }
+  throw new AIProviderError(`Unsupported AI_PROVIDER: ${env.AI_PROVIDER}`);
 }
 
 export class DefaultAIService implements AIService {

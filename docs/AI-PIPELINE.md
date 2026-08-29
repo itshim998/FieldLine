@@ -144,9 +144,9 @@ Candidate matches between extracted field facts and scheduled activities are sco
 
 ---
 
-## 4. Provider Abstraction: MockAI vs Gemini
+## 4. Provider Abstraction: MockAI, Gemini, and Groq
 
-FieldLine supports two pluggable AI providers behind the `AIProvider` interface:
+FieldLine supports pluggable AI providers behind the `AIProvider` interface:
 
 ```typescript
 export interface AIProvider {
@@ -159,10 +159,49 @@ export interface AIProvider {
 ### `MockAIProvider` (Default / Local / Offline)
 - Runs completely offline without API keys or internet connection.
 - Implements deterministic regex and keyword heuristics to extract field facts and answer assistant queries.
-- Guarantees 100% test reproducibility and instant local evaluation for SIH judges.
+- Guarantees 100% test reproducibility and instant local evaluation for golden demo verification.
 
-### `GeminiAIProvider` (Cloud / Production)
+### `GeminiAIProvider` (Google Gen AI)
 - Uses `@google/genai` with `gemini-3.7-flash`.
 - Generates structured JSON schema completions.
 - Automatically redacts API keys and authorization headers from all logs and error messages.
 - Activated by setting `AI_PROVIDER=gemini` and configuring `GEMINI_API_KEY` in `.env`.
+
+### `GroqAIProvider` (High-Throughput Real-AI with 20-Key Failover Router)
+- Uses Groq's high-speed OpenAI-compatible endpoint with model `openai/gpt-oss-20b`.
+- Backed by an in-memory **20-Key Sticky Sequential Failover Router** (`GroqKeyRouter`).
+- Activated by setting `AI_PROVIDER=groq` and configuring `GROQ_API_KEY_01` through `GROQ_API_KEY_20` in `.env`.
+
+---
+
+## 5. Groq 20-Key Sticky Sequential Failover Architecture (Pass 26)
+
+```text
+                         AIService
+                            │
+                            ▼
+                       AIProvider
+                            │
+                    ┌───────┴────────┐
+                    │                │
+                 MockAI             GroqAI
+                                      │
+                                      ▼
+                                GroqKeyRouter
+                                      │
+               ┌──────────┬──────────┼──────────┬──────────┐
+               ▼          ▼          ▼          ▼          ▼
+             Key 01     Key 02     Key 03     ...       Key 20
+               │          │          │                    │
+               └──────────┴──────────┴────────────────────┘
+```
+
+### Key Router Semantics & Invariants:
+1. **Sticky Current Key**: The router maintains `currentKeyIndex` (initially Slot `01`). While requests succeed, FieldLine stays on the current key.
+2. **Immediate Failover**: On qualifying failures (HTTP 429 rate limit, 401/403 auth error, 5xx server errors, timeouts, network drops), the router immediately advances to the next configured slot (`(current + 1) % N`) without delay.
+3. **Never Incorrectly Reset**: If Key 07 fails and Key 10 succeeds, subsequent requests start at Key 10. The ring state follows the successful key.
+4. **Single-Pass Exhaustion Guard**: A single request attempts each configured key at most once in ring order. If all keys fail, one aggregated `AIProviderError` is returned with sanitized diagnostic metadata.
+5. **Key Health & Cooldown**: Repeated 429/5xx errors trigger exponential cooldown (or parse `Retry-After` headers); 401/403 errors mark the key permanently invalid to prevent future requests from starting on dead keys.
+6. **Zero Credential Exposure**: API keys and authorization headers are strictly redacted. Logging and health snapshots expose only key slots (e.g. `Slot 01`, `Slot 07`).
+7. **Acceptance Smoke Test**: Run `npm run ai:smoke` to validate real Groq connectivity and model responses without altering deterministic test suites.
+

@@ -159,7 +159,33 @@ This command:
 | `npm run setup` | Prepares a fresh checkout by validating configuration, creating directories, and initializing SQLite. |
 | `npm run demo:reset` | Resets runtime database and uploads, seeds the complete flagship SIH Golden Demo project (`Refinery Expansion — Unit 4`), and runs automated invariant verification. |
 | `npm run demo:verify` | Executes machine-checkable invariant verification against the live SQLite golden project (risk distribution, intelligence facts, grounded assistant queries, evidence storage). |
-| `npm run verify:release` | Executes the complete release verification suite: production build + 91-file test suite + golden demo reset + 53-invariant demo verification. |
+| `npm run verify:release` | Executes the complete release verification suite: production build + 93-file test suite + golden demo reset + 53-invariant demo verification. |
+| `npm run ai:smoke` | Standalone acceptance smoke test validating live Groq `openai/gpt-oss-20b` connectivity and key router diagnostics without exposing credentials. |
+
+---
+
+### Groq Real-AI & 20-Key Sticky Sequential Failover Router (Pass 26)
+
+FieldLine supports **Groq `openai/gpt-oss-20b`** as the production-grade real-AI provider backed by a robust 20-key sequential failover router (`GroqKeyRouter`):
+
+- **Sticky Current Key**: Stays on the currently successful key credential across requests.
+- **Sequential Failover**: On rate limits (HTTP 429), auth issues (401/403), 5xx errors, timeouts, or network failures, immediately advances to the next configured slot (`GROQ_API_KEY_01` .. `GROQ_API_KEY_20`).
+- **Wrap-Around Ring**: Seamlessly wraps from Key 20 back to Key 01.
+- **Single-Pass Exhaustion Guard**: Every key is attempted at most once per request before returning a clean aggregated `AIProviderError`.
+- **Zero Key Leakage**: Keys and auth headers are completely redacted in all logs, health endpoints, DTOs, and error messages.
+- **Offline Determinism Preserved**: The default `AI_PROVIDER=mock` ensures the entire golden demo and test suite remain 100% offline-capable and reproducible.
+
+To activate Groq real-AI mode:
+```env
+AI_PROVIDER=groq
+GROQ_MODEL=openai/gpt-oss-20b
+GROQ_API_KEY_01=gsk_...
+GROQ_API_KEY_02=gsk_...
+```
+Then run the acceptance smoke test:
+```bash
+npm run ai:smoke
+```
 
 ---
 
@@ -267,6 +293,7 @@ Example response:
 - [x] **PASS 23 — Test and Evaluation Suite** *(Completed)*
 - [x] **PASS 24 — Golden Demo Environment** *(Completed)*
 - [x] **PASS 25 — Final Integration and Presentation Polish** *(Completed)*
+- [x] **PASS 26 — Groq AI & 20-Key Failover Router** *(Completed)*
 
 ---
 
