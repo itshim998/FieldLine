@@ -1,682 +1,664 @@
-PASS 26 objective
+# FieldLine Pass 26 — Correction: Concurrency-Safe Sticky Failover Router
 
-Replace the current real-AI path with Groq openai/gpt-oss-20b, backed by a robust 20-key sequential failover router, while preserving FieldLine's existing AIProvider abstraction, structured-output contracts, canonical-truth rules, deterministic calculations, offline MockAI mode, and regression suite.
+Repository:
 
-1. New architecture
+`itshim998/FieldLine`
 
-The final AI layer should become:
+Branch:
 
-                         AIService
-                            │
-                            ▼
-                       AIProvider
-                            │
-                    ┌───────┴────────┐
-                    │                │
-                 MockAI             GroqAI
-                                      │
-                                      ▼
-                                GroqKeyRouter
-                                      │
-               ┌──────────┬──────────┼──────────┬──────────┐
-               ▼          ▼          ▼          ▼          ▼
-             Key 01     Key 02     Key 03     ...       Key 20
-               │          │          │                    │
-               └──────────┴──────────┴────────────────────┘
+`main`
 
-The router belongs inside the Groq provider layer, not in AIService.
+## Current state
 
-The rest of FieldLine should remain unaware that multiple credentials exist.
+Pass 26 has been implemented in commit:
 
-2. Configuration
+`3107bde7ae092d28f8c897c48ee10d4caa1ec9aa`
 
-Use explicit numbered environment variables:
+The implementation is **NOT approved yet**.
 
-AI_PROVIDER=groq
+The Groq provider, 20-key sequential failover, sticky routing, cooldowns, wrap-around, exhaustion protection, structured generation, secret sanitization, environment configuration, and most tests are already present.
 
-GROQ_MODEL=openai/gpt-oss-20b
+There is one blocking correctness issue:
 
-GROQ_API_KEY_01=...
-GROQ_API_KEY_02=...
-GROQ_API_KEY_03=...
-...
-GROQ_API_KEY_20=...
+> **The sticky router's state transition is not safe against concurrent in-flight requests.**
 
-The environment layer should:
+Do NOT rewrite Pass 26.
 
-detect configured keys
-preserve numeric ordering
-reject malformed/empty configured entries
-require at least one Groq key when AI_PROVIDER=groq
-expose the resulting configuration cleanly to the provider
+Do NOT redesign the entire AI layer.
 
-Do not expose the actual keys through logs, health responses, DTOs, or errors.
+Make a minimal, rigorous correction focused on router state transitions and regression coverage.
 
-3. Groq provider implementation
+---
 
-Add something like:
+# 1. REQUIRED ROUTING SEMANTICS
 
-backend/src/ai/providers/groq-ai.provider.ts
-backend/src/ai/providers/groq-key-router.ts
+The intended behavior remains:
 
-The exact names may follow current repository conventions.
+```text
+Current Key
+    ↓
+keep using Current Key
+    ↓
+successful requests
+    ↓
+Current Key remains unchanged
+```
 
-GroqAIProvider implements:
+When the current key fails:
 
-AIProvider
+```text
+Current Key fails
+    ↓
+immediately advance
+    ↓
+try next configured key
+    ↓
+success
+    ↓
+new successful key becomes Current Key
+```
 
-and exposes the same:
+Subsequent requests must remain on that successful key until it fails.
 
-generateText(...)
-generateStructured(...)
+This is NOT request-count round robin.
 
-methods already required by FieldLine.
+Correct:
 
-Groq is compatible with OpenAI-style clients, and Groq documents its endpoint as OpenAI-compatible; use the supported TypeScript SDK/client approach that best fits the existing dependency structure.
+```text
+01 → 01 → 01 → 01
+01 fails
+02 → 02 → 02
+02 fails
+03 → 03 → 03
+```
 
-4. Stateful sticky key selection
+Incorrect:
 
-The router needs one central state:
-
-currentKeyIndex
-
-Initial state:
-
-0
-
-meaning Key 01.
-
-For every request:
-
-currentKeyIndex
-↓
-attempt that key
-
-On success:
-
-keep currentKeyIndex unchanged
-
-On a qualifying failure:
-
-currentKeyIndex = next configured key
-retry same request
-
-The same request continues advancing until:
-
-one key succeeds, or
-every configured key has been attempted once
-
-Then the request either succeeds or fails.
-
-5. Never restart the ring incorrectly
-
-This is one of the most important robustness requirements.
-
-Suppose:
-
-current = Key 07
-
-and Key 07 fails.
-
-Try:
-
-08 → 09 → 10
-
-If Key 10 succeeds:
-
-current = Key 10
-
-Do not reset to Key 01 after the success.
-
-Likewise, if Key 10 subsequently fails:
-
-11
-
-must be tried next.
-
-The state follows the successful key, not the request count.
-
-6. Failure classification
-
-The router should distinguish between:
-
-Failover-worthy provider failures
-
-Examples:
-
-429 Too Many Requests
-authentication/key failures
-expired/revoked key responses
-transient 5xx responses
-network failures
-request timeout
-provider unavailable
-other explicit provider-side failures
-Non-failover request failures
-
-For example, a request that is intrinsically invalid because the application sent an invalid payload should not cause the router to permanently rotate through all credentials unnecessarily.
-
-The implementation should classify errors based on actual Groq response/status information.
-
-Groq documents 429 for rate limits and 500/5xx-class provider errors separately from malformed requests.
-
-7. Retry semantics
-
-For a request:
-
-Key 05 → 429
-
-the request should immediately continue to:
-
-Key 06
-
-rather than waiting for Key 05's cooldown.
-
-For transient provider/network failures, continue to the next key according to the failover policy.
-
-When Groq supplies:
-
-retry-after
-
-or rate-limit headers, capture that metadata for diagnostics and router state where useful. Groq explicitly documents headers such as retry-after, x-ratelimit-remaining-*, and x-ratelimit-reset-*.
-
-Do not create an unbounded retry loop.
-
-8. Every key attempted at most once per request
-
-Suppose:
-
-20 configured keys
-current = 14
-
-and every key fails.
-
-The router must attempt:
-
-14
-15
-16
-17
-18
-19
-20
+```text
 01
 02
 03
 04
-05
-06
-07
-08
-09
-10
-11
-12
-13
+...
+```
 
-exactly once.
+---
 
-Then return one aggregated AIProviderError.
+# 2. BLOCKING RACE CONDITION
 
-Never:
+The current implementation does:
 
-14 → 15 → ... → 13 → 14 → 15 → ...
+```ts
+recordFailure(failedKey)
+    → currentKeyIndex = nextKey
 
-for the same request.
+recordSuccess(successfulKey)
+    → currentKeyIndex = successfulKey
+```
 
-9. Concurrency safety
+This is not sufficient when two requests are concurrently in flight.
 
-This is critical.
+Example:
 
-Multiple FieldLine requests may arrive concurrently.
+```text
+Initial current = 01
 
-The router must not corrupt:
+Request A starts using 01
+Request B starts using 01
 
-currentKeyIndex
+A → 01 fails
+    → router moves current to 02
 
-through race conditions.
+B → 01 succeeds later
+    → current is changed back to 01
+```
 
-Design the state transition so concurrent requests have deterministic and safe behavior.
+That is WRONG.
 
-The important invariant is:
+Once a newer router transition has moved the active state from 01 to 02, a stale success from an older request that was already operating on 01 must NOT revert the router to 01.
 
-A successful request establishes the active key for subsequent requests without another concurrent request accidentally resetting it.
+Expected:
 
-Gemini should specifically inspect the current Node execution model and select an implementation that is safe under concurrent async requests.
+```text
+A → 01 fails
+A → 02 succeeds
 
-10. Key health state
+B → stale 01 success arrives later
 
-Maintain lightweight runtime state per key:
+Final current key MUST remain 02
+```
 
-Key 01
-  healthy / failed
-  failureCount
-  lastFailureAt
-  lastSuccessAt
-  optional cooldownUntil
+The latest valid routing state must not be overwritten by an older in-flight request.
 
-Key 02
-  ...
+---
 
-This state is in-memory runtime state, not SQLite application state.
+# 3. FIX THE STATE-TRANSITION SEMANTICS
 
-Do not create a database table for provider credentials.
+Inspect the current `GroqKeyRouter` implementation and introduce the smallest correct mechanism needed to make state transitions concurrency-safe.
 
-11. Temporarily unhealthy keys
+A good implementation may use a generation/epoch/version associated with the active routing state, for example:
 
-A key that repeatedly fails should not necessarily be hammered on every subsequent request.
+```text
+routingEpoch
+```
 
-Implement a lightweight cooldown/health mechanism.
+or an equivalent mechanism.
 
-For example:
+The conceptual invariant is:
 
-Key 01 → repeated 429s
-        ↓
-temporarily unavailable
-        ↓
-router proceeds through remaining keys
+```text
+state transition N
+    ↓
+only operations associated with the current/latest routing state
+    may mutate the active sticky key
+```
 
-After an appropriate cooldown, Key 01 becomes eligible again.
+An older in-flight request must be allowed to finish, but its eventual success/failure must not incorrectly roll back a newer routing decision.
 
-Do not permanently blacklist a key because of one failure.
+Do NOT simply serialize every request globally unless the repository architecture genuinely requires it.
 
-The precise cooldown/backoff policy should be based on the provider error type and available reset metadata rather than arbitrary long delays.
+The desired behavior is still:
 
-12. Expired/revoked credentials
+* requests can execute concurrently
+* provider I/O remains asynchronous/concurrent
+* only the sticky routing state transition needs protection
 
-If:
+---
 
-Key 03 → authentication failure
+# 4. IMPORTANT: PRESERVE FAILOVER PROGRESSION
 
-the current request immediately moves to:
+The fix must NOT break the intended sequential progression.
 
-Key 04
+Example:
 
-and Key 03 should be marked unhealthy.
+```text
+Current = 07
 
-A permanently invalid key should not cause every subsequent request to fail against Key 03 first.
+Request A:
+07 fails
+08 succeeds
 
-Keep enough state to avoid repeatedly selecting known-dead keys.
+Current must become 08
 
-13. Wrap-around behavior
+Later:
+08 succeeds
+Current remains 08
 
-If:
+Later:
+08 fails
+09 succeeds
 
-current = Key 20
-
-and Key 20 fails:
-
-Key 01
-
-becomes the next candidate.
+Current becomes 09
+```
 
 Likewise:
 
-current = Key 19
-19 fails
+```text
+20 fails
+01 succeeds
+```
+
+must still work.
+
+---
+
+# 5. IMPORTANT: STALE SUCCESS RULE
+
+Explicitly encode this rule:
+
+> A success from an older request may count toward that key's health statistics, but it must not overwrite a newer active-key routing decision.
+
+For example:
+
+```text
+Request A starts on 01
+Request B starts on 01
+
+A fails → active routing moves to 02
+B succeeds on stale 01
+
+Allowed:
+01.successCount++
+
+Not allowed:
+currentKeyIndex = 01
+```
+
+This distinction is important.
+
+Do not discard useful health information merely because the request became stale for routing purposes.
+
+---
+
+# 6. IMPORTANT: STALE FAILURE RULE
+
+Likewise inspect stale failures.
+
+Example:
+
+```text
+Current = 01
+
+A starts on 01
+B starts on 01
+
+A fails
+→ current moves to 02
+
+B later fails on stale 01
+```
+
+That stale failure must update Key 01 health appropriately, but must NOT perform an additional active-key transition based on an already superseded state.
+
+Do not accidentally make:
+
+```text
+02 → 01
+```
+
+or skip forward unexpectedly because of the stale operation.
+
+The active routing cursor must reflect the newest legitimate routing transition.
+
+---
+
+# 7. CONCURRENT FAILOVER SCENARIO
+
+Add a deterministic test that reproduces the actual race.
+
+Do NOT use:
+
+```ts
+Math.random()
+```
+
+for the critical ordering.
+
+Use explicit deferred promises/barriers so the sequence is deterministic.
+
+Example:
+
+```text
+Initial active = 01
+
+Request A starts on 01
+Request B starts on 01
+
+Force A to fail first:
+01 → 429
+
+Router should advance:
+current = 02
+
+Force 02 to succeed for A:
+A completes on 02
+
+Only AFTER that:
+allow stale B's 01 request to succeed
+
+Assert:
+current = 02
+```
+
+This test must fail on the current implementation and pass after the correction.
+
+---
+
+# 8. ADD STRONGER CONCURRENCY TESTS
+
+Add several deterministic concurrency cases.
+
+### Test A — stale success cannot roll back
+
+```text
+01 active
+A(01) fails
+02 succeeds
+B(01) succeeds late
+final = 02
+```
+
+### Test B — stale failure cannot roll back
+
+```text
+01 active
+A(01) fails
+02 succeeds
+B(01) fails later
+final = 02
+```
+
+### Test C — successive active transitions
+
+```text
+01 active
+
+Request group:
+01 fails
+02 succeeds
+
+later:
+02 fails
+03 succeeds
+
+old requests from 01 complete afterward
+
+final = 03
+```
+
+### Test D — concurrency with wrap-around
+
+```text
+20 active
 20 fails
 01 succeeds
 
-then:
+stale 20 request completes afterward
 
-14. Structured generation
+final = 01
+```
 
-generateStructured() is mandatory because FieldLine's extraction path depends on it.
+### Test E — concurrency with exhaustion
 
-The flow remains:
-
-Groq
-↓
-JSON response
-↓
-AIService
-↓
-Zod safeParse()
-↓
-typed FieldLine object
-
-The provider must not weaken or duplicate the existing Zod validation.
-
-FieldLine's current AIService already validates provider output against the supplied schema.
-
-openai/gpt-oss-20b supports JSON Schema mode according to Groq's current model documentation.
-
-15. Preserve MockAI
-
-Never remove:
-
-AI_PROVIDER=mock
-
-MockAI remains essential for:
-
-npm test
-npm run demo:reset
-npm run demo:verify
-npm run verify:release
-
-The golden demo must remain offline-capable.
-
-Groq becomes the real-AI mode:
-
-AI_PROVIDER=groq
-16. Gemini can remain supported
-
-Do not delete the current Gemini provider unless the repository audit demonstrates a concrete reason.
-
-The provider factory should support:
-
-mock
-gemini
-groq
-
-with explicit validation.
-
-An unknown value must result in a clear configuration error rather than silently falling back to MockAI.
-
-17. Tests are mandatory
-
-Add focused tests for the router.
-
-At minimum:
-
-Sticky-success test
-Key 01 succeeds
-Request 1 → Key 01
-Request 2 → Key 01
-Request 3 → Key 01
-Failover test
-Key 01 fails
-Request → Key 02
-Consecutive failure test
-01 fails
-02 fails
-03 succeeds
-Persistent current-key test
-01 succeeds
-01 succeeds
-01 fails
-02 succeeds
-02 succeeds
-02 fails
-03 succeeds
-Wrap-around test
-20 fails
-01 succeeds
-Exhaustion test
-
-All 20 fail.
+Several concurrent requests cause failures across the ring.
 
 Verify:
 
-every key attempted once
-no infinite loop
-one controlled provider error
-useful diagnostic metadata without exposing credentials
-Invalid-key health test
+* no infinite loops
+* no duplicate attempts within one request
+* no corrupted current index
+* no impossible active slot
 
-Repeated 401/403 from a key causes it to be considered unhealthy.
+---
 
-Recovery test
+# 9. DO NOT RELAX THE EXISTING TESTS
 
-Temporarily unhealthy key becomes eligible again after cooldown.
+Keep all current tests.
 
-Concurrent request test
+Do not delete or weaken:
 
-Several simultaneous requests must not corrupt router state.
+* sticky-success test
+* failover test
+* consecutive-failure test
+* persistent-current-key test
+* wrap-around test
+* exhaustion test
+* invalid-key health test
+* cooldown recovery test
+* existing concurrency test
+* non-failover 400 test
+* sanitization test
 
-Structured-output test
+The new concurrency tests are additive.
 
-Real provider implementation is tested against the existing structured contract using mocked HTTP/API responses.
+---
 
-Do not make the test suite dependent on live Groq.
+# 10. ALSO FIX THE ENVIRONMENT EDGE CASE
 
-18. Observability
+While this correction is open, fix the small configuration inconsistency identified during review.
 
-Provider logging should show:
+Current `extractGroqApiKeys()` treats an explicitly present empty numbered variable as malformed.
 
-Groq request
-key slot: 07
-model: openai/gpt-oss-20b
-attempt: 1
-result: 429
-failover: 08
+That means:
 
-but never:
+```env
+GROQ_API_KEY_01=real_key
+GROQ_API_KEY_02=
+GROQ_API_KEY_03=
+```
 
-actual API key
-full authorization header
-secret
+can be rejected even though one valid key exists.
 
-Use key indices/slots rather than the secrets themselves.
+The intended configuration should allow:
 
-19. AI workload verification
+* one configured Groq key
+* several configured Groq keys
+* all 20 configured Groq keys
 
-After implementation, test both major FieldLine AI workloads:
+Empty unused slots should simply be ignored.
 
-Extraction
-field report
+However:
+
+* a key variable that is present but contains whitespace/empty content should not be treated as a configured credential
+* malformed actual credential values should still be rejected according to the repository's validation policy
+* if `AI_PROVIDER=groq` and zero usable keys exist, startup must fail clearly
+
+Add/update environment tests for:
+
+```text
+one key
+sparse keys
+all 20 keys
+empty unused slots
+no usable keys
+```
+
+Preserve numeric ordering.
+
+---
+
+# 11. VERIFY THE ACTUAL PROVIDER PATH
+
+Do not only test `GroqKeyRouter` in isolation.
+
+Verify that `GroqAIProvider` continues to delegate:
+
+```text
+generateText()
+generateStructured()
+```
+
+through the corrected router.
+
+Existing provider tests must continue to pass.
+
+The provider must still target:
+
+```text
+https://api.groq.com/openai/v1/chat/completions
+```
+
+and:
+
+```text
+openai/gpt-oss-20b
+```
+
+by default.
+
+---
+
+# 12. STRUCTURED OUTPUT MUST REMAIN INTACT
+
+Do not modify the canonical validation model.
+
+The existing flow remains:
+
+```text
+Groq response
 ↓
-Groq
+provider JSON parsing
 ↓
-structured extraction
+AIService
 ↓
-Zod
+Zod validation
 ↓
-matching
-Assistant
-verified facts
-↓
-Groq
-↓
-natural language response
-↓
-existing grounding validation
+typed FieldLine result
+```
 
-Do not change canonical progress, variance, risk, or intelligence calculations.
+Do not move Zod validation into the router.
 
-20. Real-Groq acceptance test
+Do not make the router aware of domain schemas.
 
-Add a clearly separated manual/optional command if useful, for example:
+---
 
-npm run ai:smoke
+# 13. HEALTH / COOLDOWN SEMANTICS
 
-It should:
+Preserve the existing health model:
 
-verify Groq configuration
-send one small structured request
-use openai/gpt-oss-20b
-show provider/model/key-slot diagnostics without revealing secrets
-return nonzero on failure
+```text
+failureCount
+successCount
+lastFailureAt
+lastSuccessAt
+lastErrorStatus
+cooldownUntil
+isPermanentlyInvalid
+```
 
-This should not run as part of npm test, because live provider calls must not become part of deterministic regression.
+The concurrency correction must not accidentally:
 
-21. Configuration documentation
+* clear another key's cooldown
+* resurrect a permanently invalid key
+* reset failure counts incorrectly
+* erase newer timestamps
+* overwrite health state with stale data
 
-Update:
+Think carefully about stale updates here too.
 
-.env.example
-README.md
-docs/AI-PIPELINE.md
+---
 
-to explain:
+# 14. SECRET SECURITY
 
-AI_PROVIDER=groq
-GROQ_MODEL=openai/gpt-oss-20b
-GROQ_API_KEY_01=...
+Continue to guarantee:
+
+* no raw API key in logs
+* no Authorization header leakage
+* no raw API key in error messages
+* no raw API key in health snapshots
+* no raw API key in DTOs
+
+The existing sanitization tests must remain intact.
+
+---
+
+# 15. DO NOT CHANGE THE 20-KEY MODEL
+
+The provider should continue supporting:
+
+```text
+GROQ_API_KEY_01
 ...
-GROQ_API_KEY_20=...
+GROQ_API_KEY_20
+```
 
-Document the key-routing semantics clearly:
+The router should support fewer than 20 keys when only a subset is configured.
 
-FieldLine stays on the current Groq credential while requests succeed. When that credential fails, the router advances immediately through the configured credentials until a request succeeds or every credential has been attempted.
+The router's sequence operates over the configured keys, not necessarily all twenty physical slots.
 
-Do not document secrets themselves.
+---
 
-22. Demo behavior
+# 16. VALIDATION COMMANDS
 
-npm run demo:reset must continue to work without Groq.
+After implementation run:
 
-So:
-
-MockAI
-
-remains the deterministic golden-demo provider.
-
-For your real-AI local test, switch .env:
-
-AI_PROVIDER=groq
-
-then start normally:
-
-npm run dev
-
-Now the UI should exercise the actual Groq path.
-
-23. Verification
-
-Gemini must finish with:
-
+```bash
 npm test
 npm run build
 npm run demo:reset
 npm run demo:verify
 npm run verify:release
+```
 
-plus the Groq smoke test using the real configured credentials.
+All must pass.
 
-Expected principle:
+Also run:
 
-mock mode
-→ fully offline
-→ deterministic
+```bash
+npm run ai:smoke
+```
 
-groq mode
-→ real GPT-OSS 20B
-→ sequential sticky key failover
-→ automatic advancement on failure
-24. Scope guard
+with at least one real Groq credential configured.
 
-Do NOT implement:
+The smoke test must actually perform a real Groq request.
 
-voice input
-frontend redesign
-new AI business logic
-new canonical-truth rules
-LLM-generated calculations
-LLM-generated SQL
-database-backed API-key storage
-hardcoded Groq responses
-live-Groq calls inside normal Vitest regression
-ordinary request-count round robin
+---
 
-The specific routing model is:
+# 17. REQUIRED ACCEPTANCE TEST MATRIX
 
+Before declaring the correction complete, verify these exact cases:
+
+| Scenario                                 | Expected                     |
+| ---------------------------------------- | ---------------------------- |
+| repeated success                         | same key every request       |
+| 01 → 429                                 | next key immediately         |
+| 01 → failure, 02 → failure, 03 → success | current becomes 03           |
+| 20 → failure                             | wraps to 01                  |
+| all keys fail                            | one bounded exhaustion error |
+| 01 stale success after 02 became active  | current remains 02           |
+| 01 stale failure after 02 became active  | current remains 02           |
+| stale completions after 03 became active | current remains 03           |
+| temporarily unhealthy key cooldown       | recovery still works         |
+| permanently invalid key                  | skipped on later requests    |
+| concurrent requests                      | no routing-state corruption  |
+| empty unused env slots                   | ignored                      |
+| zero usable Groq keys                    | clear startup failure        |
+| secret in provider error                 | redacted                     |
+
+---
+
+# 18. DO NOT IMPLEMENT
+
+Do NOT:
+
+* add speech-to-text
+* redesign the frontend
+* redesign the AIProvider interface
+* add another AI abstraction
+* change FieldLine's canonical-truth model
+* add database persistence for router state
+* hardcode Groq responses
+* add live Groq calls to the normal Vitest suite
+* remove MockAI
+* remove Gemini
+* create a request-count round-robin
+
+The router remains:
+
+```text
 STICKY CURRENT KEY
         ↓
-keep using it
+success → stay
         ↓
-failure
+failure → advance
         ↓
-NEXT KEY
+success → stay on new key
         ↓
-keep using successful key
-        ↓
-failure
-        ↓
-NEXT KEY
+failure → advance
         ↓
 ...
         ↓
 wrap around
+```
 
-Not:
+---
 
-Request 1 → Key 01
-Request 2 → Key 02
-Request 3 → Key 03
+# 19. FINAL DEFINITION OF DONE
 
-That distinction must be encoded directly into the router tests.
+This correction is complete only when:
 
-25. Definition of Done
+1. The concurrency race is fixed.
+2. A stale in-flight success cannot roll back a newer active-key transition.
+3. A stale in-flight failure cannot roll back or corrupt a newer active-key transition.
+4. Concurrent requests remain genuinely asynchronous.
+5. Sticky routing semantics remain unchanged.
+6. Sequential failover remains unchanged.
+7. Wrap-around remains unchanged.
+8. Exhaustion remains bounded.
+9. Key health/cooldown state remains correct.
+10. Environment parsing supports sparse configured keys correctly.
+11. All existing tests pass.
+12. New deterministic concurrency tests pass.
+13. Build passes.
+14. Golden demo reset and verification pass.
+15. Release verification passes.
+16. Real Groq smoke test succeeds with configured credentials.
+17. No secrets leak anywhere.
 
-Pass 26 is complete when:
+---
 
-Provider
+# COMMIT AND PUSH CHANGES TO GITHUB. 
 
-GroqAIProvider implements the existing AIProvider.
+Use:
 
-Model
-
-Default Groq model is:
-
-openai/gpt-oss-20b.
-
-Configuration
-
-Up to 20 explicitly configured Groq credentials can be loaded deterministically.
-
-Sticky routing
-
-A successful key continues receiving requests.
-
-Failover
-
-Any qualifying failure immediately advances to the next available key.
-
-Cascading failure
-
-If multiple successive keys fail, the same request continues through the remaining keys.
-
-Exhaustion
-
-Every configured key is attempted at most once for a single request.
-
-Wrap-around
-
-Key 20 correctly falls through to Key 01.
-
-Health
-
-Repeatedly failing keys can be temporarily suppressed and later recovered.
-
-Concurrency
-
-Concurrent requests do not corrupt router state.
-
-Structured extraction
-
-Existing Zod contract remains authoritative.
-
-Assistant
-
-Real Groq responses remain constrained by existing FieldLine grounding.
-
-MockAI
-
-Offline deterministic mode remains intact.
-
-Gemini
-
-Existing Gemini support remains intact unless the repository audit identifies a concrete incompatibility.
-
-Security
-
-No API key is exposed through logs, UI, errors, DTOs, or documentation.
-
-Regression
-npm test
-npm run build
-npm run demo:reset
-npm run demo:verify
-npm run verify:release
-
-all pass.
-
-Real AI
-
-A separate Groq smoke test succeeds against the configured model.
-
-Recommended commit
-feat: integrate Groq GPT-OSS with robust key failover
-
-Commit and push changes to Github. 
+`fix: harden Groq sticky failover concurrency` as commit message. 

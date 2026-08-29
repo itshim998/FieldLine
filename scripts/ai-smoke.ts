@@ -21,13 +21,8 @@ async function runGroqSmokeTest(): Promise<void> {
   console.log('⚡ FieldLine Real-Groq Provider Smoke Test (Pass 26)');
   console.log('================================================================\n');
 
-  const { keys, malformed } = extractGroqApiKeys(process.env as Record<string, string | undefined>);
+  const { keys } = extractGroqApiKeys(process.env as Record<string, string | undefined>);
   const model = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
-
-  if (malformed.length > 0) {
-    console.error(`❌ Malformed/empty Groq key configuration detected: ${malformed.join(', ')}`);
-    process.exit(1);
-  }
 
   if (keys.length === 0) {
     console.error('❌ No Groq API keys configured.');

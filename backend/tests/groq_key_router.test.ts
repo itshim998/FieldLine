@@ -1,6 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GroqKeyRouter, GroqKeyRouterOptions } from '../src/ai/providers/groq-key-router.js';
+import { describe, it, expect, vi } from 'vitest';
+import { GroqKeyRouter } from '../src/ai/providers/groq-key-router.js';
 import { AIProviderError } from '../src/errors/AppError.js';
+
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: any) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 describe('GroqKeyRouter (Pass 26)', () => {
   const sample20Keys = Array.from({ length: 20 }, (_, i) => `gsk_mock_secret_key_${String(i + 1).padStart(2, '0')}`);
@@ -10,6 +20,7 @@ describe('GroqKeyRouter (Pass 26)', () => {
     expect(router.keyCount).toBe(20);
     expect(router.getCurrentIndex()).toBe(0);
     expect(router.getCurrentSlot()).toBe('01');
+    expect(router.getCurrentEpoch()).toBe(0);
 
     const snapshots = router.getKeyHealthSnapshots();
     expect(snapshots).toHaveLength(20);
@@ -280,5 +291,214 @@ describe('GroqKeyRouter (Pass 26)', () => {
       expect(err.message).not.toContain(secretKey);
       expect(err.message).toContain('[REDACTED_KEY_SLOT_01]');
     }
+  });
+
+  // =========================================================================
+  // Deterministic Concurrency Invariant Tests (Sections 7 & 8)
+  // =========================================================================
+
+  it('Test A: should prevent stale success from rolling back a newer active key', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const bBarrier = createDeferred<string>();
+
+    // Request A starts on 01, fails on 01, advances to 02, and succeeds on 02
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429 Rate limited');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `A-success-${slot}`;
+    });
+
+    // Request B starts on 01 (concurrently under epoch 0), but blocks until released
+    const reqBPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        return await bBarrier.promise;
+      }
+      return `B-success-${slot}`;
+    });
+
+    // Wait for Request A to complete on 02
+    const resA = await reqAPromise;
+    expect(resA).toBe('A-success-02');
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Release stale Request B to complete on 01
+    bBarrier.resolve('B-stale-success-01');
+    const resB = await reqBPromise;
+    expect(resB).toBe('B-stale-success-01');
+
+    // INVARIANT: Key 01 health gets success recorded, but active key MUST remain 02
+    expect(router.getCurrentSlot()).toBe('02');
+    const snapshots = router.getKeyHealthSnapshots();
+    expect(snapshots[0].successCount).toBe(1);
+    expect(snapshots[1].successCount).toBe(1);
+  });
+
+  it('Test B: should prevent stale failure from rolling back or skipping the active key', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const bBarrier = createDeferred<void>();
+
+    // Request A starts on 01, fails on 01, advances to 02, and succeeds on 02
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `A-success-${slot}`;
+    });
+
+    // Request B starts on 01 concurrently, blocks, then fails on 01 and retries
+    const reqBPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        await bBarrier.promise;
+        const err = new Error('429 stale');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `B-success-${slot}`;
+    });
+
+    // A finishes and establishes 02 as active
+    const resA = await reqAPromise;
+    expect(resA).toBe('A-success-02');
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Release B's delayed failure on 01
+    bBarrier.resolve();
+    const resB = await reqBPromise;
+    expect(resB).toBe('B-success-02');
+
+    // INVARIANT: Active slot remains 02 (not skipped to 03 or reverted to 01)
+    expect(router.getCurrentSlot()).toBe('02');
+  });
+
+  it('Test C: should handle successive active transitions without corruption from older completions', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const staleBarrier1 = createDeferred<string>();
+    const staleBarrier2 = createDeferred<string>();
+
+    // Stale request 1 started while 01 is active
+    const staleReq1 = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        return await staleBarrier1.promise;
+      }
+      return `Stale1-${slot}`;
+    });
+
+    // Failover 01 -> 02 (Req A)
+    await router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `A-${slot}`;
+    });
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Stale request 2 started while 02 is active
+    const staleReq2 = router.executeRequest(async (_key, slot) => {
+      if (slot === '02') {
+        return await staleBarrier2.promise;
+      }
+      return `Stale2-${slot}`;
+    });
+
+    // Failover 02 -> 03 (Req B)
+    await router.executeRequest(async (_key, slot) => {
+      if (slot === '02') {
+        const err = new Error('500');
+        (err as any).status = 500;
+        throw err;
+      }
+      return `B-${slot}`;
+    });
+    expect(router.getCurrentSlot()).toBe('03');
+
+    // Release older in-flight requests from epochs 0 and 1
+    staleBarrier1.resolve('Stale1-Done');
+    staleBarrier2.resolve('Stale2-Done');
+
+    await Promise.all([staleReq1, staleReq2]);
+
+    // INVARIANT: Final active key MUST remain 03
+    expect(router.getCurrentSlot()).toBe('03');
+  });
+
+  it('Test D: should preserve wrap-around transitions when older requests complete late', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    // Advance router to slot 20
+    (router as any).currentKeyIndex = 19;
+    expect(router.getCurrentSlot()).toBe('20');
+
+    const lateBarrier = createDeferred<string>();
+
+    // Late request starts on 20
+    const lateReq = router.executeRequest(async (_key, slot) => {
+      if (slot === '20') {
+        return await lateBarrier.promise;
+      }
+      return `Late-${slot}`;
+    });
+
+    // Request A on 20 fails -> wraps to 01 and succeeds
+    const resA = await router.executeRequest(async (_key, slot) => {
+      if (slot === '20') {
+        const err = new Error('503');
+        (err as any).status = 503;
+        throw err;
+      }
+      return `A-success-${slot}`;
+    });
+    expect(resA).toBe('A-success-01');
+    expect(router.getCurrentSlot()).toBe('01');
+
+    // Now resolve late request on 20
+    lateBarrier.resolve('Late-success-20');
+    const resLate = await lateReq;
+    expect(resLate).toBe('Late-success-20');
+
+    // INVARIANT: Active key must remain 01 (not rolled back to 20)
+    expect(router.getCurrentSlot()).toBe('01');
+  });
+
+  it('Test E: should maintain bounded single-pass execution across concurrent requests during widespread failure', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+
+    // 5 concurrent requests where all keys return 429
+    const tasks = Array.from({ length: 5 }, () => {
+      const attemptedInThisReq: string[] = [];
+      return router
+        .executeRequest(async (_key, slot) => {
+          attemptedInThisReq.push(slot);
+          const err = new Error(`429 on ${slot}`);
+          (err as any).status = 429;
+          throw err;
+        })
+        .catch((err) => {
+          expect(err).toBeInstanceOf(AIProviderError);
+          // Each individual request must attempt exactly 20 distinct keys (no duplicates, no infinite loops)
+          expect(attemptedInThisReq).toHaveLength(20);
+          const unique = new Set(attemptedInThisReq);
+          expect(unique.size).toBe(20);
+          return 'failed_as_expected';
+        });
+    });
+
+    const results = await Promise.all(tasks);
+    expect(results).toEqual(Array(5).fill('failed_as_expected'));
+
+    // Router currentIndex must be a valid slot index (0 to 19)
+    expect(router.getCurrentIndex()).toBeGreaterThanOrEqual(0);
+    expect(router.getCurrentIndex()).toBeLessThan(20);
   });
 });

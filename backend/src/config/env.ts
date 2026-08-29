@@ -10,12 +10,12 @@ export interface GroqEnvFields {
 }
 
 /**
- * Extracts and validates GROQ_API_KEY_01 through GROQ_API_KEY_20 preserving numeric order.
- * Rejects empty/malformed entries if configured.
+ * Extracts GROQ_API_KEY_01 through GROQ_API_KEY_20 preserving numeric order.
+ * Empty or whitespace-only unused slots are ignored.
+ * Supports sparse configuration (e.g. Key 01 and Key 05 only).
  */
-export function extractGroqApiKeys(source: Record<string, string | undefined>): { keys: string[]; malformed: string[] } {
+export function extractGroqApiKeys(source: Record<string, string | undefined>): { keys: string[] } {
   const keys: string[] = [];
-  const malformed: string[] = [];
 
   for (let i = 1; i <= 20; i++) {
     const padded = String(i).padStart(2, '0');
@@ -25,25 +25,21 @@ export function extractGroqApiKeys(source: Record<string, string | undefined>): 
     const rawVal = source[varNamePadded] ?? (source[varNameUnpadded] !== undefined ? source[varNameUnpadded] : undefined);
     if (rawVal !== undefined) {
       const trimmed = rawVal.trim();
-      if (trimmed.length === 0) {
-        malformed.push(varNamePadded);
-      } else {
+      if (trimmed.length > 0) {
         keys.push(trimmed);
       }
     }
   }
 
   // Fallback to single GROQ_API_KEY if no numbered keys were found
-  if (keys.length === 0 && malformed.length === 0 && source.GROQ_API_KEY !== undefined) {
+  if (keys.length === 0 && source.GROQ_API_KEY !== undefined) {
     const singleTrimmed = source.GROQ_API_KEY.trim();
-    if (singleTrimmed.length === 0) {
-      malformed.push('GROQ_API_KEY');
-    } else {
+    if (singleTrimmed.length > 0) {
       keys.push(singleTrimmed);
     }
   }
 
-  return { keys, malformed };
+  return { keys };
 }
 
 export const envSchema = z.object({
@@ -57,11 +53,10 @@ export const envSchema = z.object({
   GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash'),
   GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b')
 }).passthrough().transform((data) => {
-  const { keys, malformed } = extractGroqApiKeys(data as Record<string, string | undefined>);
+  const { keys } = extractGroqApiKeys(data as Record<string, string | undefined>);
   return {
     ...data,
-    groqApiKeys: keys,
-    _groqMalformed: malformed
+    groqApiKeys: keys
   };
 }).superRefine((data, ctx) => {
   if (data.AI_PROVIDER === 'gemini' && (!data.GEMINI_API_KEY || data.GEMINI_API_KEY.trim().length === 0)) {
@@ -69,14 +64,6 @@ export const envSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: 'GEMINI_API_KEY is required when AI_PROVIDER=gemini',
       path: ['GEMINI_API_KEY']
-    });
-  }
-
-  if (data._groqMalformed && data._groqMalformed.length > 0) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: `Configured Groq API key(s) are empty or malformed: ${data._groqMalformed.join(', ')}`,
-      path: ['groqApiKeys']
     });
   }
 

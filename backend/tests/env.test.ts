@@ -53,21 +53,64 @@ describe('Environment Configuration Validation', () => {
     expect(config.groqApiKeys).toEqual(['gsk-key-one', 'gsk-key-two', 'gsk-key-three']);
   });
 
-  it('should throw an error when AI_PROVIDER=groq but no Groq API keys are provided', () => {
-    const custom = {
-      AI_PROVIDER: 'groq'
-    };
-
-    expect(() => getValidatedEnv(custom)).toThrow(/At least one Groq API key/);
-  });
-
-  it('should throw an error when empty or whitespace Groq API key is configured', () => {
+  it('should support a single configured Groq key', () => {
     const custom = {
       AI_PROVIDER: 'groq',
-      GROQ_API_KEY_01: '   '
+      GROQ_API_KEY_01: 'gsk-only-key'
     };
 
-    expect(() => getValidatedEnv(custom)).toThrow(/empty or malformed/);
+    const config = getValidatedEnv(custom);
+    expect(config.groqApiKeys).toEqual(['gsk-only-key']);
+  });
+
+  it('should support sparse configured Groq keys while preserving numeric order', () => {
+    const custom = {
+      AI_PROVIDER: 'groq',
+      GROQ_API_KEY_14: 'gsk-key-fourteen',
+      GROQ_API_KEY_02: 'gsk-key-two',
+      GROQ_API_KEY_07: 'gsk-key-seven'
+    };
+
+    const config = getValidatedEnv(custom);
+    expect(config.groqApiKeys).toEqual(['gsk-key-two', 'gsk-key-seven', 'gsk-key-fourteen']);
+  });
+
+  it('should ignore empty or whitespace-only unused slots without failing validation', () => {
+    const custom = {
+      AI_PROVIDER: 'groq',
+      GROQ_API_KEY_01: 'gsk-valid-key-one',
+      GROQ_API_KEY_02: '',
+      GROQ_API_KEY_03: '   ',
+      GROQ_API_KEY_04: 'gsk-valid-key-four'
+    };
+
+    const config = getValidatedEnv(custom);
+    expect(config.groqApiKeys).toEqual(['gsk-valid-key-one', 'gsk-valid-key-four']);
+  });
+
+  it('should load all 20 configured Groq keys deterministically in numeric order', () => {
+    const custom: Record<string, string> = {
+      AI_PROVIDER: 'groq'
+    };
+    for (let i = 1; i <= 20; i++) {
+      const slot = String(i).padStart(2, '0');
+      custom[`GROQ_API_KEY_${slot}`] = `gsk-key-${slot}`;
+    }
+
+    const config = getValidatedEnv(custom);
+    expect(config.groqApiKeys).toHaveLength(20);
+    expect(config.groqApiKeys[0]).toBe('gsk-key-01');
+    expect(config.groqApiKeys[19]).toBe('gsk-key-20');
+  });
+
+  it('should throw an error when AI_PROVIDER=groq but no Groq API keys are provided or all are empty', () => {
+    const emptyCustom = {
+      AI_PROVIDER: 'groq',
+      GROQ_API_KEY_01: '',
+      GROQ_API_KEY_02: '   '
+    };
+
+    expect(() => getValidatedEnv(emptyCustom)).toThrow(/At least one Groq API key/);
   });
 
   it('should support single GROQ_API_KEY fallback when no numbered keys exist', () => {
