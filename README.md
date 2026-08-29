@@ -154,10 +154,52 @@ This command:
 | Command | Description |
 |---|---|
 | `npm run dev` | Starts backend (port 3001) and frontend (port 3000) concurrently in development watch mode. |
-| `npm test` | Runs the automated Vitest test suite across API endpoints, Zod validation, and SQLite. |
+| `npm test` | Runs the automated Vitest test suite across API endpoints, Zod validation, SQLite, and evaluation benchmarks. |
 | `npm run build` | Compiles TypeScript backend to `dist/backend` and builds Vite frontend to `dist/frontend`. |
 | `npm run setup` | Prepares a fresh checkout by validating configuration, creating directories, and initializing SQLite. |
-| `npm run demo:reset` | Resets local SQLite database and uploads storage to a clean pristine state. |
+| `npm run demo:reset` | Resets runtime database and uploads, seeds the complete flagship SIH Golden Demo project (`Refinery Expansion — Unit 4`), and runs automated invariant verification. |
+| `npm run demo:verify` | Executes machine-checkable invariant verification against the live SQLite golden project (risk distribution, intelligence facts, grounded assistant queries, evidence storage). |
+
+---
+
+## 🏆 Smart India Hackathon 2026 Golden Demo Environment (Pass 24)
+
+FieldLine provides a 100% deterministic, offline-ready presentation environment tailored for the Smart India Hackathon demonstration.
+
+### Instant Reproduction Pipeline:
+```bash
+npm install
+npm run setup
+npm run demo:reset
+npm run demo:verify
+npm run dev
+```
+
+### Golden Project: `Refinery Expansion — Unit 4` (`REFINERY-U4`)
+- **30 Realistic EPC Activities** across 6 work areas:
+  - **Area A — Civil / Earthworks** (Site Clearing, Rough Grading, Stormwater Basin, Perimeter Road, Civil Acceptance Milestone)
+  - **Area B — Foundation** (North Tank Excavation, Crude Pump Piling, Substation Foundation, Compressor Piers, Piling Inspection Milestone)
+  - **Area C — Structural** (Pipe Rack PR-07, Main Pipe Bridge, Compressor Shelter, Substation Cable Support, Structural Completion Milestone)
+  - **Area D — Piping** (Cooling Water Header, Process Pipe Rack Spooling, HP Steam Tie-in, Crude Feedstock Flanges, Flare Header Welding)
+  - **Area E — Electrical / Instrumentation** (Substation Civil/Trenching, MCC Cable Trays, HV Feeder Pulling, Instrument Air Tubing, Marshalling Cabinets)
+  - **Area F — Commissioning & Utilities** (Cooling Water Flush & Hydrotest, Hydrotest Package A, ESD Loop Verification, Instrument Air Leak Test, RFSU Milestone)
+
+### Dynamic Dashboard State (as of `2026-08-28`):
+- **Delayed / Overdue (4):** `ACT-A02` (Site Rough Grading), `ACT-B02` (Crude Pump Piling), `ACT-D02` (Process Rack Spooling), `ACT-F01` (Cooling Water Header Test)
+- **At Risk (4):** `ACT-A03` (Stormwater Basin), `ACT-B03` (Substation Foundation), `ACT-C01` (Pipe Rack PR-07), `ACT-D03` (HP Steam Header)
+- **Completed (4):** `ACT-A01`, `ACT-B01`, `ACT-D01`, `ACT-E01`
+- **On Track / Ahead (18):** Active construction packages + 4 approaching zero-duration milestones (`ACT-A05`, `ACT-B05`, `ACT-C05`, `ACT-F05`)
+
+### Messy Language & Human Review Scenarios:
+- **Heterogeneous Phrasing:** Heterogeneous field descriptions (e.g. *"Piling works at crude pump bay reached 38%"*, *"Pump foundation piles completed to 65%"*, *"Excavation at North Tank completed 100%"*) accurately mapped to canonical schedule activities.
+- **Review Policy Demonstrations:** Contains **Auto-confirmed** high confidence matches, **Suggested** medium confidence matches awaiting review, **Rejected** out-of-scope candidate matches, and **Manually resolved** ambiguous candidates.
+
+### Sample Grounded Assistant Queries:
+The FieldLine Assistant answers queries strictly grounded in the live seeded project state:
+- *"What is delayed?"* &rarr; Identifies the 4 overdue activities with exact variance percentages.
+- *"Which activities are at risk?"* &rarr; Highlights activities with strong negative variance near completion.
+- *"Which milestones are approaching?"* &rarr; Lists upcoming zero-duration milestones within 14 days.
+- *"Tell me about the crude pump foundation"* &rarr; Reports complete timeline from 20% to 65% progress.
 
 ---
 
@@ -175,7 +217,7 @@ Example response:
   "status": "ok",
   "service": "FieldLine Backend",
   "version": "0.1.0",
-  "timestamp": "2026-08-25T11:00:00.000Z",
+  "timestamp": "2026-08-28T12:00:00.000Z",
   "uptime": 12.34,
   "environment": "development",
   "database": {
@@ -187,7 +229,7 @@ Example response:
     "schema_version": "0.2.0",
     "app_name": "FieldLine",
     "sih_ps_id": "SIH26122",
-    "pass": "Pass 2: SQLite and Persistence Foundation"
+    "pass": "Pass 24: Golden Demo Environment"
   }
 }
 ```
@@ -217,10 +259,10 @@ Example response:
 - [x] **PASS 18 — FieldLine Assistant** *(Completed)*
 - [x] **PASS 19 — Human Review Workflow** *(Completed)*
 - [x] **PASS 20 — Dashboard** *(Completed)*
-- [ ] **PASS 21 — Activity Detail View**
+- [x] **PASS 21 — Activity Detail View** *(Completed)*
 - [ ] **PASS 22 — Voice Input**
-- [ ] **PASS 23 — Test and Evaluation Suite**
-- [ ] **PASS 24 — Golden Demo Environment**
+- [x] **PASS 23 — Test and Evaluation Suite** *(Completed)*
+- [x] **PASS 24 — Golden Demo Environment** *(Completed)*
 - [ ] **PASS 25 — Final Integration and Presentation Polish**
 
 ---
@@ -228,3 +270,4 @@ Example response:
 ## 🔒 Security & Local Data Policy
 
 FieldLine stores all data locally in `database/fieldline.db` and files in `uploads/`. No sensitive data or API keys are committed to Git. All runtime data is ignored via `.gitignore`.
+

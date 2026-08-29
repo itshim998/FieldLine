@@ -3,10 +3,12 @@ import path from 'node:path';
 import { getValidatedEnv } from '../backend/src/config/env.js';
 import { initDatabase, closeDatabase, isDatabaseHealthy } from '../backend/src/database/db.js';
 import { getAppliedMigrations } from '../backend/src/database/migrator.js';
+import { seedGoldenDemo } from '../demo/golden-demo-seeder.js';
+import { verifyGoldenDemoEnvironment } from './demo-verify.js';
 
 async function resetDemoEnvironment(): Promise<void> {
   console.log('====================================================');
-  console.log('🔄 Resetting FieldLine Local Runtime Environment (Pass 2)');
+  console.log('🔄 Resetting FieldLine Golden Demo Environment (Pass 24)');
   console.log('====================================================');
 
   const rootDir = process.cwd();
@@ -15,7 +17,7 @@ async function resetDemoEnvironment(): Promise<void> {
   // 1. Close existing DB if open
   closeDatabase();
 
-  // 2. Remove SQLite files if they exist
+  // 2. Remove SQLite database files
   const dbFullPath = path.resolve(rootDir, env.DATABASE_PATH);
   const dbFiles = [
     dbFullPath,
@@ -64,17 +66,41 @@ async function resetDemoEnvironment(): Promise<void> {
   const applied = getAppliedMigrations(db);
   console.log(`✅ SQLite migrations applied on fresh database: ${applied.join(', ')}`);
 
-  if (isDatabaseHealthy()) {
-    console.log('✅ SQLite database cleanly re-initialized and verified healthy');
-  } else {
+  if (!isDatabaseHealthy()) {
     console.error('❌ Failed to re-initialize SQLite database during reset');
     process.exit(1);
   }
 
-  closeDatabase();
+  // 5. Seed Golden Demo Dataset
+  console.log('🌱 Seeding deterministic SIH Golden Demo dataset...');
+  const seedResult = await seedGoldenDemo();
+
+  console.log('----------------------------------------------------');
+  console.log(`📋 Seed Summary:`);
+  console.log(`   - Project: [${seedResult.projectCode}] ${seedResult.projectName}`);
+  console.log(`   - Activities: ${seedResult.activitiesCount} across 6 EPC Areas`);
+  console.log(`   - Evidence Files: ${seedResult.evidenceCount}`);
+  console.log(`   - Field Reports: ${seedResult.progressReportsCount}`);
+  console.log(`   - Canonical Progress Observations: ${seedResult.canonicalObservationsCount}`);
+  console.log(`   - Reference As-Of Date: ${seedResult.asOfDate}`);
+  console.log('----------------------------------------------------');
+
+  // 6. Run Golden Demo Verification
+  console.log('🧪 Verifying golden demo environment invariants...');
+  const verification = await verifyGoldenDemoEnvironment();
+
+  if (!verification.passed) {
+    console.error('❌ Golden demo verification failed after reset:');
+    for (const failure of verification.failures) {
+      console.error(`   ${failure}`);
+    }
+    process.exit(1);
+  }
 
   console.log('====================================================');
-  console.log('✨ FieldLine local demo environment reset complete!');
+  console.log('✨ FieldLine Golden Demo Environment is ready!');
+  console.log('Run `npm run dev` to start backend and frontend.');
+  console.log('The web dashboard will automatically open into Refinery Expansion — Unit 4.');
   console.log('====================================================');
 }
 

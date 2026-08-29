@@ -1,644 +1,650 @@
-# FieldLine Pass 23 — Critical Regression & Evaluation Suite
+PASS 24 — Golden Demo Environment
+Objective
 
-You are working on the FieldLine repository:
+Create a fully deterministic, presentation-ready local FieldLine environment for SIH 2026.
 
-`itshim998/FieldLine`
+The goal is not merely “insert sample data.”
 
-Canonical branch:
+The goal is:
 
-`main`
+Run one command and get the exact project state needed for the SIH demonstration, every single time.
 
-## Current repository baseline
+The environment must be:
 
-Before making any changes, inspect the ACTUAL current repository state and current HEAD.
-
-The current known HEAD is:
-
-`a3d056e7c63c06c199369df35cc62ef624bfd4aa`
-
-Commit:
-
-`feat: implement FieldLine activity detail view`
-
-Do NOT assume this is still the latest commit. Verify first.
-
-FieldLine already contains a substantial Vitest-based test suite with:
-
-* unit tests
-* repository tests
-* service tests
-* router/API tests
-* schedule validation tests
-* document extractor tests
-* document ingestion tests
-* job/worker tests
-* idempotency tests
-* transactional failure tests
-* canonical truth protection tests
-* assistant grounding/security tests
-* Project Intelligence E2E tests
-* fixtures
-* golden extraction fixtures
-* CSV/XLSX equivalence tests
-
-Do NOT rebuild the test system from scratch.
-
----
-
-# PASS 23 OBJECTIVE
-
-Create a coherent, deterministic **critical-workflow evaluation suite** that proves the entire FieldLine project-truth pipeline works together.
-
-The key question this pass must answer is:
-
-> Can a clean local FieldLine instance take a schedule and field report, process the report through the existing ingestion/matching/review pipeline, create canonical progress safely, calculate deterministic intelligence, expose that state through the dashboard, and answer a grounded assistant question?
-
-This pass is primarily about **system-level regression**, not adding arbitrary numbers of isolated unit tests.
-
----
-
-# CORE ARCHITECTURE TO PRESERVE
-
-FieldLine's existing architecture is authoritative:
-
-```text
-Raw Evidence
-→ ingestion
-→ extracted structured field facts
-→ Activity Matching
-→ confidence/review policy
-→ human/system confirmation
-→ canonical ActivityProgress
-→ Progress Snapshot
-→ Risk Classification
-→ Project Intelligence
-→ Dashboard / Activity Detail
-→ grounded Assistant
-```
-
-Preserve all existing architectural invariants:
-
-1. Project isolation
-2. AI is not the source of truth
-3. Only confirmed matches are eligible for canonical progress
-4. Review history remains immutable
-5. Review mutation + mandatory audit event remain atomic
-6. Failed ingestion leaves no partial canonical state
-7. Repeated processing remains idempotent
-8. Evidence remains content-addressably deduplicated
-9. ActivityProgress remains canonical historical progress
-10. Historical views use canonical `asOfDate`
-11. `completedToday` uses actual completion semantics
-12. Dashboard remains a presentation/aggregation layer
-13. Activity Detail remains read-only composition
-14. Assistant claims remain field-verifiable
-15. Assistant is read-only
-16. No LLM-generated SQL
-17. Uncertainty remains visible
-18. Server filesystem paths never leak to clients
-19. Queries remain bounded
-20. Deterministic domain calculations remain authoritative
-
----
-
-# FIRST TASK — REPOSITORY AUDIT
-
-Before editing anything:
-
-1. Inspect the latest `main` HEAD.
-2. Inspect the existing test directory.
-3. Identify current test helpers/fixtures.
-4. Identify the current app composition / dependency injection pattern.
-5. Identify how the processing worker is instantiated.
-6. Identify the current schedule import route/service.
-7. Identify the current evidence upload route/service.
-8. Identify the current document-processing job route/service/worker.
-9. Identify the current matching confirmation path.
-10. Identify the current ProgressService path.
-11. Identify the current snapshot/intelligence/dashboard path.
-12. Identify the current AssistantService path.
-13. Identify existing tests that already cover each layer.
-
-Do not duplicate tests blindly.
-
----
-
-# NEW FLAGSHIP TEST
-
-Create one authoritative system-level regression test, conceptually:
-
-`backend/tests/critical_workflow_e2e.test.ts`
-
-You may choose a better filename if repository conventions suggest one, but keep the intent obvious.
-
-This must be an **application/backend E2E test**, using the current Node/Express/Vitest/Supertest architecture.
-
-Do NOT add Playwright or Cypress.
-
-Use in-memory SQLite for isolation.
-
-Use `MockAIProvider` or an equivalent deterministic provider.
-
-Do NOT make network requests to Gemini or any external API.
-
----
-
-# FLAGSHIP WORKFLOW
-
-The primary test must cover:
-
-```text
-clean test DB
+reset
 ↓
-create project
+seed
 ↓
-import schedule
+start FieldLine
 ↓
-verify activities
+same project
 ↓
-upload field evidence
+same schedules
 ↓
-create/process document job
+same evidence
 ↓
-worker processes job
+same progress history
 ↓
-document extraction
+same dashboard
 ↓
-AI field-fact extraction
+same activity detail
 ↓
-activity matching
+same intelligence
 ↓
-review/confirmation
+same assistant answers
+
+No manual database editing should be necessary.
+
+1. Golden demo project
+
+Use a realistic flagship project:
+
+Refinery Expansion — Unit 4
+
+This is preferable to simply copying the smaller Pass 23 “Metro Transit Hub” project because Pass 24 is a presentation dataset, not a regression fixture.
+
+Target roughly 30 activities.
+
+The activities should be distributed across multiple work areas, for example:
+
+Area A — Civil / Earthworks
+Area B — Foundation
+Area C — Structural
+Area D — Piping
+Area E — Electrical / Instrumentation
+Area F — Commissioning
+
+Do not create six completely artificial disconnected groups. They should feel like one real infrastructure/industrial project.
+
+2. Dataset composition
+
+The 30-or-so activities should deliberately produce a useful dashboard state.
+
+Include:
+
+Category	Approximate target
+On track	12–16
+Behind / mildly negative variance	4–6
+At risk	3–4
+Delayed / overdue	2–4
+Completed	3–5
+Milestones	3–5
+Stale / no recent update	several
+
+These are targets, not rigid counts.
+
+The final distribution must be driven by the actual risk/progress engine so the dashboard tells a coherent story.
+
+Do not manually label an activity “AT_RISK” or “DELAYED” in the database if those values are derived by existing engines.
+
+3. Realistic schedule data
+
+Create a canonical demo schedule containing:
+
+activity IDs
+activity names
+WBS codes
+work areas
+planned start/finish
+planned quantities
+units
+baseline progress where supported by the current schema
+
+The data should resemble a real EPC/infrastructure schedule rather than a toy dataset.
+
+Example activity naming style:
+
+Unit 4 Site Grading
+North Tank Foundation Excavation
+Crude Pump Foundation Piling
+Pipe Rack PR-07 Structural Erection
+Cooling Water Header Installation
+Process Pipe Rack Carbon Steel Spooling
+Electrical Substation Civil Works
+MCC Room Cable Tray Installation
+Instrument Air Header Testing
+Unit 4 Hydrotest Package A
+
+Use the actual schedule import/normalization path where practical so the demo data remains representative of real user input.
+
+4. Messy field reports
+
+This is the most important presentation feature.
+
+Create realistic human-written field reports containing multiple ways of describing the same scheduled activity.
+
+For example, for one canonical activity such as:
+
+ACT-014 — Block B Excavation
+
+the evidence can contain:
+
+“Block B excavation roughly 65% done.”
+
+Another report:
+
+“Excavation at B is practically finished.”
+
+Another:
+
+“Section B earthwork completed.”
+
+The point is to visually demonstrate that FieldLine can connect heterogeneous field language to canonical schedule activities.
+
+Do this across several activities, not only one.
+
+Use multiple linguistic variations:
+
+shortened names
+location-first descriptions
+informal site language
+spelling/casing variation
+quantity-oriented descriptions
+completion phrases
+partially specified descriptions
+
+Do not fabricate activity IDs inside these human-written reports unless that is intentionally part of a test scenario.
+
+5. Multiple report dates
+
+Do not make the demo consist of one report on one day.
+
+Create a small history, for example:
+
+D-14
+D-10
+D-7
+D-3
+D-1
+D0 / presentation date
+
+The exact dates should be deterministic.
+
+This allows the demo to show:
+
+changing progress
+historical observations
+overdue activities
+completed work
+recent updates
+stale activities
+asOfDate behavior
+
+This is especially important because Pass 23 established historical/deterministic evaluation as a major invariant.
+
+6. Canonical progress history
+
+Seed actual ActivityProgress only through the repository's canonical mechanisms.
+
+Do not directly insert fake canonical progress rows merely for convenience unless the existing data-seeding architecture absolutely requires it.
+
+The final dataset should contain a believable progression history.
+
+For example:
+
+Foundation excavation:
+20% → 38% → 52% → 65%
+
+Pipe rack erection:
+15% → 31% → 48%
+
+Electrical room:
+0% → 12% → 26%
+
+Tank foundation:
+100% completed
+
+The exact values should be selected so the existing snapshot/risk calculations generate a visually meaningful state.
+
+7. Evidence files
+
+Seed a realistic evidence set.
+
+Prefer actual local files over database-only placeholders.
+
+Include several:
+
+.txt
+.csv
+.pdf where practical
+optionally a small image/photo fixture if the existing application path supports it cleanly
+
+Examples:
+
+daily_site_report_2026-08-18.txt
+civil_progress_update_2026-08-21.csv
+weekly_execution_report_2026-08-24.pdf
+inspection_note_unit4.txt
+piping_progress_2026-08-27.csv
+
+These should live inside the existing local upload/evidence model.
+
+Do not put secrets or unnecessary large binary assets in Git.
+
+Keep fixtures small and repository-friendly.
+
+8. Matches and review states
+
+The golden environment should intentionally contain all useful review situations.
+
+Include:
+
+Clearly resolved
+
+Some reports should produce strong, unambiguous matches.
+
+Suggested
+
+Some observations should remain pending review.
+
+Rejected
+
+At least one deliberately incorrect candidate should be rejected.
+
+Manually resolved
+
+At least one ambiguous observation should demonstrate the human review path.
+
+This is important for the demo because it shows the human-in-the-loop model rather than portraying AI as automatically authoritative.
+
+The current repository already encodes this review model:
+
+confirmed → canonical eligible
+suggested → awaiting review
+rejected → non-canonical
+resolved → confirmed via human action
+
+and Pass 23 tests these boundaries.
+
+9. Assistant-ready state
+
+The final dataset must produce meaningful answers to questions such as:
+
+What is delayed?
+
+Which activities are at risk?
+
+What changed recently?
+
+What is behind schedule?
+
+What happened in Area B?
+
+Tell me about the tank foundation.
+
+The assistant must answer from the actual seeded project state, not from hardcoded demo responses.
+
+Do not add a “demo mode” that bypasses the existing grounded assistant.
+
+10. Dashboard-ready state
+
+The seeded project should make the dashboard visually useful immediately.
+
+It should contain enough variation to produce:
+
+meaningful overall progress
+a non-zero variance
+delayed activities
+at-risk activities
+completed activities
+upcoming milestones
+stale activities
+recent updates
+evidence-linked updates
+
+The dashboard should therefore tell a story at first load.
+
+11. Activity Detail-ready state
+
+At least 3–5 activities should have especially rich histories.
+
+For those activities, the Activity Detail screen should show:
+
+Identity
 ↓
-ProgressService
+Current state
 ↓
-ActivityProgress
+Progress timeline
 ↓
-ProgressSnapshotService
+Source report
 ↓
-RiskClassification
+Match/review history
 ↓
-ProjectIntelligenceService
+Originating evidence
+
+This is where Pass 21 + Pass 24 should meet.
+
+Do not add new Activity Detail functionality in this pass.
+
+Just create the dataset that makes the existing feature compelling.
+
+12. Deterministic seed architecture
+
+Create a proper demo seeding layer.
+
+For example:
+
+scripts/
+    demo-reset.ts
+    demo-seed.ts
+
+demo/
+    golden-demo.ts
+    fixtures/
+        schedules/
+        reports/
+        evidence/
+
+You may choose better names based on the existing architecture.
+
+The essential requirement is that the dataset has one canonical source definition.
+
+Do not scatter dozens of unrelated INSERT statements through demo-reset.ts.
+
+Prefer a structured deterministic seed definition that can be consumed by a small seed orchestrator.
+
+13. Redesign npm run demo:reset
+
+The existing demo:reset currently resets to an empty database.
+
+Change its semantic meaning to:
+
+npm run demo:reset
+
+=
+
+remove previous runtime state
 ↓
-dashboard endpoint
+recreate database
 ↓
-assistant endpoint
-```
+run migrations
+↓
+seed golden project
+↓
+seed schedules
+↓
+seed progress history
+↓
+seed evidence
+↓
+seed matches/review state
+↓
+verify canonical state
+↓
+verify dashboard/intelligence
+↓
+verify assistant-ready state
+↓
+exit
 
-Use the EXISTING production services and repositories.
+After it completes, running:
 
-Do not mock away the business logic.
+npm run dev
 
-Mock only external/non-deterministic AI behavior where required.
+must immediately show the golden demo environment.
 
----
+14. Demo reset must be idempotent
 
-# DETERMINISTIC GOLDEN FIXTURE
+Running:
 
-Create a reusable fixture for a small realistic construction project.
+npm run demo:reset
+npm run demo:reset
+npm run demo:reset
 
-The fixture should include approximately 4–6 activities.
+must always result in the same logical project state.
 
-Cover:
+No duplicate:
 
-* one on-track activity
-* one delayed activity
-* one at-risk activity
-* one activity that can be completed from the report
-* one ambiguous/non-matching activity
-* optionally one milestone
+projects
+schedules
+activities
+evidence
+progress updates
+matches
+events
 
-The field report fixture must include:
+should accumulate.
 
-* explicit report date
-* a clearly matchable activity
-* a deterministic progress percentage
-* a completed activity or completion signal
-* an ambiguous observation
+15. Golden demo verification
 
-Also define expected outputs for the fixture:
+Do not trust the seeder merely because it exits with code 0.
 
-* normalized schedule activity
-* extracted field fact
-* expected matching result
-* expected confidence/review state
-* expected canonical ActivityProgress
-* expected snapshot values
-* expected variance
-* expected risk classification
-* expected intelligence result
-* expected dashboard values
-* expected grounded assistant facts
+Add a dedicated verification step/test.
 
-Keep generated IDs/timestamps out of the golden comparison unless they are normalized.
+For example:
 
-Reuse the existing golden-fixture conventions already present in the repository.
+npm run demo:verify
 
----
+or an appropriate equivalent.
 
-# HAPPY-PATH ASSERTIONS
+It should verify at minimum:
 
-The flagship test must assert meaningful values, not just HTTP 200.
+Project
 
-## Schedule
+Exactly one canonical golden demo project exists.
 
-Verify:
+Schedule
 
-* correct number of activities
-* correct normalized names/IDs
-* correct dates/quantities where relevant
+Expected schedule(s) exist with expected activity count.
 
-Do not duplicate all schedule-validator test coverage.
+Progress
 
-## Evidence
+Expected canonical observations exist.
 
-Verify:
+Risk
 
-* correct project association
-* evidence persisted
-* no client-visible filesystem path leakage
+Expected counts/classifications are produced by the real risk engine.
 
-## Job
+Intelligence
 
-Verify:
+Expected delayed/at-risk/completed/milestone/stale outputs are produced.
 
-* job created
-* processing occurs
-* job reaches the correct final state
-* result payload is bounded/sanitized
+Dashboard
 
-## Extraction
+Expected headline numbers appear.
 
-Verify:
+Assistant
 
-* deterministic MockAI output is accepted
-* extracted facts are structured
-* no fabricated activity IDs are introduced by the application
+A deterministic assistant query returns grounded facts matching the seeded state.
 
-## Matching
+Evidence
 
-Verify:
+Expected evidence records/files exist.
 
-* expected activity receives expected candidate
-* confidence tier/status are correct
-* ambiguous fact does not become canonical
+16. Golden dataset should have machine-verifiable invariants
 
-## Review
+Create a small manifest containing expected logical values.
 
-Confirm the intended match using the existing review workflow.
+For example:
 
-Verify:
+projectCode
+activityCount
+scheduleCount
+expectedDelayedIds
+expectedAtRiskIds
+expectedCompletedIds
+expectedMilestoneIds
+expectedStaleIds
+expectedProgressSummary
 
-* match becomes confirmed
-* reviewer metadata exists
-* corresponding audit event exists
-* the state transition remains atomic
+Do not duplicate production logic here.
 
-## Canonical Progress
+The manifest should contain expected results, not calculation formulas.
 
-Use the EXISTING ProgressService.
+17. Demo fixture determinism
 
-Verify:
+Use fixed:
 
-* confirmed match creates ActivityProgress
-* expected progress percentage is stored
-* expected observation/as-of date is preserved
-* rejected/unresolved facts do not create canonical progress
+project code
+activity IDs
+report dates
+file names
+textual evidence
+progress percentages
+reviewer names where relevant
 
-## Snapshot / Variance / Risk
+Avoid:
 
-Query the existing canonical services.
+Date.now()
+Math.random()
+current system date
+random UUIDs in semantic assertions
 
-Assert exact expected values.
+Generated database UUIDs may remain generated internally, but the logical golden dataset must be stable.
 
-Do NOT recreate production formulas inside the test.
+18. Demo seed should not depend on Gemini
 
-## Intelligence
+This is critical.
 
-Call the real ProjectIntelligenceService or endpoint.
+npm run demo:reset must work offline.
 
-Assert the expected entries in:
+The golden presentation environment should not require:
 
-* delayed
-* atRisk
-* completedToday
-* behindSchedule
-* approachingMilestones
-* staleActivities
-* recentChanges
+Gemini API calls
+internet access
+external services
+Docker
+cloud databases
 
-## Dashboard
+Use the existing deterministic/local AI machinery where AI-generated extraction must be represented.
 
-Call:
+The repo is explicitly designed as a local-only presentation environment.
 
-`GET /api/projects/:projectId/dashboard`
+19. Do not contaminate production architecture
 
-Assert the displayed aggregate values match the canonical snapshot/intelligence state.
+This pass must not introduce:
 
-The test must detect disagreement between dashboard aggregation and domain truth.
+special demo-only database tables
+alternate domain calculations
+a separate demo dashboard
+fake assistant APIs
+hardcoded frontend values
+demo-only production branches scattered across services
+bypasses around review/canonical-truth rules
 
-## Assistant
+The demo dataset must operate through the same application paths used by normal FieldLine behavior.
 
-Call:
+20. Documentation
 
-`POST /api/projects/:projectId/assistant/query`
+Update the relevant documentation so that a fresh clone can understand:
 
-Use a deterministic question such as:
+npm install
+npm run setup
+npm run demo:reset
+npm run dev
 
-`What is delayed?`
+and immediately reproduce the SIH demo.
 
-Verify:
+Update:
 
-* correct intent
-* correct verified fact reference
-* grounded result
-* authoritative value
-* no invented project data
+README
+implementation plan / roadmap as appropriate
+demo instructions if a dedicated document is created
 
-The assistant should be connected to the REAL intelligence state created by the workflow.
+The README currently states that npm run demo:reset resets to a pristine state, so that description must be corrected to reflect the new golden-demo semantics.
 
----
+21. Verification commands
 
-# FAILURE EVALUATION
+At the end of the pass, run:
 
-Add focused high-value failure scenarios.
-
-Do not duplicate existing tests unnecessarily.
-
-## 1. Malformed schedule
-
-Verify:
-
-* request rejected
-* no partial schedule/activity truth
-* existing records remain unchanged
-
-Prefer existing invalid schedule fixtures.
-
-## 2. Malformed document
-
-Verify:
-
-* processing fails
-* job becomes failed
-* no partial ProgressUpdate
-* no new ActivityProgress
-
-## 3. AI extraction failure
-
-Replace only the AI dependency with a deterministic failing provider.
-
-Verify:
-
-* processing fails
-* no ProgressUpdate
-* no Match
-* no ActivityProgress
-* existing canonical state remains unchanged
-
-## 4. Missing activity
-
-Field report refers to an activity not present in the schedule.
-
-Verify:
-
-* no canonical progress
-* safe unresolved/not-found behavior
-
-## 5. Ambiguous activity
-
-Create two plausible candidates.
-
-Verify:
-
-* match remains suggested/unresolved according to the existing policy
-* no automatic canonical truth
-
-## 6. Rejected match
-
-Reject an otherwise plausible match.
-
-Verify:
-
-* no ActivityProgress is created
-
-## 7. Duplicate evidence
-
-Upload/process the same raw bytes twice within the same project.
-
-Verify:
-
-* content-addressable deduplication remains intact
-* no duplicated canonical truth
-* processing idempotency remains intact
-
-## 8. Contradictory report
-
-Create a second report containing conflicting progress information.
-
-Do NOT invent a new conflict-resolution policy.
-
-Instead, test the repository's current actual semantics and verify that contradictory input cannot silently corrupt canonical state.
-
-## 9. Invalid date
-
-Use malformed/invalid report-date information.
-
-Verify deterministic validation/fallback behavior consistent with existing implementation.
-
-Never use the current wall clock to create arbitrary project truth.
-
-## 10. Missing quantity / missing percentage
-
-Verify the application's current behavior for incomplete facts.
-
-Do not fabricate a number just to make the test pass.
-
-## 11. Malformed assistant claim
-
-Configure MockAI so it returns:
-
-* a valid factRef
-* a valid-looking claim
-* but an incorrect authoritative value
-
-Verify the existing field-level grounding protection rejects the claim.
-
----
-
-# CROSS-PROJECT ISOLATION
-
-The flagship evaluation should also create Project A and Project B.
-
-Populate each with distinct data.
-
-Verify that Project A's:
-
-* evidence
-* processing
-* matches
-* progress
-* intelligence
-* dashboard
-* assistant
-
-never expose Project B data.
-
-Also verify the inverse.
-
-Do not rely only on repository-level isolation tests; this is a whole-workflow regression.
-
----
-
-# DETERMINISM
-
-Run the same deterministic fixture twice.
-
-Compare the resulting logical outputs:
-
-* extracted fields
-* match results
-* canonical progress
-* snapshot
-* intelligence
-* dashboard facts
-* assistant verified facts
-
-Normalize generated:
-
-* UUIDs
-* creation timestamps
-* other non-semantic metadata
-
-The two logical results must be equivalent.
-
----
-
-# TEST COMMAND
-
-The repository currently has Vitest configured for backend tests.
-
-Keep:
-
-`npm test`
-
-as the complete regression suite.
-
-Add:
-
-`npm run test:evaluation`
-
-for the critical evaluation test.
-
-Optionally add:
-
-`npm run test:coverage`
-
-only if cleanly compatible with the current setup.
-
-Do NOT introduce arbitrary coverage thresholds simply to produce a numeric target.
-
----
-
-# FILES / AREAS LIKELY TO CHANGE
-
-Inspect before editing. Likely areas include:
-
-* `backend/tests/`
-* `backend/tests/fixtures/`
-* `package.json`
-* possibly a new test helper under `backend/tests/`
-* possibly test-only dependency-composition helpers if the current architecture needs one
-
-Do not modify production services unless absolutely necessary for testability.
-
-If dependency injection prevents the flagship workflow from being composed with `MockAIProvider`, solve that minimally and architecturally.
-
-Do NOT add production behavior merely for testing.
-
----
-
-# REGRESSION REQUIREMENTS
-
-After implementation run:
-
-```bash
+npm run demo:reset
+npm run demo:verify
 npm test
 npm run build
-npm run test:evaluation
-```
 
 All must pass.
 
-Do not weaken existing tests.
+Then verify manually that:
 
-Do not remove existing tests.
+npm run dev
 
-Do not change existing expected project semantics merely to satisfy the new evaluation suite.
+opens directly into the populated golden project.
 
-If the new system-level test exposes a genuine contradiction in the current implementation, STOP and report the inconsistency rather than silently changing production semantics.
+22. Exit criteria
 
----
+Pass 24 is complete when:
 
-# SCOPE GUARD
+Reset
+npm run demo:reset
 
-This is a TEST/EVALUATION pass.
+recreates the exact golden environment.
 
-Do NOT implement:
+Reproducibility
 
-* speech-to-text
-* new AI providers
-* new dashboard features
-* new assistant capabilities
-* new persistence concepts
-* new project-truth semantics
-* new conflict-resolution policy
-* Playwright/Cypress browser testing
-* cloud test infrastructure
-* CI/CD redesign
-* performance/load testing
-* production observability
+Running reset repeatedly yields the same logical state.
 
-Keep Pass 23 focused on proving the current system.
+Dataset
 
----
+A realistic industrial project exists with roughly 30 activities across multiple work areas.
 
-# DEFINITION OF DONE
+Progress story
 
-Pass 23 is complete when all of the following are true:
+The project includes believable historical progress and a mixture of completed, on-track, at-risk, delayed, and stale activities.
 
-1. The complete existing regression suite passes.
-2. The build passes.
-3. A dedicated critical evaluation command exists and passes.
-4. A deterministic end-to-end test proves:
+Messy language
 
-```text
-schedule
-→ evidence
-→ job
-→ ingestion
-→ extraction
-→ matching
-→ review
-→ canonical progress
-→ snapshot
-→ variance/risk
-→ intelligence
-→ dashboard
-→ assistant
-```
+Multiple differently worded field observations map to the same canonical scheduled activities.
 
-5. Failure scenarios prove malformed or uncertain input cannot silently become canonical truth.
-6. Cross-project isolation is proven across the complete workflow.
-7. Assistant field-level grounding is exercised against real generated intelligence.
-8. Repeated identical fixtures produce equivalent logical outputs.
-9. No existing approved invariant is weakened.
-10. No duplicate business engine is introduced.
+Human review
 
----
+Suggested, rejected, and manually resolved match states are represented.
 
-# COMMIT
+Evidence
+
+The project contains realistic locally stored evidence connected to reports/progress.
+
+Dashboard
+
+The dashboard opens with a meaningful, presentation-ready state.
+
+Activity Detail
+
+Several activities have useful execution histories.
+
+Intelligence
+
+The intelligence endpoint produces deterministic, meaningful results.
+
+Assistant
+
+The assistant answers from the actual seeded project state and remains grounded.
+
+Offline
+
+The demo can be rebuilt without Gemini or external services.
+
+Regression
+
+Existing tests/build continue to pass.
+
+Verification
+
+A machine-checkable golden-demo verification exists.
+
+Scope guard
+
+Do NOT implement Pass 22 voice input.
+
+Do NOT implement Pass 25 presentation polish.
+
+Do NOT redesign the dashboard.
+
+Do NOT add new assistant capabilities.
+
+Do NOT redesign the domain model.
+
+Do NOT introduce a new database.
+
+Do NOT add external infrastructure.
+
+This pass is:
+
+“Make FieldLine reproducibly demo-ready.”
+
+Nothing more.
+
+Suggested commit
 
 Use:
 
-`test: add FieldLine critical workflow evaluation suite`
+feat: add FieldLine golden demo environment

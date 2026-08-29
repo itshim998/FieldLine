@@ -600,6 +600,14 @@ export function App(): React.JSX.Element {
             showNotification('info', 'Previously selected project was not found; returned to project list.');
           }
         }
+      } else if (projectList.length === 1) {
+        const soleProject = projectList[0];
+        setSelectedProject(soleProject);
+        localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, soleProject.id);
+        fetchSchedules(soleProject.id);
+        fetchProgressUpdates(soleProject.id);
+        fetchEvidence(soleProject.id);
+        fetchIntelligence(soleProject.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
       } else {
         setSelectedProject(null);
       }
