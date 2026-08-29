@@ -46,7 +46,7 @@ export { GeminiAIProvider } from './providers/gemini-ai.provider.js';
 export { GroqAIProvider } from './providers/groq-ai.provider.js';
 export type { GroqAIProviderOptions } from './providers/groq-ai.provider.js';
 export { GroqKeyRouter } from './providers/groq-key-router.js';
-export type { GroqKeyRouterOptions, KeyHealthState, ProviderAttemptError } from './providers/groq-key-router.js';
+export type { GroqKeyRouterOptions, KeyHealthState, KeyHealthSnapshot, ProviderAttemptError } from './providers/groq-key-router.js';
 
 export { DefaultAIService, createDefaultAIProvider, aiService } from './services/ai.service.js';
 export type { AIService } from './services/ai.service.js';

@@ -14,6 +14,10 @@ export interface KeyHealthState {
   isPermanentlyInvalid: boolean;
 }
 
+export interface KeyHealthSnapshot extends Omit<KeyHealthState, 'apiKey'> {
+  isAvailable: boolean;
+}
+
 export interface GroqKeyRouterOptions {
   apiKeys: string[];
   defaultModel?: string;
@@ -98,7 +102,7 @@ export class GroqKeyRouter {
   /**
    * Returns a snapshot of health states for all keys without exposing API keys.
    */
-  getKeyHealthSnapshots(): Omit<KeyHealthState, 'apiKey'>[] {
+  getKeyHealthSnapshots(): KeyHealthSnapshot[] {
     const now = Date.now();
     return this.keys.map((k) => ({
       index: k.index,
