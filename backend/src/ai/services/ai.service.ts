@@ -4,7 +4,7 @@ import { MockAIProvider } from '../providers/mock-ai.provider.js';
 import { AIRequestOptions } from '../contracts/ai.contract.js';
 import { AIProviderError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
-
+import { GroqAIProvider } from '../providers/groq-ai.provider.js';
 import { env } from '../../config/env.js';
 import { GeminiAIProvider } from '../providers/gemini-ai.provider.js';
 
@@ -20,6 +20,12 @@ export function createDefaultAIProvider(): AIProvider {
       defaultModel: env.GEMINI_MODEL
     });
   }
+  if (env.AI_PROVIDER === 'groq') {
+   return new GroqAIProvider({
+     apiKey: env.GROQ_API_KEY,
+     defaultModel: env.GROQ_MODEL
+  });
+}
   return new MockAIProvider();
 }
 

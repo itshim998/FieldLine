@@ -10,9 +10,12 @@ export const envSchema = z.object({
   DATABASE_PATH: z.string().min(1).default('./database/fieldline.db'),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
   VITE_PORT: z.coerce.number().int().positive().default(3000),
-  AI_PROVIDER: z.enum(['mock', 'gemini']).default('mock'),
+  AI_PROVIDER: z.enum(['mock', 'gemini','groq']).default('mock'),
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash')
+  GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash'),
+  
+  GROQ_API_KEY: z.string().optional(),
+  GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b'),
 }).superRefine((data, ctx) => {
   if (data.AI_PROVIDER === 'gemini' && (!data.GEMINI_API_KEY || data.GEMINI_API_KEY.trim().length === 0)) {
     ctx.addIssue({
@@ -21,6 +24,14 @@ export const envSchema = z.object({
       path: ['GEMINI_API_KEY']
     });
   }
+
+if (data.AI_PROVIDER === 'groq' && (!data.GROQ_API_KEY || data.GROQ_API_KEY.trim().length === 0)) {
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: 'GROQ_API_KEY is required when AI_PROVIDER=groq',
+    path: ['GROQ_API_KEY']
+  });
+}
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;
