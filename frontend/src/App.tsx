@@ -34,7 +34,8 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
-  LayoutDashboard
+  LayoutDashboard,
+  Sparkles
 } from 'lucide-react';
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
@@ -1392,7 +1393,7 @@ export function App(): React.JSX.Element {
             SIH 2026 &bull; SIH26122
           </div>
           <div className="badge-pass">
-            Pass 7: Manual Progress Reporting
+            Deterministic Core &bull; Verified
           </div>
         </div>
       </header>
@@ -1992,7 +1993,7 @@ export function App(): React.JSX.Element {
                   </div>
                   <div className="progress-mode-badge">
                     <ShieldCheck size={13} />
-                    <span>PASS 7 &bull; Raw Data Capture</span>
+                    <span>Direct Field Progress Capture</span>
                   </div>
                 </div>
 
@@ -2178,7 +2179,7 @@ export function App(): React.JSX.Element {
                         <div className="progress-item-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                             <span className="progress-record-id mono">ID: {update.id}</span>
-                            <span className="progress-pass-tag">Pass 19 Human Review Enabled</span>
+                            <span className="progress-pass-tag">Human Review Enabled</span>
                           </div>
                           <button
                             type="button"
@@ -2902,10 +2903,12 @@ export function App(): React.JSX.Element {
                   <span className="assistant-suggestions-label">Recent / Suggested:</span>
                   {[
                     'What is delayed?',
-                    'Why is Foundation B at risk?',
-                    'Which activities are most behind schedule?',
-                    'What changed today?',
+                    'Which activities are at risk?',
+                    'Tell me about the crude pump foundation',
                     'Which milestones are approaching?',
+                    'What is the status of ACT-B02?',
+                    'What changed recently?',
+                    'Why is PR-07 steel erection at risk?',
                     'Which activities have no recent updates?'
                   ].map((q, idx) => (
                     <button
@@ -2925,6 +2928,19 @@ export function App(): React.JSX.Element {
                   <div className="notification-banner error" style={{ margin: 0 }}>
                     <AlertCircle size={16} />
                     <span>{assistantError}</span>
+                  </div>
+                )}
+
+                {/* Assistant Loading Skeleton Box */}
+                {assistantLoading && !assistantResponse && (
+                  <div className="assistant-loading-box">
+                    <RefreshCw size={24} className="pulse-dot" color="#6366f1" />
+                    <span className="assistant-loading-text">
+                      Evaluating Verified Project Intelligence Facts...
+                    </span>
+                    <span className="assistant-loading-subtext">
+                      Performing grounded natural language synthesis with deterministic citation verification
+                    </span>
                   </div>
                 )}
 
@@ -2959,7 +2975,20 @@ export function App(): React.JSX.Element {
                         )}
 
                         {assistantResponse.resolvedActivity && (
-                          <span className="format-tag" style={{ background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8' }}>
+                          <span
+                            className="format-tag"
+                            style={{
+                              background: 'rgba(56, 189, 248, 0.15)',
+                              color: '#38bdf8',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => {
+                              if (assistantResponse.resolvedActivity?.id) {
+                                handleOpenActivityDetail(assistantResponse.resolvedActivity.id);
+                              }
+                            }}
+                            title="Click to view full activity detail"
+                          >
                             Target: {assistantResponse.resolvedActivity.name} ({assistantResponse.resolvedActivity.externalId})
                           </span>
                         )}
@@ -2968,10 +2997,6 @@ export function App(): React.JSX.Element {
                       <span className="date-cell" style={{ fontSize: '0.75rem' }}>
                         Observed as-of {assistantResponse.asOfDate}
                       </span>
-                    </div>
-
-                    <div className="assistant-answer-body">
-                      {assistantResponse.answer}
                     </div>
 
                     {/* Ambiguous Candidates Suggestion Box */}
@@ -2995,6 +3020,48 @@ export function App(): React.JSX.Element {
                       </div>
                     )}
 
+                    {/* Factual Claims Grid (Section 18 & 19 Grounding) */}
+                    {assistantResponse.claims && assistantResponse.claims.length > 0 && (
+                      <div className="assistant-claims-section">
+                        <div className="assistant-claims-title">
+                          <ShieldCheck size={14} />
+                          <span>Verified Factual Claims ({assistantResponse.claims.length}):</span>
+                        </div>
+                        <div className="assistant-claims-grid">
+                          {assistantResponse.claims.map((claim, idx) => (
+                            <div key={idx} className="assistant-claim-card">
+                              <div className="assistant-claim-header">
+                                <span className={`assistant-claim-type ${claim.type || 'metric'}`}>
+                                  {claim.type || 'fact'}
+                                </span>
+                                <span className="assistant-claim-ref">
+                                  {claim.factRef || (claim.factRefs ? claim.factRefs.join(', ') : 'FACT')}
+                                </span>
+                              </div>
+                              <p className="assistant-claim-text">{claim.text}</p>
+                              {claim.field && (
+                                <div className="assistant-claim-field-val">
+                                  <span>{claim.field}:</span>
+                                  <strong>{String(claim.value)}</strong>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Natural-Language Synthesis Body */}
+                    <div className="assistant-synthesis-container">
+                      <div className="assistant-synthesis-header">
+                        <Sparkles size={14} />
+                        <span>Natural-Language Synthesis (AI Generated)</span>
+                      </div>
+                      <div className="assistant-answer-body">
+                        {assistantResponse.answer}
+                      </div>
+                    </div>
+
                     {/* Verified Facts & Citations Accordion */}
                     {assistantResponse.verifiedFacts.length > 0 && (
                       <div className="assistant-facts-section">
@@ -3016,7 +3083,18 @@ export function App(): React.JSX.Element {
                                 <div className="assistant-fact-card-header">
                                   <span className="assistant-fact-ref-badge">{fact.ref}</span>
                                   {fact.externalId && (
-                                    <span className="act-id-cell">{fact.externalId}</span>
+                                    <span
+                                      className="act-id-cell"
+                                      style={{ cursor: fact.activityId ? 'pointer' : 'default' }}
+                                      onClick={() => {
+                                        if (fact.activityId) {
+                                          handleOpenActivityDetail(fact.activityId);
+                                        }
+                                      }}
+                                      title={fact.activityId ? 'Click to open Activity Detail View' : undefined}
+                                    >
+                                      {fact.externalId}
+                                    </span>
                                   )}
                                   {fact.category && (
                                     <span className="format-tag" style={{ fontSize: '0.7rem' }}>
@@ -4107,8 +4185,8 @@ export function App(): React.JSX.Element {
                   <span className="meta-card-value">{latency !== null ? `${latency} ms` : '—'}</span>
                 </div>
                 <div className="meta-card">
-                  <span className="meta-card-label">Pass Version</span>
-                  <span className="meta-card-value">Pass 7 Manual Reporting</span>
+                  <span className="meta-card-label">System Release</span>
+                  <span className="meta-card-value">FieldLine v0.1.0 Production</span>
                 </div>
               </div>
             </div>

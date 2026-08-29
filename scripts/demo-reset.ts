@@ -8,7 +8,7 @@ import { verifyGoldenDemoEnvironment } from './demo-verify.js';
 
 async function resetDemoEnvironment(): Promise<void> {
   console.log('====================================================');
-  console.log('🔄 Resetting FieldLine Golden Demo Environment (Pass 24)');
+  console.log('🔄 Resetting FieldLine Golden Demo Environment');
   console.log('====================================================');
 
   const rootDir = process.cwd();

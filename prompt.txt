@@ -1,650 +1,850 @@
-PASS 24 — Golden Demo Environment
-Objective
+# FieldLine Pass 25 — Final Integration, Release Hardening & Presentation Polish
 
-Create a fully deterministic, presentation-ready local FieldLine environment for SIH 2026.
+Repository:
 
-The goal is not merely “insert sample data.”
+`itshim998/FieldLine`
 
-The goal is:
+Branch:
 
-Run one command and get the exact project state needed for the SIH demonstration, every single time.
+`main`
 
-The environment must be:
+## Canonical baseline
 
-reset
+The current canonical baseline is Pass 24:
+
+`c31895deced67e47a883f9d2a6ea0d9ea20dfece`
+
+Commit:
+
+`feat: add FieldLine golden demo environment`
+
+Verify the actual current HEAD before making changes. Do not assume the SHA above is still the latest commit.
+
+Pass 24 is approved and already provides:
+
+* deterministic Golden Demo project: `Refinery Expansion — Unit 4`
+* project code: `REFINERY-U4`
+* 30 activities
+* six EPC work areas
+* multi-date historical evidence
+* physical evidence fixtures
+* deterministic canonical progress
+* review-state examples
+* delayed / at-risk / completed / on-track distribution
+* approaching milestones
+* `npm run demo:reset`
+* `npm run demo:verify`
+* machine-checkable demo invariants
+* offline MockAI assistant support
+* automatic selection of the sole golden project on fresh startup
+
+Pass 23 is also approved and remains the canonical regression suite.
+
+Pass 22 remains deliberately BENCHED.
+
+---
+
+# PASS 25 OBJECTIVE
+
+Do NOT build another major product feature.
+
+The objective is:
+
+> Turn the current working FieldLine system into a coherent, release-ready, SIH-presentation-ready application.
+
+Pass 24 established the golden environment.
+
+Pass 25 must make that environment:
+
+* polished
+* coherent
+* recoverable
+* documented
+* responsive
+* operationally reliable
+
+Think:
+
+```text
+Pass 23 = prove the system
+Pass 24 = create the demo state
+Pass 25 = make the whole thing presentation-ready
+```
+
+---
+
+# FIRST TASK — AUDIT THE ACTUAL REPOSITORY
+
+Before editing:
+
+1. Inspect current `main` HEAD.
+2. Inspect frontend architecture.
+3. Inspect current dashboard components.
+4. Inspect Activity Detail components.
+5. Inspect assistant UI and data model.
+6. Inspect evidence/upload UI.
+7. Inspect review UI.
+8. Inspect all loading/error/empty-state handling.
+9. Inspect `scripts/setup.ts`.
+10. Inspect `scripts/demo-reset.ts`.
+11. Inspect `scripts/demo-verify.ts`.
+12. Inspect `demo/golden-demo-manifest.ts`.
+13. Inspect `demo/golden-demo-seeder.ts`.
+14. Inspect `package.json`.
+15. Inspect `docs/`.
+16. Search for:
+
+* debug logs
+* TODO/FIXME
+* stale pass numbers
+* dead imports
+* dead components
+* temporary files
+* hardcoded demo values
+* absolute local paths
+
+Do not perform a large rewrite.
+
+---
+
+# SECTION 1 — FINAL DEMO JOURNEY
+
+Make this journey work smoothly:
+
+```text
+Open FieldLine
 ↓
-seed
+Golden Project automatically selected
 ↓
-start FieldLine
-↓
-same project
-↓
-same schedules
-↓
-same evidence
-↓
-same progress history
-↓
-same dashboard
-↓
-same activity detail
-↓
-same intelligence
-↓
-same assistant answers
-
-No manual database editing should be necessary.
-
-1. Golden demo project
-
-Use a realistic flagship project:
-
-Refinery Expansion — Unit 4
-
-This is preferable to simply copying the smaller Pass 23 “Metro Transit Hub” project because Pass 24 is a presentation dataset, not a regression fixture.
-
-Target roughly 30 activities.
-
-The activities should be distributed across multiple work areas, for example:
-
-Area A — Civil / Earthworks
-Area B — Foundation
-Area C — Structural
-Area D — Piping
-Area E — Electrical / Instrumentation
-Area F — Commissioning
-
-Do not create six completely artificial disconnected groups. They should feel like one real infrastructure/industrial project.
-
-2. Dataset composition
-
-The 30-or-so activities should deliberately produce a useful dashboard state.
-
-Include:
-
-Category	Approximate target
-On track	12–16
-Behind / mildly negative variance	4–6
-At risk	3–4
-Delayed / overdue	2–4
-Completed	3–5
-Milestones	3–5
-Stale / no recent update	several
-
-These are targets, not rigid counts.
-
-The final distribution must be driven by the actual risk/progress engine so the dashboard tells a coherent story.
-
-Do not manually label an activity “AT_RISK” or “DELAYED” in the database if those values are derived by existing engines.
-
-3. Realistic schedule data
-
-Create a canonical demo schedule containing:
-
-activity IDs
-activity names
-WBS codes
-work areas
-planned start/finish
-planned quantities
-units
-baseline progress where supported by the current schema
-
-The data should resemble a real EPC/infrastructure schedule rather than a toy dataset.
-
-Example activity naming style:
-
-Unit 4 Site Grading
-North Tank Foundation Excavation
-Crude Pump Foundation Piling
-Pipe Rack PR-07 Structural Erection
-Cooling Water Header Installation
-Process Pipe Rack Carbon Steel Spooling
-Electrical Substation Civil Works
-MCC Room Cable Tray Installation
-Instrument Air Header Testing
-Unit 4 Hydrotest Package A
-
-Use the actual schedule import/normalization path where practical so the demo data remains representative of real user input.
-
-4. Messy field reports
-
-This is the most important presentation feature.
-
-Create realistic human-written field reports containing multiple ways of describing the same scheduled activity.
-
-For example, for one canonical activity such as:
-
-ACT-014 — Block B Excavation
-
-the evidence can contain:
-
-“Block B excavation roughly 65% done.”
-
-Another report:
-
-“Excavation at B is practically finished.”
-
-Another:
-
-“Section B earthwork completed.”
-
-The point is to visually demonstrate that FieldLine can connect heterogeneous field language to canonical schedule activities.
-
-Do this across several activities, not only one.
-
-Use multiple linguistic variations:
-
-shortened names
-location-first descriptions
-informal site language
-spelling/casing variation
-quantity-oriented descriptions
-completion phrases
-partially specified descriptions
-
-Do not fabricate activity IDs inside these human-written reports unless that is intentionally part of a test scenario.
-
-5. Multiple report dates
-
-Do not make the demo consist of one report on one day.
-
-Create a small history, for example:
-
-D-14
-D-10
-D-7
-D-3
-D-1
-D0 / presentation date
-
-The exact dates should be deterministic.
-
-This allows the demo to show:
-
-changing progress
-historical observations
-overdue activities
-completed work
-recent updates
-stale activities
-asOfDate behavior
-
-This is especially important because Pass 23 established historical/deterministic evaluation as a major invariant.
-
-6. Canonical progress history
-
-Seed actual ActivityProgress only through the repository's canonical mechanisms.
-
-Do not directly insert fake canonical progress rows merely for convenience unless the existing data-seeding architecture absolutely requires it.
-
-The final dataset should contain a believable progression history.
-
-For example:
-
-Foundation excavation:
-20% → 38% → 52% → 65%
-
-Pipe rack erection:
-15% → 31% → 48%
-
-Electrical room:
-0% → 12% → 26%
-
-Tank foundation:
-100% completed
-
-The exact values should be selected so the existing snapshot/risk calculations generate a visually meaningful state.
-
-7. Evidence files
-
-Seed a realistic evidence set.
-
-Prefer actual local files over database-only placeholders.
-
-Include several:
-
-.txt
-.csv
-.pdf where practical
-optionally a small image/photo fixture if the existing application path supports it cleanly
-
-Examples:
-
-daily_site_report_2026-08-18.txt
-civil_progress_update_2026-08-21.csv
-weekly_execution_report_2026-08-24.pdf
-inspection_note_unit4.txt
-piping_progress_2026-08-27.csv
-
-These should live inside the existing local upload/evidence model.
-
-Do not put secrets or unnecessary large binary assets in Git.
-
-Keep fixtures small and repository-friendly.
-
-8. Matches and review states
-
-The golden environment should intentionally contain all useful review situations.
-
-Include:
-
-Clearly resolved
-
-Some reports should produce strong, unambiguous matches.
-
-Suggested
-
-Some observations should remain pending review.
-
-Rejected
-
-At least one deliberately incorrect candidate should be rejected.
-
-Manually resolved
-
-At least one ambiguous observation should demonstrate the human review path.
-
-This is important for the demo because it shows the human-in-the-loop model rather than portraying AI as automatically authoritative.
-
-The current repository already encodes this review model:
-
-confirmed → canonical eligible
-suggested → awaiting review
-rejected → non-canonical
-resolved → confirmed via human action
-
-and Pass 23 tests these boundaries.
-
-9. Assistant-ready state
-
-The final dataset must produce meaningful answers to questions such as:
-
-What is delayed?
-
-Which activities are at risk?
-
-What changed recently?
-
-What is behind schedule?
-
-What happened in Area B?
-
-Tell me about the tank foundation.
-
-The assistant must answer from the actual seeded project state, not from hardcoded demo responses.
-
-Do not add a “demo mode” that bypasses the existing grounded assistant.
-
-10. Dashboard-ready state
-
-The seeded project should make the dashboard visually useful immediately.
-
-It should contain enough variation to produce:
-
-meaningful overall progress
-a non-zero variance
-delayed activities
-at-risk activities
-completed activities
-upcoming milestones
-stale activities
-recent updates
-evidence-linked updates
-
-The dashboard should therefore tell a story at first load.
-
-11. Activity Detail-ready state
-
-At least 3–5 activities should have especially rich histories.
-
-For those activities, the Activity Detail screen should show:
-
-Identity
-↓
-Current state
-↓
-Progress timeline
-↓
-Source report
-↓
-Match/review history
-↓
-Originating evidence
-
-This is where Pass 21 + Pass 24 should meet.
-
-Do not add new Activity Detail functionality in this pass.
-
-Just create the dataset that makes the existing feature compelling.
-
-12. Deterministic seed architecture
-
-Create a proper demo seeding layer.
-
-For example:
-
-scripts/
-    demo-reset.ts
-    demo-seed.ts
-
-demo/
-    golden-demo.ts
-    fixtures/
-        schedules/
-        reports/
-        evidence/
-
-You may choose better names based on the existing architecture.
-
-The essential requirement is that the dataset has one canonical source definition.
-
-Do not scatter dozens of unrelated INSERT statements through demo-reset.ts.
-
-Prefer a structured deterministic seed definition that can be consumed by a small seed orchestrator.
-
-13. Redesign npm run demo:reset
-
-The existing demo:reset currently resets to an empty database.
-
-Change its semantic meaning to:
-
-npm run demo:reset
-
-=
-
-remove previous runtime state
-↓
-recreate database
-↓
-run migrations
-↓
-seed golden project
-↓
-seed schedules
-↓
-seed progress history
-↓
-seed evidence
-↓
-seed matches/review state
-↓
-verify canonical state
-↓
-verify dashboard/intelligence
-↓
-verify assistant-ready state
-↓
-exit
-
-After it completes, running:
-
-npm run dev
-
-must immediately show the golden demo environment.
-
-14. Demo reset must be idempotent
-
-Running:
-
-npm run demo:reset
-npm run demo:reset
-npm run demo:reset
-
-must always result in the same logical project state.
-
-No duplicate:
-
-projects
-schedules
-activities
-evidence
-progress updates
-matches
-events
-
-should accumulate.
-
-15. Golden demo verification
-
-Do not trust the seeder merely because it exits with code 0.
-
-Add a dedicated verification step/test.
-
-For example:
-
-npm run demo:verify
-
-or an appropriate equivalent.
-
-It should verify at minimum:
-
-Project
-
-Exactly one canonical golden demo project exists.
-
-Schedule
-
-Expected schedule(s) exist with expected activity count.
-
-Progress
-
-Expected canonical observations exist.
-
-Risk
-
-Expected counts/classifications are produced by the real risk engine.
-
-Intelligence
-
-Expected delayed/at-risk/completed/milestone/stale outputs are produced.
-
 Dashboard
+↓
+Identify delayed / at-risk activity
+↓
+Open Activity Detail
+↓
+Inspect execution history
+↓
+Inspect evidence/review context
+↓
+Return to dashboard
+↓
+Open Assistant
+↓
+Ask grounded question
+↓
+Show verified facts
+```
 
-Expected headline numbers appear.
+Also ensure this core workflow remains demonstrable:
 
-Assistant
+```text
+Schedule
+↓
+Field Report
+↓
+Matching
+↓
+Review
+↓
+Canonical Progress
+↓
+Variance
+```
 
-A deterministic assistant query returns grounded facts matching the seeded state.
+Do not add new functionality solely for the demo.
 
-Evidence
+---
 
-Expected evidence records/files exist.
+# SECTION 2 — LOADING STATES
 
-16. Golden dataset should have machine-verifiable invariants
+Audit every asynchronous surface.
 
-Create a small manifest containing expected logical values.
+Ensure visible feedback exists for:
 
-For example:
+* initial application load
+* project list loading
+* project selection
+* dashboard loading
+* activity-detail loading
+* schedule loading
+* evidence loading
+* evidence upload
+* evidence processing
+* intelligence loading
+* assistant loading
+* schedule import
+* manual report submission
+* review mutations
 
-projectCode
-activityCount
-scheduleCount
-expectedDelayedIds
-expectedAtRiskIds
-expectedCompletedIds
-expectedMilestoneIds
-expectedStaleIds
-expectedProgressSummary
+Avoid blank UI while requests are active.
 
-Do not duplicate production logic here.
+Reuse existing styling/components where possible.
 
-The manifest should contain expected results, not calculation formulas.
+Do not build an unnecessarily complex skeleton framework.
 
-17. Demo fixture determinism
+---
 
-Use fixed:
+# SECTION 3 — EMPTY STATES
 
-project code
-activity IDs
-report dates
-file names
-textual evidence
-progress percentages
-reviewer names where relevant
+Audit:
 
-Avoid:
+* no projects
+* no schedules
+* no activities
+* no evidence
+* no reports
+* no pending reviews
+* no intelligence entries
+* no recent changes
+* no assistant response
 
-Date.now()
-Math.random()
-current system date
-random UUIDs in semantic assertions
+Each empty state should clearly explain what is missing and what action is relevant.
 
-Generated database UUIDs may remain generated internally, but the logical golden dataset must be stable.
+Do not make empty states interfere with the golden demo first-load experience.
 
-18. Demo seed should not depend on Gemini
+---
 
-This is critical.
+# SECTION 4 — ERROR STATES
 
-npm run demo:reset must work offline.
+Audit network/API/backend failure handling.
 
-The golden presentation environment should not require:
+Important cases:
 
-Gemini API calls
-internet access
-external services
-Docker
-cloud databases
+* backend unavailable
+* invalid project
+* invalid activity
+* upload failure
+* processing failure
+* assistant failure
+* invalid response
+* malformed input
 
-Use the existing deterministic/local AI machinery where AI-generated extraction must be represented.
+The UI should:
 
-The repo is explicitly designed as a local-only presentation environment.
+* show a useful message
+* avoid raw stack traces
+* avoid misleading stale content
+* provide sensible recovery where appropriate
 
-19. Do not contaminate production architecture
+Do not unnecessarily change API error contracts.
 
-This pass must not introduce:
+---
 
-special demo-only database tables
-alternate domain calculations
-a separate demo dashboard
-fake assistant APIs
-hardcoded frontend values
-demo-only production branches scattered across services
-bypasses around review/canonical-truth rules
+# SECTION 5 — DASHBOARD POLISH
 
-The demo dataset must operate through the same application paths used by normal FieldLine behavior.
+Use the EXISTING dashboard architecture.
 
-20. Documentation
+Do not create another dashboard engine.
 
-Update the relevant documentation so that a fresh clone can understand:
+The golden project deliberately contains:
 
+* 4 delayed
+* 4 at-risk
+* 4 completed
+* 18 on-track/ahead
+* 4 approaching milestones
+
+Make those distinctions obvious.
+
+Refine:
+
+* Project Health
+* Activity Status
+* Attention
+* Milestones
+* Recent Updates
+
+Make important information scannable within seconds.
+
+Do not hardcode any golden values into frontend components.
+
+---
+
+# SECTION 6 — ACTIVITY DETAIL POLISH
+
+The current Activity Detail architecture already exposes:
+
+* identity
+* current state
+* timeline
+* progress sources
+* review context
+* evidence
+
+Make the page tell one coherent execution story.
+
+For rich golden activities such as:
+
+* `ACT-B02`
+* `ACT-C01`
+* `ACT-A02`
+
+the user should immediately understand:
+
+```text
+planned
+→ observed
+→ matched
+→ reviewed
+→ actual progress
+→ risk
+→ source evidence
+```
+
+Do not add new business calculations.
+
+Use current backend DTOs.
+
+---
+
+# SECTION 7 — ASSISTANT UX
+
+Use the current Assistant API contract.
+
+The backend exposes:
+
+* intent
+* resolved activity
+* ambiguous candidates
+* answer
+* claims
+* factRefs
+* grounded
+* status
+* asOfDate
+* verifiedFacts
+
+Use these existing fields to make the UI trustworthy.
+
+The user should visually understand:
+
+```text
+AI-generated wording
+        vs
+Verified FieldLine fact
+```
+
+Improve:
+
+* suggested questions
+* loading state
+* response formatting
+* fact/claim display
+* grounded indicator
+* activity resolution
+* failure state
+* empty state
+* as-of-date context
+
+Do not weaken grounding.
+
+Do not add a parallel answer path.
+
+---
+
+# SECTION 8 — EVIDENCE UX
+
+Make evidence traceability clear.
+
+Ensure:
+
+* filename is readable
+* evidence type is clear
+* originating report is understandable
+* Activity Detail shows the relevant source
+* no absolute filesystem paths are shown
+* unavailable evidence gets a clean error state
+
+Do not add a new document viewer unless the current architecture already supports it without scope expansion.
+
+---
+
+# SECTION 9 — REVIEW UX
+
+Preserve current review semantics:
+
+```text
+suggested
+↓
+human action
+↓
+confirmed / rejected / resolved
+```
+
+Make the canonical-truth boundary visually clear.
+
+Do not automatically confirm matches merely to improve the demo.
+
+Do not introduce new review semantics.
+
+---
+
+# SECTION 10 — PROCESSING UX
+
+The existing evidence-processing state should feel complete:
+
+```text
+uploaded
+→ queued
+→ processing
+→ completed
+```
+
+or:
+
+```text
+uploaded
+→ queued
+→ failed
+```
+
+Add visible progress/status feedback where appropriate using the current job architecture.
+
+Do not introduce a new job system.
+
+---
+
+# SECTION 11 — RESPONSIVE UI
+
+Audit at:
+
+* 1440px
+* 1024px
+* 768px
+* 390–430px
+
+Prioritize:
+
+* dashboard
+* Activity Detail
+* project selector
+* review
+* evidence
+* assistant
+
+Fix:
+
+* horizontal overflow
+* clipped content
+* broken grids
+* overlapping buttons
+* unreadable tables
+* oversized cards
+* inaccessible controls
+
+Do not redesign the whole visual language.
+
+---
+
+# SECTION 12 — ENVIRONMENT HARDENING
+
+The current environment schema already supports:
+
+```text
+AI_PROVIDER=mock
+AI_PROVIDER=gemini
+```
+
+with Gemini requiring `GEMINI_API_KEY`.
+
+Verify:
+
+### Offline
+
+Default/local MockAI works without credentials.
+
+### Gemini
+
+Missing API key fails clearly.
+
+### Invalid configuration
+
+Produces a clear startup error.
+
+### Logging
+
+Never expose secrets.
+
+Do not redesign the environment system unless the audit finds a real defect.
+
+---
+
+# SECTION 13 — CLEAN INSTALLATION
+
+Verify the documented sequence from a clean runtime:
+
+```bash
 npm install
 npm run setup
 npm run demo:reset
-npm run dev
-
-and immediately reproduce the SIH demo.
-
-Update:
-
-README
-implementation plan / roadmap as appropriate
-demo instructions if a dedicated document is created
-
-The README currently states that npm run demo:reset resets to a pristine state, so that description must be corrected to reflect the new golden-demo semantics.
-
-21. Verification commands
-
-At the end of the pass, run:
-
-npm run demo:reset
 npm run demo:verify
+npm run dev
+```
+
+The system must not depend on:
+
+* developer-specific absolute paths
+* pre-existing database state
+* old uploads
+* hidden files
+* undocumented API keys
+
+---
+
+# SECTION 14 — RESET RELIABILITY
+
+The current Pass 24 reset pipeline is:
+
+```text
+delete runtime DB
+↓
+delete uploads
+↓
+recreate DB
+↓
+migrations
+↓
+golden seed
+↓
+verification
+```
+
+Preserve this.
+
+Verify repeated:
+
+```bash
+npm run demo:reset
+npm run demo:reset
+npm run demo:reset
+```
+
+produces the same logical golden state.
+
+No duplicates should accumulate.
+
+---
+
+# SECTION 15 — DEMO VERIFICATION
+
+Keep `npm run demo:verify` focused on demo integrity.
+
+It must remain capable of detecting:
+
+* wrong golden project
+* wrong activity count
+* wrong risk counts
+* wrong milestone state
+* missing rich histories
+* missing evidence
+* missing physical evidence files
+* dashboard drift
+* assistant grounding drift
+* duplicate/unexpected golden state
+
+Do not turn it into a replacement for the complete Vitest suite.
+
+---
+
+# SECTION 16 — RELEASE VERIFICATION COMMAND
+
+Add:
+
+```bash
+npm run verify:release
+```
+
+It should orchestrate:
+
+```text
+build
++
+test
++
+demo reset
++
+demo verify
+```
+
+Use the repository's existing commands.
+
+Avoid recursive npm-script loops.
+
+Do not start long-running dev servers from this command.
+
+The purpose is:
+
+> One command determines whether the repository is ready for presentation.
+
+---
+
+# SECTION 17 — DOCUMENTATION
+
+Create:
+
+## `docs/DEMO.md`
+
+Include:
+
+* SIH demo purpose
+* golden project
+* exact setup commands
+* demo reset
+* demo verification
+* recommended dashboard walkthrough
+* recommended Activity Detail walkthrough
+* recommended review demonstration
+* recommended assistant questions
+* recovery instructions
+
+## `docs/AI-PIPELINE.md`
+
+Document:
+
+```text
+Field Evidence
+↓
+Normalization
+↓
+AI Structured Extraction
+↓
+Zod Contract Validation
+↓
+Activity Matching
+↓
+Confidence / Review Policy
+↓
+Human Confirmation
+↓
+Canonical Progress
+↓
+Deterministic Intelligence
+↓
+Grounded Assistant
+```
+
+Explicitly explain:
+
+* what AI does
+* what AI does not do
+* why AI is not authoritative
+* MockAI vs Gemini
+* structured contracts
+* human-review boundary
+* grounding
+
+## `docs/ARCHITECTURE.md`
+
+Audit and update the existing architecture document.
+
+Do not replace it wholesale.
+
+Bring it into alignment with the ACTUAL Pass 24 codebase, including:
+
+* demo environment
+* demo verification
+* Activity Detail
+* current AI provider abstraction
+* worker pipeline
+* current frontend composition
+
+---
+
+# SECTION 18 — FINAL ARCHITECTURE DIAGRAM
+
+Ensure documentation includes an accurate high-level architecture such as:
+
+```text
+                      Local Browser
+                           ↓
+                  FieldLine React UI
+                           ↓
+                  Node / Express API
+                           ↓
+        ┌──────────────────┼──────────────────┐
+        ↓                  ↓                  ↓
+ Domain Services       AI Layer          Job Worker
+        ↓                  ↓                  ↓
+        │            Mock / Gemini            │
+        └──────────────────┼──────────────────┘
+                           ↓
+                        SQLite
+                       /      \
+                      /        \
+               Project State   Evidence Files
+```
+
+And the truth pipeline:
+
+```text
+Schedule
+↓
+Activities
+↓
+Field Evidence
+↓
+AI Extraction
+↓
+Activity Matching
+↓
+Human Review
+↓
+Canonical ActivityProgress
+↓
+Snapshot / Variance / Risk
+↓
+Project Intelligence
+├── Dashboard
+├── Activity Detail
+└── Grounded Assistant
+```
+
+Only document behavior that actually exists.
+
+---
+
+# SECTION 19 — CODE HYGIENE
+
+Audit and clean:
+
+* dead imports
+* unused variables
+* stale comments
+* TODO/FIXME that no longer apply
+* debug logging
+* temporary artifacts
+* old pass-number text
+* dead components
+* unused dependencies
+* inconsistent naming
+
+Do NOT perform a broad refactor.
+
+Remove debris; preserve working architecture.
+
+---
+
+# SECTION 20 — MOCKAI BOUNDARY
+
+Pass 24 expanded `MockAIProvider` so the offline assistant can interpret manager questions.
+
+Keep the abstraction:
+
+```text
+AIService
+    ↓
+AIProvider
+    ├── MockAIProvider
+    └── GeminiAIProvider
+```
+
+Do not move demo-specific behavior into:
+
+* AssistantService
+* domain services
+* repositories
+* controllers
+
+The domain must continue to operate independently of whether MockAI or Gemini is used.
+
+---
+
+# SECTION 21 — NO PASS 22
+
+Do NOT implement voice input.
+
+Do NOT add:
+
+* microphone capture
+* speech recognition
+* transcription
+* audio APIs
+* voice UI
+
+Pass 22 remains benched.
+
+---
+
+# SECTION 22 — NO DEMO-ONLY BUSINESS LOGIC
+
+Absolutely do NOT introduce:
+
+```ts
+if (demoMode) { ... }
+```
+
+to fake business behavior.
+
+Do NOT hardcode:
+
+* dashboard numbers
+* risk classifications
+* assistant answers
+* progress
+* canonical truth
+
+The golden demo must work because it is real valid FieldLine data.
+
+---
+
+# SECTION 23 — VALIDATION
+
+Run:
+
+```bash
 npm test
 npm run build
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+```
 
 All must pass.
 
-Then verify manually that:
+Then manually smoke-test:
 
-npm run dev
+```text
+dashboard
+→ delayed activity
+→ Activity Detail
+→ evidence
+→ back
+→ assistant
+→ grounded question
+→ review/pending item
+```
 
-opens directly into the populated golden project.
+---
 
-22. Exit criteria
+# DEFINITION OF DONE
 
-Pass 24 is complete when:
+Pass 25 is complete when:
 
-Reset
-npm run demo:reset
+1. Existing functionality remains intact.
+2. Full test suite passes.
+3. Production build passes.
+4. Golden demo reset passes.
+5. Golden demo verification passes.
+6. Release verification command passes.
+7. Fresh installation works.
+8. Dashboard is presentation-ready.
+9. Activity Detail is presentation-ready.
+10. Assistant UX clearly communicates grounding.
+11. Evidence/review flows are understandable.
+12. Loading/error/empty states are complete.
+13. Responsive behavior is acceptable.
+14. No obvious debug/dead-code debris remains.
+15. `docs/DEMO.md` exists.
+16. `docs/AI-PIPELINE.md` exists.
+17. `docs/ARCHITECTURE.md` reflects the actual current architecture.
+18. No voice input is added.
+19. No major feature is added.
+20. No demo-only business logic is added.
 
-recreates the exact golden environment.
+---
 
-Reproducibility
-
-Running reset repeatedly yields the same logical state.
-
-Dataset
-
-A realistic industrial project exists with roughly 30 activities across multiple work areas.
-
-Progress story
-
-The project includes believable historical progress and a mixture of completed, on-track, at-risk, delayed, and stale activities.
-
-Messy language
-
-Multiple differently worded field observations map to the same canonical scheduled activities.
-
-Human review
-
-Suggested, rejected, and manually resolved match states are represented.
-
-Evidence
-
-The project contains realistic locally stored evidence connected to reports/progress.
-
-Dashboard
-
-The dashboard opens with a meaningful, presentation-ready state.
-
-Activity Detail
-
-Several activities have useful execution histories.
-
-Intelligence
-
-The intelligence endpoint produces deterministic, meaningful results.
-
-Assistant
-
-The assistant answers from the actual seeded project state and remains grounded.
-
-Offline
-
-The demo can be rebuilt without Gemini or external services.
-
-Regression
-
-Existing tests/build continue to pass.
-
-Verification
-
-A machine-checkable golden-demo verification exists.
-
-Scope guard
-
-Do NOT implement Pass 22 voice input.
-
-Do NOT implement Pass 25 presentation polish.
-
-Do NOT redesign the dashboard.
-
-Do NOT add new assistant capabilities.
-
-Do NOT redesign the domain model.
-
-Do NOT introduce a new database.
-
-Do NOT add external infrastructure.
-
-This pass is:
-
-“Make FieldLine reproducibly demo-ready.”
-
-Nothing more.
-
-Suggested commit
+# COMMIT
 
 Use:
 
-feat: add FieldLine golden demo environment
+`feat: finalize FieldLine integration and presentation polish`

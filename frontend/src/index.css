@@ -2269,6 +2269,23 @@ body {
   color: #cbd5e1;
 }
 
+.assistant-synthesis-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.assistant-synthesis-header {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #818cf8;
+}
+
 .assistant-answer-body {
   font-size: 0.975rem;
   line-height: 1.65;
@@ -2277,6 +2294,147 @@ body {
   border-left: 3px solid #6366f1;
   padding: 1rem 1.25rem;
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+/* Factual Claims Display */
+.assistant-claims-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  background: rgba(16, 185, 129, 0.04);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+}
+
+.assistant-claims-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.775rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #34d399;
+}
+
+.assistant-claims-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.65rem;
+}
+
+.assistant-claim-card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(16, 185, 129, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.assistant-claim-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.assistant-claim-type {
+  font-size: 0.675rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.assistant-claim-type.metric {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.assistant-claim-type.classification {
+  background: rgba(244, 63, 94, 0.15);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.3);
+}
+
+.assistant-claim-type.status {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.assistant-claim-type.variance {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.assistant-claim-type.reason {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.assistant-claim-ref {
+  font-size: 0.675rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.1rem 0.4rem;
+  border-radius: var(--radius-sm);
+}
+
+.assistant-claim-text {
+  font-size: 0.825rem;
+  color: #e2e8f0;
+  line-height: 1.4;
+}
+
+.assistant-claim-field-val {
+  font-size: 0.725rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  display: flex;
+  gap: 0.35rem;
+}
+
+.assistant-claim-field-val strong {
+  color: #94a3b8;
+}
+
+/* Assistant Loading Skeleton */
+.assistant-loading-box {
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px dashed rgba(99, 102, 241, 0.4);
+  border-radius: var(--radius-md);
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  text-align: center;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.assistant-loading-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #a5b4fc;
+}
+
+.assistant-loading-subtext {
+  font-size: 0.775rem;
+  color: var(--text-secondary);
 }
 
 .assistant-candidates-box {
@@ -5035,12 +5193,161 @@ body {
   margin: 0;
 }
 
-.empty-timeline-state .empty-subtext, .empty-evidence-state .empty-subtext {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  max-width: 420px;
+/* ========================================================================= */
+/* PASS 25 — RESPONSIVE LAYOUT & PRESENTATION HARDENING                      */
+/* Breakpoints: 1440px (Large Display), 1024px (Tablet Land), 768px (Tab), 480px (Mobile) */
+/* ========================================================================= */
+
+@media (max-width: 1200px) {
+  .health-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .status-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
+@media (max-width: 1024px) {
+  .dashboard-two-col-grid {
+    grid-template-columns: 1fr;
+  }
 
+  .activity-metadata-pills-row {
+    flex-wrap: wrap;
+  }
 
+  .current-state-metrics-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 
+  .current-metric-block.variance {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    padding: 0.75rem;
+  }
+
+  .header-main {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .workspace-nav {
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 0.25rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .dashboard-top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .health-hero-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .health-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .status-cards-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .current-state-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .current-metric-block.variance {
+    grid-column: auto;
+  }
+
+  .current-dates-comparison-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-form {
+    flex-direction: column;
+  }
+
+  .assistant-ask-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .assistant-claims-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .intelligence-metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .activity-detail-header-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
+
+  .modal-dialog {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 1rem auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-container {
+    padding: 0.5rem;
+  }
+
+  .status-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .intelligence-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .health-project-name {
+    font-size: 1.15rem;
+  }
+
+  .activity-title {
+    font-size: 1.15rem;
+  }
+
+  .activity-detail-page-container {
+    gap: 1rem;
+  }
+
+  .assistant-panel-card {
+    padding: 1.15rem;
+  }
+
+  .table-responsive {
+    border-radius: var(--radius-sm);
+  }
+
+  .table-responsive table th,
+  .table-responsive table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.75rem;
+  }
+}

@@ -228,7 +228,7 @@ export function ProjectDashboardView({
       {/* Date Filter Toolbar */}
       <div className="dashboard-top-bar">
         <div className="dashboard-top-left">
-          <span className="dashboard-hero-tag">Pass 20 Primary Operational Overview</span>
+          <span className="dashboard-hero-tag">Primary Operational Overview</span>
         </div>
         <div className="dashboard-date-selector-group">
           <Calendar size={14} color="var(--accent-blue)" />

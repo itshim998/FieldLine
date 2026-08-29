@@ -16,7 +16,8 @@
     "build:frontend": "vite build frontend --config frontend/vite.config.ts",
     "setup": "tsx scripts/setup.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
-    "demo:verify": "tsx scripts/demo-verify.ts"
+    "demo:verify": "tsx scripts/demo-verify.ts",
+    "verify:release": "tsx scripts/verify-release.ts"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",

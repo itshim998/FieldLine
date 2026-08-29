@@ -6,7 +6,7 @@ import { getAppliedMigrations } from '../backend/src/database/migrator.js';
 
 async function runSetup(): Promise<void> {
   console.log('====================================================');
-  console.log('🚀 Initializing FieldLine Local Environment (Pass 2)');
+  console.log('🚀 Initializing FieldLine Local Environment');
   console.log('====================================================');
 
   const rootDir = process.cwd();

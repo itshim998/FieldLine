@@ -159,12 +159,16 @@ This command:
 | `npm run setup` | Prepares a fresh checkout by validating configuration, creating directories, and initializing SQLite. |
 | `npm run demo:reset` | Resets runtime database and uploads, seeds the complete flagship SIH Golden Demo project (`Refinery Expansion — Unit 4`), and runs automated invariant verification. |
 | `npm run demo:verify` | Executes machine-checkable invariant verification against the live SQLite golden project (risk distribution, intelligence facts, grounded assistant queries, evidence storage). |
+| `npm run verify:release` | Executes the complete release verification suite: production build + 91-file test suite + golden demo reset + 53-invariant demo verification. |
 
 ---
 
-## 🏆 Smart India Hackathon 2026 Golden Demo Environment (Pass 24)
+## 🏆 Smart India Hackathon 2026 Golden Demo Environment
 
 FieldLine provides a 100% deterministic, offline-ready presentation environment tailored for the Smart India Hackathon demonstration.
+
+See [docs/DEMO.md](docs/DEMO.md) for the complete step-by-step presentation walkthrough.
+See [docs/AI-PIPELINE.md](docs/AI-PIPELINE.md) for the AI extraction, matching, and grounded assistant architecture.
 
 ### Instant Reproduction Pipeline:
 ```bash
@@ -228,8 +232,7 @@ Example response:
   "metadata": {
     "schema_version": "0.2.0",
     "app_name": "FieldLine",
-    "sih_ps_id": "SIH26122",
-    "pass": "Pass 24: Golden Demo Environment"
+    "sih_ps_id": "SIH26122"
   }
 }
 ```
@@ -260,14 +263,15 @@ Example response:
 - [x] **PASS 19 — Human Review Workflow** *(Completed)*
 - [x] **PASS 20 — Dashboard** *(Completed)*
 - [x] **PASS 21 — Activity Detail View** *(Completed)*
-- [ ] **PASS 22 — Voice Input**
+- [ ] **PASS 22 — Voice Input** *(Benched)*
 - [x] **PASS 23 — Test and Evaluation Suite** *(Completed)*
 - [x] **PASS 24 — Golden Demo Environment** *(Completed)*
-- [ ] **PASS 25 — Final Integration and Presentation Polish**
+- [x] **PASS 25 — Final Integration and Presentation Polish** *(Completed)*
 
 ---
 
 ## 🔒 Security & Local Data Policy
 
 FieldLine stores all data locally in `database/fieldline.db` and files in `uploads/`. No sensitive data or API keys are committed to Git. All runtime data is ignored via `.gitignore`.
+
 

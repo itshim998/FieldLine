@@ -200,7 +200,7 @@ export function ProjectHealth({
             <span className="health-kpi-subtext">Deterministic Canonical Risk</span>
           </div>
           <div className="canonical-guarantee-tag">
-            <span>Pass 11/12 Certified Snapshot</span>
+            <span>Certified Canonical Snapshot</span>
           </div>
         </div>
       </div>

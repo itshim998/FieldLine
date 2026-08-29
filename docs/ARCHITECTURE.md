@@ -1,4 +1,4 @@
-# FieldLine Architecture — Pass 3: Project Management
+# FieldLine System Architecture — Complete Technical Specification (Pass 25)
 
 ## Overview
 
@@ -8,6 +8,57 @@ The core design principle is:
 > **Production-quality application logic, presentation-grade local infrastructure.**
 
 FieldLine runs entirely locally on a developer/evaluator workstation without requiring cloud infrastructure, container daemons (Docker), or external database servers.
+
+---
+
+## High-Level System Architecture
+
+```text
+                      Local Browser
+                           ↓
+                  FieldLine React UI
+                           ↓
+                  Node / Express API
+                           ↓
+        ┌──────────────────┼──────────────────┐
+        ↓                  ↓                  ↓
+ Domain Services       AI Layer          Job Worker
+        ↓                  ↓                  ↓
+        │            Mock / Gemini            │
+        └──────────────────┼──────────────────┘
+                           ↓
+                        SQLite
+                       /      \
+                      /        \
+               Project State   Evidence Files
+```
+
+---
+
+## Canonical Truth & Intelligence Pipeline
+
+```text
+Schedule
+↓
+Activities
+↓
+Field Evidence
+↓
+AI Extraction
+↓
+Activity Matching
+↓
+Human Review
+↓
+Canonical ActivityProgress
+↓
+Snapshot / Variance / Risk
+↓
+Project Intelligence
+├── Dashboard
+├── Activity Detail
+└── Grounded Assistant
+```
 
 ---
 
@@ -739,3 +790,61 @@ frontend/
       - **Filesystem Security**: Absolute server paths (`filePath`) are never serialized; files are viewed safely via `/api/projects/:projectId/evidence/:evidenceId/content`.
       - **Canonical Truth Protection**: Only `confirmed` matches are marked `canonicalProgressEligible: true`.
       - **No N+1 Queries**: Progress update records are retrieved via a single batch lookup `listByIds(ids, projectId)`.
+24. **Pass 23 — Critical Workflow Regression & Evaluation Suite**:
+    - **Purpose**: Establishes a rigorous, machine-verifiable end-to-end evaluation suite (`critical_workflow_e2e.test.ts`) that proves the complete 13-stage FieldLine workflow pipeline without flakiness or network dependencies.
+    - **13-Stage Pipeline Tested End-to-End**:
+      ```text
+      1. Project Creation
+         ↓
+      2. Baseline Schedule Ingestion (CSV / XLSX / P6)
+         ↓
+      3. Multi-Format Evidence Ingestion (Text, PDF, CSV)
+         ↓
+      4. Asynchronous Document Processing Job Execution
+         ↓
+      5. AI Structured Entity Extraction (Zod Validation)
+         ↓
+      6. Multi-Tier Activity Matching (Exact ID, Text, WBS)
+         ↓
+      7. Confidence Tiering & Review Queue Routing
+         ↓
+      8. Human Review Decision (Confirm / Reject / Resolve)
+         ↓
+      9. Canonical Progress Normalization & Quantity Arithmetic
+         ↓
+      10. Progress Snapshot & Schedule Variance Calculation
+         ↓
+      11. Deterministic Risk Classification (On Track, At Risk, Delayed)
+         ↓
+      12. Project Intelligence Fact Synthesis
+         ↓
+      13. Grounded FieldLine Assistant Query with Fact Provenance
+      ```
+    - **Evaluation Invariants Proved**:
+      - **Determinism & Output Equivalence**: Independent runs produce identical normalized logical outputs.
+      - **Multi-Format Processing Equivalence**: Equivalent progress extracted whether reported in CSV, PDF, or raw text.
+      - **Idempotency**: Re-uploading identical evidence returns existing records with matching SHA-256 hashes.
+      - **Error & Failure Isolation**: Malformed documents and failed jobs never corrupt valid project state.
+25. **Pass 24 — Golden Demo Environment & Invariant Verification Suite**:
+    - **Purpose**: Establishes a deterministic, presentation-grade Golden Demo dataset and machine-checkable invariant verifier for SIH 2026 evaluation.
+    - **Golden Dataset Topology**:
+      - Project: `Refinery Expansion — Unit 4` (`REFINERY-U4`).
+      - 30 EPC Activities distributed across 6 work areas (Civil, Foundation, Structural, Piping, Electrical, Commissioning).
+      - Multi-date historical progress trajectories (`ACT-B02`, `ACT-C01`, `ACT-E02`, `ACT-B01`, `ACT-A02`).
+      - 4 Delayed, 4 At-Risk, 4 Completed, 18 On-Track/Ahead activities.
+      - 4 Approaching zero-duration key delivery milestones.
+      - Real physical evidence files on disk with SHA-256 provenance.
+    - **Commands**:
+      - `npm run demo:reset`: Idempotently cleans database & uploads, reapplies authoritative SQLite migrations, seeds golden dataset, and runs invariant verification.
+      - `npm run demo:verify`: Machine-checks 53 invariants across database health, risk engine counts, intelligence queries, assistant grounding, and physical evidence existence.
+26. **Pass 25 — Final Integration, Release Hardening & Presentation Polish**:
+    - **Purpose**: Unifies the entire system into a polished, release-ready, SIH-presentation-ready application with zero dead-ends, robust responsive design, and unified release verification.
+    - **Release Verification Orchestration (`npm run verify:release`)**:
+      - Orchestrates `build` + `test` + `demo:reset` + `demo:verify` into a single deterministic command.
+    - **Frontend Presentation Polish**:
+      - Enhanced Assistant UX with visual distinction between AI-synthesized narrative and deterministic verified claims/facts.
+      - Structured factual claims grid with claim type badges, cited fact references, and key-value inspectability.
+      - Deep Activity Detail navigation preserving workspace context and historical trajectories.
+      - Comprehensive responsive design layout covering 1440px (large displays), 1024px (tablets), 768px (portrait), and 390-480px (mobile).
+      - Complete loading skeletons, error banners, and contextual empty states across all views.
+

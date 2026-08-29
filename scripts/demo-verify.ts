@@ -36,7 +36,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   };
 
   console.log('====================================================');
-  console.log('🔍 Verifying FieldLine Golden Demo Environment (Pass 24)');
+  console.log('🔍 Verifying FieldLine Golden Demo Environment');
   console.log(`Snapshot Date: ${GOLDEN_AS_OF_DATE}`);
   console.log('====================================================');
 
