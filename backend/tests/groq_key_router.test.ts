@@ -21,6 +21,7 @@ describe('GroqKeyRouter (Pass 26)', () => {
     expect(router.getCurrentIndex()).toBe(0);
     expect(router.getCurrentSlot()).toBe('01');
     expect(router.getCurrentEpoch()).toBe(0);
+    expect(router.getKeyHealthEpoch(0)).toBe(0);
 
     const snapshots = router.getKeyHealthSnapshots();
     expect(snapshots).toHaveLength(20);
@@ -28,6 +29,7 @@ describe('GroqKeyRouter (Pass 26)', () => {
     expect(snapshots[19].slot).toBe('20');
     // Ensure API keys are NOT exposed in public snapshots
     expect((snapshots[0] as any).apiKey).toBeUndefined();
+    expect(snapshots[0].isAvailable).toBe(true);
   });
 
   it('should enforce sticky success across multiple requests (Sticky-success test)', async () => {
@@ -294,7 +296,7 @@ describe('GroqKeyRouter (Pass 26)', () => {
   });
 
   // =========================================================================
-  // Deterministic Concurrency Invariant Tests (Sections 7 & 8)
+  // Deterministic Routing Cursor Concurrency Invariant Tests (Tests A-E)
   // =========================================================================
 
   it('Test A: should prevent stale success from rolling back a newer active key', async () => {
@@ -331,11 +333,8 @@ describe('GroqKeyRouter (Pass 26)', () => {
     const resB = await reqBPromise;
     expect(resB).toBe('B-stale-success-01');
 
-    // INVARIANT: Key 01 health gets success recorded, but active key MUST remain 02
+    // INVARIANT: Active key MUST remain 02
     expect(router.getCurrentSlot()).toBe('02');
-    const snapshots = router.getKeyHealthSnapshots();
-    expect(snapshots[0].successCount).toBe(1);
-    expect(snapshots[1].successCount).toBe(1);
   });
 
   it('Test B: should prevent stale failure from rolling back or skipping the active key', async () => {
@@ -500,5 +499,272 @@ describe('GroqKeyRouter (Pass 26)', () => {
     // Router currentIndex must be a valid slot index (0 to 19)
     expect(router.getCurrentIndex()).toBeGreaterThanOrEqual(0);
     expect(router.getCurrentIndex()).toBeLessThan(20);
+  });
+
+  // =========================================================================
+  // Deterministic Per-Key Health Concurrency Invariant Tests (Section 13)
+  // =========================================================================
+
+  it('Health Concurrency Test 1: should prevent stale success from resurrecting a key placed in cooldown by a newer failure', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const slowReqBarrier = createDeferred<string>();
+
+    // Request A starts on 01 (slow)
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        return await slowReqBarrier.promise;
+      }
+      return `A-success-${slot}`;
+    });
+
+    // Request B starts on 01, fails 429, advances to 02, and succeeds on 02
+    const reqBPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429 Rate Limited');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `B-success-${slot}`;
+    });
+
+    const resB = await reqBPromise;
+    expect(resB).toBe('B-success-02');
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Key 01 is now in cooldown from Request B's 429
+    const snapBeforeStaleSuccess = router.getKeyHealthSnapshots();
+    expect(snapBeforeStaleSuccess[0].isAvailable).toBe(false);
+    expect(snapBeforeStaleSuccess[0].cooldownUntil).not.toBeNull();
+    expect(snapBeforeStaleSuccess[0].failureCount).toBe(1);
+
+    // Now release slow Request A to succeed on 01
+    slowReqBarrier.resolve('A-stale-success-01');
+    const resA = await reqAPromise;
+    expect(resA).toBe('A-stale-success-01');
+
+    // INVARIANT: Key 01 must remain in cooldown! Stale success must NOT resurrect Key 01
+    const snapAfterStaleSuccess = router.getKeyHealthSnapshots();
+    expect(snapAfterStaleSuccess[0].isAvailable).toBe(false);
+    expect(snapAfterStaleSuccess[0].cooldownUntil).not.toBeNull();
+    expect(snapAfterStaleSuccess[0].failureCount).toBe(1);
+    expect(router.getCurrentSlot()).toBe('02');
+  });
+
+  it('Health Concurrency Test 2: should prevent stale failure from poisoning a newly healthy key', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const slowReqBarrier = createDeferred<void>();
+
+    // Request A starts on 01 (slow, will eventually fail)
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        await slowReqBarrier.promise;
+        const err = new Error('429 Slow Request Failed');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `A-fallback-${slot}`;
+    });
+
+    // Newer Request B succeeds on 01 and establishes healthy state
+    const resB = await router.executeRequest(async () => 'B-immediate-success-01');
+    expect(resB).toBe('B-immediate-success-01');
+
+    const snapAfterB = router.getKeyHealthSnapshots();
+    expect(snapAfterB[0].isAvailable).toBe(true);
+    expect(snapAfterB[0].failureCount).toBe(0);
+    expect(snapAfterB[0].cooldownUntil).toBeNull();
+
+    // Now release slow Request A to fail on 01 (and complete on 02)
+    slowReqBarrier.resolve();
+    const resA = await reqAPromise;
+    expect(resA).toBe('A-fallback-02');
+
+    // INVARIANT: Key 01 must remain healthy! Stale failure must NOT poison Key 01
+    const snapAfterA = router.getKeyHealthSnapshots();
+    expect(snapAfterA[0].isAvailable).toBe(true);
+    expect(snapAfterA[0].failureCount).toBe(0);
+    expect(snapAfterA[0].cooldownUntil).toBeNull();
+  });
+
+  it('Health Concurrency Test 3: should prevent stale success from resurrecting a permanently invalid key (401)', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const slowReqBarrier = createDeferred<string>();
+
+    // Request A starts on 01 (slow)
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        return await slowReqBarrier.promise;
+      }
+      return `A-success-${slot}`;
+    });
+
+    // Newer Request B encounters 401 (Invalid Key) on 01
+    const reqBPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('401 Unauthorized API Key');
+        (err as any).status = 401;
+        throw err;
+      }
+      return `B-success-${slot}`;
+    });
+
+    const resB = await reqBPromise;
+    expect(resB).toBe('B-success-02');
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Key 01 is now permanently invalid
+    const snapAfterB = router.getKeyHealthSnapshots();
+    expect(snapAfterB[0].isPermanentlyInvalid).toBe(true);
+    expect(snapAfterB[0].isAvailable).toBe(false);
+
+    // Now release slow Request A to succeed on 01
+    slowReqBarrier.resolve('A-stale-success-01');
+    const resA = await reqAPromise;
+    expect(resA).toBe('A-stale-success-01');
+
+    // INVARIANT: Key 01 must remain permanently invalid!
+    const snapAfterA = router.getKeyHealthSnapshots();
+    expect(snapAfterA[0].isPermanentlyInvalid).toBe(true);
+    expect(snapAfterA[0].isAvailable).toBe(false);
+    expect(router.getCurrentSlot()).toBe('02');
+  });
+
+  it('Health Concurrency Test 4: should prevent stale 429 from undoing a newer recovery', async () => {
+    const router = new GroqKeyRouter({
+      apiKeys: sample20Keys,
+      baseCooldownMs: 50 // short cooldown
+    });
+
+    // 1. Initial 429 puts Key 01 in cooldown
+    await router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429 Initial');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `Init-${slot}`;
+    });
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // Wait for cooldown to expire
+    await new Promise((r) => setTimeout(r, 70));
+    expect(router.getKeyHealthSnapshots()[0].isAvailable).toBe(true);
+
+    const slowReqBarrier = createDeferred<void>();
+
+    // Request A starts on 01 (slow, will return 429)
+    (router as any).currentKeyIndex = 0;
+    const reqAPromise = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        await slowReqBarrier.promise;
+        const err = new Error('429 Stale Failure');
+        (err as any).status = 429;
+        throw err;
+      }
+      return `A-recovery-${slot}`;
+    });
+
+    // Newer Request B on Key 01 succeeds and clears cooldown
+    (router as any).currentKeyIndex = 0;
+    const resB = await router.executeRequest(async () => 'B-recovery-success-01');
+    expect(resB).toBe('B-recovery-success-01');
+    expect(router.getKeyHealthSnapshots()[0].cooldownUntil).toBeNull();
+    expect(router.getKeyHealthSnapshots()[0].failureCount).toBe(0);
+
+    // Release slow Request A's stale 429
+    slowReqBarrier.resolve();
+    await reqAPromise;
+
+    // INVARIANT: Key 01 must remain healthy, stale 429 must not reintroduce cooldown!
+    const snapAfterA = router.getKeyHealthSnapshots();
+    expect(snapAfterA[0].isAvailable).toBe(true);
+    expect(snapAfterA[0].cooldownUntil).toBeNull();
+    expect(snapAfterA[0].failureCount).toBe(0);
+  });
+
+  it('Health Concurrency Test 5: should handle multiple concurrent old requests completing in arbitrary order without health or cursor rollback', async () => {
+    const router = new GroqKeyRouter({ apiKeys: sample20Keys });
+    expect(router.getCurrentSlot()).toBe('01');
+
+    const barrier1 = createDeferred<string>();
+    const barrier2 = createDeferred<void>();
+    const barrier3 = createDeferred<string>();
+    const newerAt02Barrier = createDeferred<void>();
+    const releaseNewerAt02Barrier = createDeferred<void>();
+
+    // 1. Old Req 1 on 01
+    const req1 = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') return await barrier1.promise;
+      return `Req1-${slot}`;
+    });
+
+    // 2. Old Req 2 on 01
+    const req2 = router
+      .executeRequest(async (_key, slot) => {
+        if (slot === '01') {
+          await barrier2.promise;
+          const err = new Error('429 on 01');
+          (err as any).status = 429;
+          throw err;
+        }
+        const err = new Error('429 on fallback ' + slot);
+        (err as any).status = 429;
+        throw err;
+      })
+      .catch(() => 'Req2-Handled');
+
+    // 3. Newer Failover: 01 fails -> advances to 02 -> signals barrier -> 02 fails -> advances to 03 -> 03 succeeds
+    const newerReq = router.executeRequest(async (_key, slot) => {
+      if (slot === '01') {
+        const err = new Error('429 on 01');
+        (err as any).status = 429;
+        throw err;
+      }
+      if (slot === '02') {
+        newerAt02Barrier.resolve();
+        await releaseNewerAt02Barrier.promise;
+        const err = new Error('500 on 02');
+        (err as any).status = 500;
+        throw err;
+      }
+      return `Newer-success-03`;
+    });
+
+    // Wait until newerReq has failed on 01 and transitioned active cursor to 02
+    await newerAt02Barrier.promise;
+    expect(router.getCurrentSlot()).toBe('02');
+
+    // 4. Old Req 3 starts while 02 is active
+    const req3 = router.executeRequest(async (_key, slot) => {
+      if (slot === '02') return await barrier3.promise;
+      return `Req3-${slot}`;
+    });
+
+    // Release newerReq on 02 to fail 500 and advance to 03
+    releaseNewerAt02Barrier.resolve();
+    const newerRes = await newerReq;
+    expect(newerRes).toBe('Newer-success-03');
+    expect(router.getCurrentSlot()).toBe('03');
+
+    // 5. Resolve old requests in arbitrary mixed order: 2 (failure on 01), 1 (success on 01), 3 (success on 02)
+    barrier2.resolve();
+    barrier1.resolve('Req1-Success');
+    barrier3.resolve('Req3-Success');
+
+    await Promise.all([req1, req2, req3]);
+
+    // INVARIANT: Active key remains 03, no stale completion rolls anything backward
+    expect(router.getCurrentSlot()).toBe('03');
+
+    // INVARIANT: Health state of 01 and 02 reflects newer failure states and was not resurrected by stale successes
+    const snaps = router.getKeyHealthSnapshots();
+    expect(snaps[0].cooldownUntil).not.toBeNull();
+    expect(snaps[1].cooldownUntil).not.toBeNull();
   });
 });

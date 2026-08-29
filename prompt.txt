@@ -1,4 +1,6 @@
-# FieldLine Pass 26 — Correction: Concurrency-Safe Sticky Failover Router
+# FieldLine Pass 26 — Second Corrective Fix
+
+## Concurrency-Safe Key Health State Semantics
 
 Repository:
 
@@ -8,551 +10,606 @@ Branch:
 
 `main`
 
-## Current state
+### Current state
 
-Pass 26 has been implemented in commit:
+Pass 26 is currently **HOLD**, not approved.
 
-`3107bde7ae092d28f8c897c48ee10d4caa1ec9aa`
+The current sequence is:
 
-The implementation is **NOT approved yet**.
+```text
+3107bde
+feat: integrate Groq GPT-OSS with robust key failover
+        ↓
+87f995f
+fix: harden Groq sticky failover concurrency
+        ↓
+066bddb
+fix: declare KeyHealthSnapshot interface with isAvailable field
+```
 
-The Groq provider, 20-key sequential failover, sticky routing, cooldowns, wrap-around, exhaustion protection, structured generation, secret sanitization, environment configuration, and most tests are already present.
+The first correction introduced `routingEpoch`, which successfully protects the active sticky cursor from stale concurrent completions.
 
-There is one blocking correctness issue:
+However, the router still has a second concurrency problem:
 
-> **The sticky router's state transition is not safe against concurrent in-flight requests.**
+> **A stale in-flight request can mutate a key's authoritative health state after a newer request has already established a newer health state.**
 
-Do NOT rewrite Pass 26.
+This is the only target of this correction.
 
-Do NOT redesign the entire AI layer.
+Do NOT redesign Pass 26.
+Do NOT change the AIProvider abstraction.
+Do NOT change the 20-key routing model.
+Do NOT change the intended sticky/failover behavior.
 
-Make a minimal, rigorous correction focused on router state transitions and regression coverage.
+Make a minimal correctness fix.
 
 ---
 
-# 1. REQUIRED ROUTING SEMANTICS
+# 1. THE REQUIRED INVARIANT
 
-The intended behavior remains:
-
-```text
-Current Key
-    ↓
-keep using Current Key
-    ↓
-successful requests
-    ↓
-Current Key remains unchanged
-```
-
-When the current key fails:
+There are two distinct pieces of router state:
 
 ```text
-Current Key fails
-    ↓
-immediately advance
-    ↓
-try next configured key
-    ↓
-success
-    ↓
-new successful key becomes Current Key
+A. Active routing state
+B. Per-key health state
 ```
 
-Subsequent requests must remain on that successful key until it fails.
+Both must be protected against stale asynchronous completions.
 
-This is NOT request-count round robin.
+The existing `routingEpoch` currently protects A.
 
-Correct:
-
-```text
-01 → 01 → 01 → 01
-01 fails
-02 → 02 → 02
-02 fails
-03 → 03 → 03
-```
-
-Incorrect:
-
-```text
-01
-02
-03
-04
-...
-```
+This correction must protect B as well.
 
 ---
 
-# 2. BLOCKING RACE CONDITION
+# 2. THE REMAINING BUG
 
-The current implementation does:
-
-```ts
-recordFailure(failedKey)
-    → currentKeyIndex = nextKey
-
-recordSuccess(successfulKey)
-    → currentKeyIndex = successfulKey
-```
-
-This is not sufficient when two requests are concurrently in flight.
-
-Example:
+The current `recordSuccess()` effectively does:
 
 ```text
-Initial current = 01
+successCount++
+failureCount = 0
+lastSuccessAt = now
+cooldownUntil = null
+lastErrorStatus = null
 
-Request A starts using 01
-Request B starts using 01
-
-A → 01 fails
-    → router moves current to 02
-
-B → 01 succeeds later
-    → current is changed back to 01
+then:
+check whether attemptEpoch is stale
 ```
 
-That is WRONG.
+That ordering is unsafe.
 
-Once a newer router transition has moved the active state from 01 to 02, a stale success from an older request that was already operating on 01 must NOT revert the router to 01.
-
-Expected:
-
-```text
-A → 01 fails
-A → 02 succeeds
-
-B → stale 01 success arrives later
-
-Final current key MUST remain 02
-```
-
-The latest valid routing state must not be overwritten by an older in-flight request.
-
----
-
-# 3. FIX THE STATE-TRANSITION SEMANTICS
-
-Inspect the current `GroqKeyRouter` implementation and introduce the smallest correct mechanism needed to make state transitions concurrency-safe.
-
-A good implementation may use a generation/epoch/version associated with the active routing state, for example:
-
-```text
-routingEpoch
-```
-
-or an equivalent mechanism.
-
-The conceptual invariant is:
-
-```text
-state transition N
-    ↓
-only operations associated with the current/latest routing state
-    may mutate the active sticky key
-```
-
-An older in-flight request must be allowed to finish, but its eventual success/failure must not incorrectly roll back a newer routing decision.
-
-Do NOT simply serialize every request globally unless the repository architecture genuinely requires it.
-
-The desired behavior is still:
-
-* requests can execute concurrently
-* provider I/O remains asynchronous/concurrent
-* only the sticky routing state transition needs protection
-
----
-
-# 4. IMPORTANT: PRESERVE FAILOVER PROGRESSION
-
-The fix must NOT break the intended sequential progression.
-
-Example:
-
-```text
-Current = 07
-
-Request A:
-07 fails
-08 succeeds
-
-Current must become 08
-
-Later:
-08 succeeds
-Current remains 08
-
-Later:
-08 fails
-09 succeeds
-
-Current becomes 09
-```
-
-Likewise:
-
-```text
-20 fails
-01 succeeds
-```
-
-must still work.
-
----
-
-# 5. IMPORTANT: STALE SUCCESS RULE
-
-Explicitly encode this rule:
-
-> A success from an older request may count toward that key's health statistics, but it must not overwrite a newer active-key routing decision.
-
-For example:
-
-```text
-Request A starts on 01
-Request B starts on 01
-
-A fails → active routing moves to 02
-B succeeds on stale 01
-
-Allowed:
-01.successCount++
-
-Not allowed:
-currentKeyIndex = 01
-```
-
-This distinction is important.
-
-Do not discard useful health information merely because the request became stale for routing purposes.
-
----
-
-# 6. IMPORTANT: STALE FAILURE RULE
-
-Likewise inspect stale failures.
-
-Example:
-
-```text
-Current = 01
-
-A starts on 01
-B starts on 01
-
-A fails
-→ current moves to 02
-
-B later fails on stale 01
-```
-
-That stale failure must update Key 01 health appropriately, but must NOT perform an additional active-key transition based on an already superseded state.
-
-Do not accidentally make:
-
-```text
-02 → 01
-```
-
-or skip forward unexpectedly because of the stale operation.
-
-The active routing cursor must reflect the newest legitimate routing transition.
-
----
-
-# 7. CONCURRENT FAILOVER SCENARIO
-
-Add a deterministic test that reproduces the actual race.
-
-Do NOT use:
-
-```ts
-Math.random()
-```
-
-for the critical ordering.
-
-Use explicit deferred promises/barriers so the sequence is deterministic.
-
-Example:
-
-```text
-Initial active = 01
-
-Request A starts on 01
-Request B starts on 01
-
-Force A to fail first:
-01 → 429
-
-Router should advance:
-current = 02
-
-Force 02 to succeed for A:
-A completes on 02
-
-Only AFTER that:
-allow stale B's 01 request to succeed
-
-Assert:
-current = 02
-```
-
-This test must fail on the current implementation and pass after the correction.
-
----
-
-# 8. ADD STRONGER CONCURRENCY TESTS
-
-Add several deterministic concurrency cases.
-
-### Test A — stale success cannot roll back
-
-```text
-01 active
-A(01) fails
-02 succeeds
-B(01) succeeds late
-final = 02
-```
-
-### Test B — stale failure cannot roll back
-
-```text
-01 active
-A(01) fails
-02 succeeds
-B(01) fails later
-final = 02
-```
-
-### Test C — successive active transitions
-
-```text
-01 active
-
-Request group:
-01 fails
-02 succeeds
-
-later:
-02 fails
-03 succeeds
-
-old requests from 01 complete afterward
-
-final = 03
-```
-
-### Test D — concurrency with wrap-around
-
-```text
-20 active
-20 fails
-01 succeeds
-
-stale 20 request completes afterward
-
-final = 01
-```
-
-### Test E — concurrency with exhaustion
-
-Several concurrent requests cause failures across the ring.
-
-Verify:
-
-* no infinite loops
-* no duplicate attempts within one request
-* no corrupted current index
-* no impossible active slot
-
----
-
-# 9. DO NOT RELAX THE EXISTING TESTS
-
-Keep all current tests.
-
-Do not delete or weaken:
-
-* sticky-success test
-* failover test
-* consecutive-failure test
-* persistent-current-key test
-* wrap-around test
-* exhaustion test
-* invalid-key health test
-* cooldown recovery test
-* existing concurrency test
-* non-failover 400 test
-* sanitization test
-
-The new concurrency tests are additive.
-
----
-
-# 10. ALSO FIX THE ENVIRONMENT EDGE CASE
-
-While this correction is open, fix the small configuration inconsistency identified during review.
-
-Current `extractGroqApiKeys()` treats an explicitly present empty numbered variable as malformed.
-
-That means:
-
-```env
-GROQ_API_KEY_01=real_key
-GROQ_API_KEY_02=
-GROQ_API_KEY_03=
-```
-
-can be rejected even though one valid key exists.
-
-The intended configuration should allow:
-
-* one configured Groq key
-* several configured Groq keys
-* all 20 configured Groq keys
-
-Empty unused slots should simply be ignored.
-
-However:
-
-* a key variable that is present but contains whitespace/empty content should not be treated as a configured credential
-* malformed actual credential values should still be rejected according to the repository's validation policy
-* if `AI_PROVIDER=groq` and zero usable keys exist, startup must fail clearly
-
-Add/update environment tests for:
-
-```text
-one key
-sparse keys
-all 20 keys
-empty unused slots
-no usable keys
-```
-
-Preserve numeric ordering.
-
----
-
-# 11. VERIFY THE ACTUAL PROVIDER PATH
-
-Do not only test `GroqKeyRouter` in isolation.
-
-Verify that `GroqAIProvider` continues to delegate:
-
-```text
-generateText()
-generateStructured()
-```
-
-through the corrected router.
-
-Existing provider tests must continue to pass.
-
-The provider must still target:
-
-```text
-https://api.groq.com/openai/v1/chat/completions
-```
-
-and:
-
-```text
-openai/gpt-oss-20b
-```
-
-by default.
-
----
-
-# 12. STRUCTURED OUTPUT MUST REMAIN INTACT
-
-Do not modify the canonical validation model.
-
-The existing flow remains:
-
-```text
-Groq response
-↓
-provider JSON parsing
-↓
-AIService
-↓
-Zod validation
-↓
-typed FieldLine result
-```
-
-Do not move Zod validation into the router.
-
-Do not make the router aware of domain schemas.
-
----
-
-# 13. HEALTH / COOLDOWN SEMANTICS
-
-Preserve the existing health model:
+Likewise, `recordFailure()` mutates:
 
 ```text
 failureCount
-successCount
 lastFailureAt
-lastSuccessAt
 lastErrorStatus
 cooldownUntil
 isPermanentlyInvalid
 ```
 
-The concurrency correction must not accidentally:
+before deciding whether the completion is stale.
 
-* clear another key's cooldown
-* resurrect a permanently invalid key
-* reset failure counts incorrectly
-* erase newer timestamps
-* overwrite health state with stale data
-
-Think carefully about stale updates here too.
+Therefore a stale completion can overwrite newer state.
 
 ---
 
-# 14. SECRET SECURITY
+# 3. FAILURE SCENARIO A — STALE SUCCESS RESURRECTS A FAILED KEY
 
-Continue to guarantee:
+Reproduce this exact sequence deterministically:
 
-* no raw API key in logs
-* no Authorization header leakage
-* no raw API key in error messages
-* no raw API key in health snapshots
-* no raw API key in DTOs
+```text id="1lq8hh"
+Initial current key = 01
 
-The existing sanitization tests must remain intact.
+Request A starts on Key 01
+Request A is slow
 
----
+Request B starts on Key 01
+Request B fails with HTTP 429
 
-# 15. DO NOT CHANGE THE 20-KEY MODEL
+Key 01:
+    failureCount = 1
+    cooldownUntil = future
+Current key advances to 02
 
-The provider should continue supporting:
-
-```text
-GROQ_API_KEY_01
-...
-GROQ_API_KEY_20
+Request A finally succeeds on old Key 01
 ```
 
-The router should support fewer than 20 keys when only a subset is configured.
+### REQUIRED RESULT
 
-The router's sequence operates over the configured keys, not necessarily all twenty physical slots.
+The stale success may be counted only if the implementation intentionally treats it as diagnostic data.
+
+But it MUST NOT:
+
+```text id="d9fe93"
+failureCount = 0
+cooldownUntil = null
+lastErrorStatus = null
+```
+
+when those values represent newer state established by Request B.
+
+Most importantly:
+
+```text id="m0th0g"
+Key 01 must remain unhealthy/cooling down
+Current key must remain 02
+```
+
+The stale success must not resurrect Key 01.
 
 ---
 
-# 16. VALIDATION COMMANDS
+# 4. FAILURE SCENARIO B — STALE FAILURE POISONS A NEWLY HEALTHY KEY
 
-After implementation run:
+Reproduce:
 
-```bash
+```text id="vya4di"
+Request A starts on Key 01
+Request A is slow
+
+A newer request establishes a valid healthy state for Key 01
+
+Request A eventually fails
+```
+
+The stale failure must NOT overwrite the newer healthy state by doing:
+
+```text id="s1q4ea"
+failureCount++
+cooldownUntil = future
+lastErrorStatus = ...
+```
+
+The newer state must win.
+
+---
+
+# 5. REQUIRED DESIGN
+
+Use a monotonic state version/generation for each key, or an equivalent concurrency-safe mechanism.
+
+For example:
+
+```ts id="h52qj4"
+interface KeyHealthState {
+    ...
+    healthEpoch: number;
+}
+```
+
+At the moment an attempt is dispatched, capture the relevant health-state version:
+
+```text id="rj5ofm"
+attemptHealthEpoch
+```
+
+When a health mutation happens:
+
+```text id="1xk2be"
+only apply it if the attempt still corresponds to the latest state
+```
+
+A stale completion must not overwrite a newer health state.
+
+The exact implementation is up to you.
+
+Do NOT blindly copy this example if a better mechanism fits the current code.
+
+---
+
+# 6. IMPORTANT DISTINCTION: HEALTH EVENTS VS ROUTING EVENTS
+
+Do not conflate:
+
+```text id="b1a5ew"
+routingEpoch
+```
+
+with:
+
+```text id="2lqxgz"
+keyHealthEpoch
+```
+
+They represent different things.
+
+`routingEpoch` answers:
+
+> Is this request still allowed to mutate the active sticky cursor?
+
+`keyHealthEpoch` answers:
+
+> Is this request still allowed to overwrite the key's latest health state?
+
+Preserve both invariants.
+
+---
+
+# 7. REQUIRED RULE FOR STALE SUCCESS
+
+If a success arrives with a stale health epoch:
+
+```text id="8hfzjd"
+do NOT overwrite newer health state
+```
+
+In particular, do not clear:
+
+* newer cooldown
+* newer permanent invalid state
+* newer failure count
+* newer lastErrorStatus
+
+The safest default is:
+
+```text id="x8ocg4"
+stale success
+→ record optional diagnostic-only information
+→ do not mutate authoritative health state
+```
+
+If you decide to retain a success counter for stale completions, make sure that counter cannot accidentally make a newer failed key appear healthy.
+
+Prefer correctness over unnecessary statistics.
+
+---
+
+# 8. REQUIRED RULE FOR STALE FAILURE
+
+If a failure arrives with a stale health epoch:
+
+```text id="0n4grf"
+do NOT overwrite newer health state
+```
+
+Do not:
+
+* add a newer cooldown
+* change a newer `lastErrorStatus`
+* increment the authoritative failure sequence
+* mark a key permanently invalid based only on a stale completion
+
+Again, diagnostic logging is acceptable.
+
+---
+
+# 9. PERMANENT INVALID STATE
+
+Be especially careful with:
+
+```text id="g4o9v4"
+401 / 403
+→ isPermanentlyInvalid = true
+```
+
+A stale success must NEVER resurrect a key that a newer request has established as permanently invalid.
+
+For example:
+
+```text id="rznv04"
+01 request A starts
+
+01 request B → 401
+01 becomes permanently invalid
+
+A later succeeds
+
+01 must remain permanently invalid
+```
+
+Add an explicit regression test.
+
+---
+
+# 10. COOLDOWN STATE
+
+Likewise:
+
+```text id="4j2xkq"
+newer 429
+→ cooldownUntil = T
+
+older success
+→ must NOT clear cooldownUntil
+```
+
+And:
+
+```text id="r0r1me"
+newer success
+→ clears a previous cooldown appropriately
+
+older failure
+→ must NOT reintroduce the old cooldown
+```
+
+These two directions must both be tested.
+
+---
+
+# 11. PRESERVE EXISTING ROUTING BEHAVIOR
+
+Do not break:
+
+### Sticky success
+
+```text
+01 → 01 → 01
+```
+
+### Failover
+
+```text
+01 fails
+02 succeeds
+```
+
+### Cascading failover
+
+```text
+01 fails
+02 fails
+03 succeeds
+```
+
+### Persistent active key
+
+```text
+03 succeeds
+03 succeeds
+03 succeeds
+```
+
+### Wrap around
+
+```text
+20 fails
+01 succeeds
+```
+
+### Exhaustion
+
+Every configured key attempted at most once for the request.
+
+---
+
+# 12. PRESERVE THE ACTIVE-CURSOR FIX
+
+The first correction introduced:
+
+```text
+routingEpoch
+```
+
+Do not remove it.
+
+The following must remain true:
+
+```text id="rjv9ol"
+A stale success cannot move currentKeyIndex backwards.
+
+A stale failure cannot move currentKeyIndex unexpectedly.
+
+A newer active transition always wins.
+```
+
+Add tests that prove the combination:
+
+```text
+routing state
++
+health state
+```
+
+remains internally consistent.
+
+---
+
+# 13. DETERMINISTIC CONCURRENCY TESTS
+
+Do not use random timing.
+
+Use `createDeferred()` / explicit barriers.
+
+Create at least these tests.
+
+## Test 1 — stale success after newer 429
+
+```text
+01 request A starts
+01 request B fails 429
+01 cooldown established
+02 becomes current
+A later succeeds
+```
+
+Assert:
+
+```text
+current = 02
+01 remains cooling down
+01 does not become healthy
+```
+
+---
+
+## Test 2 — stale failure after newer success
+
+```text
+01 request A starts
+newer request establishes healthy state
+A later fails
+```
+
+Assert:
+
+```text
+newer health state remains authoritative
+```
+
+---
+
+## Test 3 — stale success after 401
+
+```text
+01 old request starts
+newer request gets 401
+01 becomes permanently invalid
+old request succeeds
+```
+
+Assert:
+
+```text
+01 remains permanently invalid
+```
+
+---
+
+## Test 4 — stale 429 after newer recovery
+
+```text
+01 had previous cooldown
+newer request succeeds and legitimately clears cooldown
+older in-flight request later returns 429
+```
+
+Assert:
+
+```text
+newer healthy state remains
+old request does not recreate cooldown
+```
+
+---
+
+## Test 5 — multiple stale completions
+
+Construct:
+
+```text
+01
+↓
+multiple concurrent old requests
+↓
+newer failover to 02
+↓
+newer failover to 03
+↓
+old 01/02 requests complete in arbitrary controlled order
+```
+
+Assert:
+
+```text
+current = 03
+
+01 and 02 health state reflect the newest valid events
+no stale completion rolls anything backward
+```
+
+---
+
+# 14. TEST HEALTH SNAPSHOTS
+
+The existing `KeyHealthSnapshot` correction must remain intact.
+
+`getKeyHealthSnapshots()` must continue to:
+
+* expose health metadata
+* expose `isAvailable`
+* NEVER expose `apiKey`
+
+The `KeyHealthSnapshot` interface should remain exported.
+
+---
+
+# 15. ENVIRONMENT FIX MUST REMAIN
+
+The prior correction changed Groq key discovery to allow:
+
+```text id="mcqrjh"
+GROQ_API_KEY_01=real
+GROQ_API_KEY_02=
+GROQ_API_KEY_03=
+GROQ_API_KEY_04=real
+```
+
+and produce:
+
+```text id="j4w6bt"
+[Key 01, Key 04]
+```
+
+Preserve this behavior.
+
+Also preserve:
+
+```text id="le3l7d"
+AI_PROVIDER=groq
+zero usable keys
+→ startup validation failure
+```
+
+---
+
+# 16. DO NOT ADD DATABASE STATE
+
+Router state must remain in-memory.
+
+Do not create SQLite tables for:
+
+* key health
+* router cursor
+* cooldowns
+* routing epochs
+
+The router is runtime infrastructure.
+
+---
+
+# 17. DO NOT SERIALIZE ALL REQUESTS
+
+Do not “fix” concurrency by putting a global mutex around the entire provider request.
+
+The application must still permit concurrent requests.
+
+Only the state transitions need correctness.
+
+Provider network calls must remain asynchronous.
+
+---
+
+# 18. SECURITY
+
+Preserve complete secret protection.
+
+Never expose:
+
+* actual key
+* Authorization header
+* full provider request
+* credentials in aggregated exhaustion errors
+
+Only refer to:
+
+```text
+Slot 01
+Slot 02
+...
+Slot 20
+```
+
+when diagnostics are needed.
+
+---
+
+# 19. RUN THE COMPLETE VALIDATION
+
+Run:
+
+```bash id="w0f0cs"
 npm test
 npm run build
 npm run demo:reset
@@ -564,101 +621,100 @@ All must pass.
 
 Also run:
 
-```bash
+```bash id="jctv1e"
 npm run ai:smoke
 ```
 
-with at least one real Groq credential configured.
+with a real Groq credential configured.
 
-The smoke test must actually perform a real Groq request.
-
----
-
-# 17. REQUIRED ACCEPTANCE TEST MATRIX
-
-Before declaring the correction complete, verify these exact cases:
-
-| Scenario                                 | Expected                     |
-| ---------------------------------------- | ---------------------------- |
-| repeated success                         | same key every request       |
-| 01 → 429                                 | next key immediately         |
-| 01 → failure, 02 → failure, 03 → success | current becomes 03           |
-| 20 → failure                             | wraps to 01                  |
-| all keys fail                            | one bounded exhaustion error |
-| 01 stale success after 02 became active  | current remains 02           |
-| 01 stale failure after 02 became active  | current remains 02           |
-| stale completions after 03 became active | current remains 03           |
-| temporarily unhealthy key cooldown       | recovery still works         |
-| permanently invalid key                  | skipped on later requests    |
-| concurrent requests                      | no routing-state corruption  |
-| empty unused env slots                   | ignored                      |
-| zero usable Groq keys                    | clear startup failure        |
-| secret in provider error                 | redacted                     |
+The smoke test must actually perform a live structured-generation request.
 
 ---
 
-# 18. DO NOT IMPLEMENT
+# 20. REVIEW THE ENTIRE GROQ ROUTER AFTER FIXING
 
-Do NOT:
+After the tests pass, review `groq-key-router.ts` as a state machine.
 
-* add speech-to-text
-* redesign the frontend
-* redesign the AIProvider interface
-* add another AI abstraction
-* change FieldLine's canonical-truth model
-* add database persistence for router state
-* hardcode Groq responses
-* add live Groq calls to the normal Vitest suite
-* remove MockAI
-* remove Gemini
-* create a request-count round-robin
+Explicitly verify:
 
-The router remains:
+```text id="3rsoeo"
+currentKeyIndex
+routingEpoch
+per-key health state
+health version/epoch
+cooldown
+permanent invalidation
+wrap-around
+failure classification
+attempt count
+```
 
-```text
-STICKY CURRENT KEY
-        ↓
-success → stay
-        ↓
-failure → advance
-        ↓
-success → stay on new key
-        ↓
-failure → advance
-        ↓
-...
-        ↓
-wrap around
+Check for impossible transitions.
+
+For example, these must never happen:
+
+```text id="5y2rg3"
+failed key becomes active because of stale success
+
+permanently invalid key becomes healthy
+
+newer cooldown disappears because of old request
+
+newer success is poisoned by old failure
+
+cursor moves backward because of stale completion
+
+single request attempts same key twice
 ```
 
 ---
 
-# 19. FINAL DEFINITION OF DONE
+# 21. REQUIRED FINAL REPORT
 
-This correction is complete only when:
+When complete, report:
 
-1. The concurrency race is fixed.
-2. A stale in-flight success cannot roll back a newer active-key transition.
-3. A stale in-flight failure cannot roll back or corrupt a newer active-key transition.
-4. Concurrent requests remain genuinely asynchronous.
-5. Sticky routing semantics remain unchanged.
-6. Sequential failover remains unchanged.
-7. Wrap-around remains unchanged.
-8. Exhaustion remains bounded.
-9. Key health/cooldown state remains correct.
-10. Environment parsing supports sparse configured keys correctly.
-11. All existing tests pass.
-12. New deterministic concurrency tests pass.
-13. Build passes.
-14. Golden demo reset and verification pass.
-15. Release verification passes.
-16. Real Groq smoke test succeeds with configured credentials.
-17. No secrets leak anywhere.
+```text
+Current HEAD
+Changed files
+New/updated concurrency invariants
+Test count
+Build result
+Demo verification result
+Release verification result
+AI smoke result
+```
+
+Do not claim the real-Groq smoke test passed unless it was actually run against a real configured Groq key.
 
 ---
 
-# COMMIT AND PUSH CHANGES TO GITHUB. 
+# DEFINITION OF DONE
+
+This correction is approved only when:
+
+1. Active cursor remains concurrency-safe.
+2. Per-key health state is concurrency-safe.
+3. Stale success cannot resurrect newer failed/cooling state.
+4. Stale success cannot resurrect permanent invalidation.
+5. Stale failure cannot poison newer healthy state.
+6. Newer cooldown cannot be cleared by an older success.
+7. Newer recovery cannot be undone by an older failure.
+8. Sticky routing semantics remain unchanged.
+9. Sequential failover remains unchanged.
+10. Wrap-around remains unchanged.
+11. Exhaustion remains bounded.
+12. Concurrent requests remain asynchronous.
+13. Sparse Groq key configuration remains supported.
+14. `KeyHealthSnapshot` remains correctly typed and secret-free.
+15. All existing tests pass.
+16. New deterministic stale-health concurrency tests pass.
+17. Build passes.
+18. Golden demo reset/verification pass.
+19. Release verification passes.
+20. Real Groq smoke test passes when credentials are configured.
+
+# COMMIT AND PUSH CHANGES TO GITHUB
 
 Use:
 
-`fix: harden Groq sticky failover concurrency` as commit message. 
+`fix: protect Groq key health from stale concurrent completions`

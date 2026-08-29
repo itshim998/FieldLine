@@ -5,6 +5,7 @@ export interface KeyHealthState {
   index: number;
   slot: string;
   apiKey: string;
+  healthEpoch: number;
   failureCount: number;
   successCount: number;
   lastFailureAt: Date | null;
@@ -60,6 +61,7 @@ export class GroqKeyRouter {
         index: idx,
         slot,
         apiKey: key,
+        healthEpoch: 0,
         failureCount: 0,
         successCount: 0,
         lastFailureAt: null,
@@ -100,6 +102,13 @@ export class GroqKeyRouter {
   }
 
   /**
+   * Current health epoch counter for a specific key slot.
+   */
+  getKeyHealthEpoch(keyIndex: number): number {
+    return this.keys[keyIndex]?.healthEpoch ?? 0;
+  }
+
+  /**
    * Returns a snapshot of health states for all keys without exposing API keys.
    */
   getKeyHealthSnapshots(): KeyHealthSnapshot[] {
@@ -107,6 +116,7 @@ export class GroqKeyRouter {
     return this.keys.map((k) => ({
       index: k.index,
       slot: k.slot,
+      healthEpoch: k.healthEpoch,
       failureCount: k.failureCount,
       successCount: k.successCount,
       lastFailureAt: k.lastFailureAt,
@@ -143,20 +153,36 @@ export class GroqKeyRouter {
 
   /**
    * Records a successful request execution for a key.
-   * Concurrency-safe: updates key health, and only mutates active sticky key if the attempt is from the current routing epoch.
+   * Concurrency-safe:
+   * - Key health is mutated ONLY if the attempt matches the key's current healthEpoch and key is not permanently invalid.
+   * - Active sticky cursor is mutated ONLY if the attempt matches the router's current routingEpoch.
    */
-  recordSuccess(keyIndex: number, attemptEpoch?: number): void {
+  recordSuccess(keyIndex: number, attemptRoutingEpoch?: number, attemptHealthEpoch?: number): void {
     const keyState = this.keys[keyIndex];
     if (!keyState) return;
 
-    keyState.successCount++;
-    keyState.failureCount = 0;
-    keyState.lastSuccessAt = new Date();
-    keyState.cooldownUntil = null;
-    keyState.lastErrorStatus = null;
+    // 1. Authoritative Per-Key Health State Update
+    if (!keyState.isPermanentlyInvalid) {
+      if (attemptHealthEpoch === undefined || attemptHealthEpoch === keyState.healthEpoch) {
+        keyState.successCount++;
+        keyState.failureCount = 0;
+        keyState.lastSuccessAt = new Date();
+        keyState.cooldownUntil = null;
+        keyState.lastErrorStatus = null;
+        keyState.healthEpoch++;
+      } else {
+        logger.debug(
+          `GroqKeyRouter: Stale success on slot [${keyState.slot}] (attemptHealthEpoch: ${attemptHealthEpoch}, currentHealthEpoch: ${keyState.healthEpoch}). Ignoring health mutation to protect newer state.`
+        );
+      }
+    } else {
+      logger.debug(
+        `GroqKeyRouter: Success arrived for permanently invalid key slot [${keyState.slot}]. Preserving permanent invalidation.`
+      );
+    }
 
-    // Check if this success is from the latest routing epoch or an older stale attempt
-    if (attemptEpoch === undefined || attemptEpoch === this.routingEpoch) {
+    // 2. Active Sticky Cursor Routing Update
+    if (attemptRoutingEpoch === undefined || attemptRoutingEpoch === this.routingEpoch) {
       if (this.currentKeyIndex !== keyIndex) {
         this.currentKeyIndex = keyIndex;
         this.routingEpoch++;
@@ -164,43 +190,62 @@ export class GroqKeyRouter {
       }
     } else {
       logger.debug(
-        `GroqKeyRouter: Stale success on slot [${keyState.slot}] (attemptEpoch: ${attemptEpoch}, currentEpoch: ${this.routingEpoch}). Health updated, active cursor unchanged at slot [${this.getCurrentSlot()}].`
+        `GroqKeyRouter: Stale success on slot [${keyState.slot}] (attemptRoutingEpoch: ${attemptRoutingEpoch}, currentRoutingEpoch: ${this.routingEpoch}). Active cursor unchanged at slot [${this.getCurrentSlot()}].`
       );
     }
   }
 
   /**
    * Records a failure for a key and applies health/cooldown adjustments.
-   * Concurrency-safe: updates key health, and only advances active sticky key if the failure is from the current routing epoch.
+   * Concurrency-safe:
+   * - Key health is mutated ONLY if the attempt matches the key's current healthEpoch and key is not already permanently invalid.
+   * - Active sticky cursor is advanced ONLY if the attempt matches the router's current routingEpoch and active key.
    */
-  recordFailure(keyIndex: number, attemptError: ProviderAttemptError, attemptEpoch?: number): void {
+  recordFailure(
+    keyIndex: number,
+    attemptError: ProviderAttemptError,
+    attemptRoutingEpoch?: number,
+    attemptHealthEpoch?: number
+  ): void {
     const keyState = this.keys[keyIndex];
     if (!keyState) return;
 
-    keyState.failureCount++;
-    keyState.lastFailureAt = new Date();
-    keyState.lastErrorStatus = attemptError.status ?? null;
+    // 1. Authoritative Per-Key Health State Update
+    if (!keyState.isPermanentlyInvalid) {
+      if (attemptHealthEpoch === undefined || attemptHealthEpoch === keyState.healthEpoch) {
+        keyState.failureCount++;
+        keyState.lastFailureAt = new Date();
+        keyState.lastErrorStatus = attemptError.status ?? null;
 
-    if (attemptError.status === 401 || attemptError.status === 403) {
-      keyState.isPermanentlyInvalid = true;
-      logger.warn(`GroqKeyRouter: Key slot [${keyState.slot}] marked permanently invalid (Auth failure ${attemptError.status})`);
-    } else {
-      // Calculate cooldown
-      let cooldownMs = attemptError.retryAfterMs;
-      if (!cooldownMs || cooldownMs <= 0) {
-        cooldownMs = Math.min(
-          this.maxCooldownMs,
-          this.baseCooldownMs * Math.pow(2, Math.min(keyState.failureCount - 1, 5))
+        if (attemptError.status === 401 || attemptError.status === 403) {
+          keyState.isPermanentlyInvalid = true;
+          logger.warn(
+            `GroqKeyRouter: Key slot [${keyState.slot}] marked permanently invalid (Auth failure ${attemptError.status})`
+          );
+        } else {
+          // Calculate cooldown
+          let cooldownMs = attemptError.retryAfterMs;
+          if (!cooldownMs || cooldownMs <= 0) {
+            cooldownMs = Math.min(
+              this.maxCooldownMs,
+              this.baseCooldownMs * Math.pow(2, Math.min(keyState.failureCount - 1, 5))
+            );
+          }
+          keyState.cooldownUntil = new Date(Date.now() + cooldownMs);
+          logger.warn(
+            `GroqKeyRouter: Key slot [${keyState.slot}] cooling down for ${cooldownMs}ms (Status: ${attemptError.status ?? 'Network/Timeout'}, Failures: ${keyState.failureCount})`
+          );
+        }
+        keyState.healthEpoch++;
+      } else {
+        logger.debug(
+          `GroqKeyRouter: Stale failure on slot [${keyState.slot}] (attemptHealthEpoch: ${attemptHealthEpoch}, currentHealthEpoch: ${keyState.healthEpoch}). Ignoring health mutation to protect newer state.`
         );
       }
-      keyState.cooldownUntil = new Date(Date.now() + cooldownMs);
-      logger.warn(
-        `GroqKeyRouter: Key slot [${keyState.slot}] cooling down for ${cooldownMs}ms (Status: ${attemptError.status ?? 'Network/Timeout'}, Failures: ${keyState.failureCount})`
-      );
     }
 
-    // Only advance currentKeyIndex if the failure occurred on the current active epoch and key
-    if (attemptEpoch === undefined || attemptEpoch === this.routingEpoch) {
+    // 2. Active Sticky Cursor Routing Update
+    if (attemptRoutingEpoch === undefined || attemptRoutingEpoch === this.routingEpoch) {
       if (this.currentKeyIndex === keyIndex) {
         this.currentKeyIndex = (keyIndex + 1) % this.keys.length;
         this.routingEpoch++;
@@ -210,14 +255,14 @@ export class GroqKeyRouter {
       }
     } else {
       logger.debug(
-        `GroqKeyRouter: Stale failure on slot [${keyState.slot}] (attemptEpoch: ${attemptEpoch}, currentEpoch: ${this.routingEpoch}). Health updated, active cursor unchanged at slot [${this.getCurrentSlot()}].`
+        `GroqKeyRouter: Stale failure on slot [${keyState.slot}] (attemptRoutingEpoch: ${attemptRoutingEpoch}, currentRoutingEpoch: ${this.routingEpoch}). Active cursor unchanged at slot [${this.getCurrentSlot()}].`
       );
     }
   }
 
   /**
    * Executes an operation with sticky sequential failover across configured keys.
-   * Concurrency-safe: each attempt captures the routing epoch at dispatch time.
+   * Concurrency-safe: each attempt captures both request-scoped routingEpoch and target key healthEpoch at dispatch time.
    * Ensures every key is attempted at most once per request.
    */
   async executeRequest<T>(
@@ -227,19 +272,21 @@ export class GroqKeyRouter {
     const totalKeys = this.keys.length;
     const startIndex = this.getInitialCandidateIndex();
     const attempts: ProviderAttemptError[] = [];
+    let currentRequestEpoch = this.routingEpoch;
 
     for (let attempt = 0; attempt < totalKeys; attempt++) {
       const targetIndex = (startIndex + attempt) % totalKeys;
       const targetKey = this.keys[targetIndex];
-      const attemptEpoch = this.routingEpoch;
+      const attemptRoutingEpoch = currentRequestEpoch;
+      const attemptHealthEpoch = targetKey.healthEpoch;
 
       logger.debug(
-        `GroqKeyRouter: ${contextDescription} [Attempt ${attempt + 1}/${totalKeys}] using Key Slot [${targetKey.slot}] (Epoch: ${attemptEpoch})`
+        `GroqKeyRouter: ${contextDescription} [Attempt ${attempt + 1}/${totalKeys}] using Key Slot [${targetKey.slot}] (RoutingEpoch: ${attemptRoutingEpoch}, HealthEpoch: ${attemptHealthEpoch})`
       );
 
       try {
         const result = await operation(targetKey.apiKey, targetKey.slot, targetIndex);
-        this.recordSuccess(targetIndex, attemptEpoch);
+        this.recordSuccess(targetIndex, attemptRoutingEpoch, attemptHealthEpoch);
         return result;
       } catch (err: unknown) {
         const classified = this.classifyError(err, targetKey.slot, targetIndex);
@@ -257,7 +304,11 @@ export class GroqKeyRouter {
           );
         }
 
-        this.recordFailure(targetIndex, classified, attemptEpoch);
+        const wasEpoch = this.routingEpoch;
+        this.recordFailure(targetIndex, classified, attemptRoutingEpoch, attemptHealthEpoch);
+        if (this.routingEpoch > wasEpoch) {
+          currentRequestEpoch = this.routingEpoch;
+        }
 
         const nextSlot = this.keys[(targetIndex + 1) % totalKeys].slot;
         logger.warn(
