@@ -50,6 +50,9 @@ export class MockAIProvider implements AIProvider {
     }
 
     if (this.mockStructuredResponse !== undefined) {
+      if (typeof this.mockStructuredResponse === 'function') {
+        return (this.mockStructuredResponse as Function)(_prompt, _schema, _options);
+      }
       return this.mockStructuredResponse;
     }
 
@@ -70,15 +73,44 @@ export class MockAIProvider implements AIProvider {
     }
 
     // Default valid assistant grounded answer payload (Pass 18 Final Grounding Correction)
+    let dynamicFactRef = 'mock-ref';
+    let dynamicValue: unknown = 60;
+    let dynamicField = 'actualProgress';
+    let dynamicType = 'metric';
+    let dynamicText = 'Mock grounded assistant answer.';
+
+    const factRefMatch = _prompt.match(/\(Ref:\s*([^\)\r\n]+)\)/);
+    if (factRefMatch) {
+      dynamicFactRef = factRefMatch[1].trim();
+      const progressMatch = _prompt.match(/actual\s+progress\s+is\s+(\d+(?:\.\d+)?)%/i);
+      const varianceMatch = _prompt.match(/progress\s+variance\s+(?:of|is)\s+(-?\d+(?:\.\d+)?)%/i);
+      if (progressMatch) {
+        dynamicValue = Number(progressMatch[1]);
+        dynamicField = 'actualProgress';
+        dynamicType = 'metric';
+        dynamicText = `Activity is ${dynamicValue}% complete.`;
+      } else if (varianceMatch) {
+        dynamicValue = Number(varianceMatch[1]);
+        dynamicField = 'progressVariance';
+        dynamicType = 'variance';
+        dynamicText = `Progress variance is ${dynamicValue}%.`;
+      } else if (dynamicFactRef.startsWith('delayed:')) {
+        dynamicValue = 'DELAYED';
+        dynamicField = 'classification';
+        dynamicType = 'classification';
+        dynamicText = 'Activity is delayed.';
+      }
+    }
+
     const defaultAssistantAnswerPayload = {
-      answer: 'Mock grounded assistant answer.',
+      answer: dynamicText,
       claims: [
         {
-          type: 'metric',
-          factRef: 'mock-ref',
-          field: 'actualProgress',
-          value: 60,
-          text: 'Mock grounded assistant answer.'
+          type: dynamicType,
+          factRef: dynamicFactRef,
+          field: dynamicField,
+          value: dynamicValue,
+          text: dynamicText
         }
       ]
     };

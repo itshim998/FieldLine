@@ -9,6 +9,7 @@
     "dev:backend": "tsx watch backend/src/index.ts",
     "dev:frontend": "vite --config frontend/vite.config.ts frontend",
     "test": "vitest run",
+    "test:evaluation": "vitest run backend/tests/critical_workflow_e2e.test.ts",
     "test:watch": "vitest",
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "tsc -p tsconfig.backend.json",

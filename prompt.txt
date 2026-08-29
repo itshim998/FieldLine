@@ -1,1155 +1,644 @@
-# FieldLine — PASS 21: ACTIVITY DETAIL VIEW
+# FieldLine Pass 23 — Critical Regression & Evaluation Suite
 
-Implement **Pass 21 — Activity Detail View** in the existing FieldLine repository.
+You are working on the FieldLine repository:
 
-Work from the actual current `main`.
+`itshim998/FieldLine`
 
-Passes 13–20 are approved.
+Canonical branch:
 
-Do NOT implement Pass 22+.
+`main`
 
----
+## Current repository baseline
 
-# 1. Objective
+Before making any changes, inspect the ACTUAL current repository state and current HEAD.
 
-Give every schedule activity a complete, trustworthy history.
+The current known HEAD is:
 
-For an activity such as:
-
-```text
-Foundation — Block B
-```
-
-the user must be able to see:
-
-```text
-Current state
-────────────────────────
-Planned: 75%
-Actual: 60%
-Variance: -15 pts
-Status: AT_RISK
-
-Timeline
-────────────────────────
-Aug 20 — planned start
-Aug 22 — started
-Aug 23 — 35%
-Aug 24 — 60%
-
-Evidence
-────────────────────────
-Report-001.pdf
-Report-004.txt
-```
-
-The page must make the product feel like a real project-management system rather than a collection of AI demos.
-
----
-
-# 2. Architectural principle
-
-Pass 21 is a **read-only activity detail composition layer**.
-
-It must NOT create new project truth.
-
-Architecture:
-
-```text id="arch21"
-Activity Detail Request
-        ↓
-ActivityDetailService
-        ↓
-canonical Activity
-+
-canonical Snapshot/Risk
-+
-ActivityProgress history
-+
-ProgressUpdate context
-+
-Match/review context
-+
-Evidence provenance
-        ↓
-typed ActivityDetail response
-        ↓
-React Activity Detail View
-```
-
-Do NOT duplicate domain logic.
-
-Do NOT create a second risk engine.
-
-Do NOT create a second progress engine.
-
----
-
-# 3. Existing canonical sources
-
-Reuse the existing services/repositories.
-
-Important current sources:
-
-```text id="sources21"
-ActivityRepository
-ActivityProgressRepository
-ProgressService
-ProgressSnapshotService
-RiskClassificationService
-ProgressUpdateRepository
-ActivityMatchRepository
-EvidenceRepository
-ProjectIntelligenceService
-```
-
-The existing ProgressService already provides:
-
-```text
-listActivityProgress(projectId, activityId)
-getLatestActivityProgress(projectId, activityId)
-```
-
-with project/activity validation.
-
-The Evidence router already provides:
-
-```http
-GET /api/projects/:projectId/activities/:activityId/evidence
-```
-
-The snapshot/risk layers already provide deterministic current state.
-
-Do not bypass those canonical semantics.
-
----
-
-# 4. New API
-
-Add:
-
-```http
-GET /api/projects/:projectId/activities/:activityId
-```
-
-This should return the complete activity detail read model.
-
-Use a thin Express route.
-
-Validate:
-
-```text id="params21"
-projectId
-activityId
-```
-
-using existing validation conventions.
-
-Cross-project activity IDs must return the existing not-found/project-isolation behavior.
-
----
-
-# 5. Activity Detail response
-
-Create:
-
-```text
-backend/src/services/activity-detail/activity-detail.types.ts
-```
-
-with a typed DTO.
-
-Suggested shape:
-
-```ts id="dto21"
-interface ActivityDetail {
-  activity: ActivityDetailActivity;
-  current: ActivityDetailCurrentState;
-  timeline: ActivityDetailTimelineItem[];
-  progressUpdates: ActivityDetailProgressUpdate[];
-  matches: ActivityDetailMatch[];
-  evidence: ActivityDetailEvidence[];
-}
-```
-
-Adapt naming to current repository conventions.
-
-Do not copy the entire database schema into the DTO.
-
----
-
-# 6. Activity identity section
-
-Return:
-
-```text id="identity21"
-activityId
-externalId
-name
-description
-wbsCode
-location
-scheduleId
-plannedStart
-plannedFinish
-plannedQuantity
-unit
-baselineProgress
-```
-
-Do not expose unnecessary internal database fields.
-
----
-
-# 7. Current state
-
-Current state must use existing canonical snapshot/risk semantics.
-
-Return:
-
-```text id="current21"
-plannedProgress
-actualProgress
-progressVariance
-varianceState
-status
-overdue
-riskClassification
-riskReasons
-actualStart
-actualFinish
-asOfDate
-```
-
-Use:
-
-```text ProgressSnapshotService
-RiskClassificationService
-```
-
-Do NOT recalculate:
-
-```text variance
-overdue
-risk
-planned progress
-```
-
-inside ActivityDetailService.
-
----
-
-# 8. Optional `asOfDate`
-
-Support:
-
-```http
-GET /api/projects/:projectId/activities/:activityId?asOfDate=YYYY-MM-DD
-```
-
-Use the same canonical date validation already used by Pass 17 and Pass 20.
-
-If omitted:
-
-```text current canonical date = existing snapshot service behavior
-```
-
-If supplied:
-
-```text all current-state fields are evaluated as of that date
-```
-
-Do not use wall-clock timestamps for historical project semantics.
-
----
-
-# 9. Current state must be internally consistent
-
-For:
-
-```text id="consistency21"
-asOfDate = D
-```
-
-the following must all describe the same state:
-
-```text
-actualProgress
-plannedProgress
-variance
-varianceState
-status
-overdue
-riskClassification
-reasons
-```
-
-Do not mix:
-
-```text current risk
-+
-historical progress
-```
-
-inside the same current-state object.
-
----
-
-# 10. Timeline
-
-The timeline must come primarily from canonical `ActivityProgress` history.
-
-Use:
-
-```text id="history21"
-ActivityProgressRepository.listByActivityId(activityId, projectId)
-```
-
-or the existing ProgressService wrapper.
-
-Sort deterministically:
-
-```text id="timeline-sort21"
-asOfDate ASC
-createdAt ASC
-id ASC
-```
-
-or another canonical chronological ordering consistent with existing repository semantics.
-
-Do not rely on SQLite implicit order.
-
----
-
-# 11. Timeline item
-
-Each timeline item should expose enough information for a manager:
-
-```text id="timelineitem21"
-progressId
-progressUpdateId
-date
-actualPercent
-actualQuantity
-actualStart
-actualFinish
-status
-notes
-createdAt
-source
-```
-
-Where source is available, resolve it from the originating ProgressUpdate:
-
-```text
-manual
-voice
-pdf
-xlsx
-image
-text
-```
-
-Do not infer source from filenames.
-
----
-
-# 12. Timeline semantics
-
-A timeline item represents a canonical ActivityProgress observation.
-
-Example:
-
-```text id="timelineexample21"
-Aug 22
-started
-0%
-
-Aug 23
-in progress
-35%
-
-Aug 24
-in progress
-60%
-```
-
-Do NOT create timeline events for every `project_event`.
-
-Do NOT turn evidence upload events into progress observations.
-
-Project events can be included as auxiliary audit context later, but they are not the canonical activity progress timeline.
-
----
-
-# 13. Historical boundary
-
-When:
-
-```text id="boundary21"
-asOfDate = D
-```
-
-the timeline should not include canonical ActivityProgress observations after D.
-
-Use:
-
-```text observation.asOfDate <= D
-```
-
-as the semantic boundary.
-
-Do not use:
-
-```text createdAt <= D
-```
-
-as a substitute.
-
-Creation time and effective progress date are different concepts.
-
----
-
-# 14. Progress update context
-
-For each ActivityProgress item with:
-
-```text progressUpdateId
-```
-
-resolve the originating ProgressUpdate.
-
-Expose compact report context:
-
-```text id="updatecontext21"
-progressUpdateId
-reportDate
-reporterName
-reporterRole
-sourceType
-status
-```
-
-Do not return the entire project's progress update list.
-
-Only return update records relevant to this activity's history.
-
----
-
-# 15. Match/review context
-
-For matches associated with this activity, return:
-
-```text id="matchcontext21"
-matchId
-progressUpdateId
-confidenceScore
-confidenceTier
-reviewState
-status
-matchMethod
-matchedText
-rationale
-reviewedBy
-reviewedAt
-```
-
-Preserve Pass 19 semantics.
-
-The detail view should visibly distinguish:
-
-```text
-confirmed
-suggested / awaiting review
-suggested / unresolved
-rejected
-```
-
-Do not reinterpret the states.
-
----
-
-# 16. Canonical progress eligibility
-
-For every match/context item, make it obvious whether it represents canonical truth.
-
-Current invariant:
-
-```text id="canonical21"
-confirmed match
-→ eligible for existing ProgressService
-
-suggested
-→ not canonical
-
-unresolved
-→ not canonical
-
-rejected
-→ not canonical
-```
-
-Do not introduce another boolean truth system if the existing status/review state already determines this.
-
-A derived UI field such as:
-
-```text
-canonicalProgressEligible: boolean
-```
-
-is acceptable only if it is deterministically derived from current status semantics.
-
----
-
-# 17. Evidence
-
-Return evidence connected to this activity through the existing provenance graph.
-
-At minimum:
-
-```text id="evidence21"
-evidenceId
-fileName
-fileType
-fileSizeBytes
-uploadedAt
-progressUpdateId
-```
-
-Do NOT expose:
-
-```text
-filePath
-absolute filesystem path
-server storage location
-```
-
-The existing Evidence content endpoint should be used to open the actual file.
-
----
-
-# 18. Evidence relationship
-
-Do not simply query:
-
-```text id="bad21"
-all project evidence
-```
-
-Instead use:
-
-```text id="good21"
-EvidenceRepository.listByActivityId(activityId, projectId)
-```
-
-or an equivalent project-scoped provenance query.
-
-The returned Evidence list must represent actual activity provenance.
-
----
-
-# 19. Do not duplicate evidence
-
-An evidence item referenced by several updates should not appear as uncontrolled duplicates in the final DTO.
-
-Deduplicate by:
-
-```text id="dedupe21"
-evidenceId
-```
-
-while preserving deterministic ordering.
-
-Prefer newest upload first for the evidence section unless existing repository semantics dictate otherwise.
-
----
-
-# 20. Repository efficiency
-
-Do not introduce an N+1 query pattern inside ActivityDetailService.
-
-The target activity detail is one activity, so a small number of bounded queries is acceptable.
-
-Use:
-
-```text id="queries21"
-1 activity lookup
-1 current snapshot/risk composition
-1 activity progress-history query
-1 relevant match query
-1 relevant evidence query
-bounded ProgressUpdate lookup
-```
-
-If there are multiple progressUpdateIds, prefer a batch lookup for their ProgressUpdates rather than one query per history item.
-
-Do NOT issue:
-
-```text id="n1-21"
-N progress-update queries
-```
-
-inside the timeline loop.
-
----
-
-# 21. Preferred batch method
-
-If `ProgressUpdateRepository` does not already support it, add:
-
-```ts id="batch21"
-listByIds(ids: string[], projectId: string): ProgressUpdate[]
-```
-
-or an equivalent project-scoped batch query.
-
-Requirements:
-
-```text
-project_id = ?
-id IN (...)
-```
-
-with deterministic ordering.
-
-Empty IDs:
-
-```text
-[]
-```
-
-must return cleanly without unnecessary SQL.
-
-Do not introduce a generic data-access framework.
-
----
-
-# 22. Frontend component
-
-Add:
-
-```text
-frontend/src/components/activity/
-```
-
-with a main component such as:
-
-```text id="component21"
-ActivityDetailView.tsx
-```
-
-Use the existing design system.
-
-Do not rewrite the entire `App.tsx`.
-
-Extract additional subcomponents only where useful:
-
-```text
-ActivityHeader
-ActivityCurrentState
-ActivityTimeline
-ActivityEvidence
-ActivityReviewContext
-```
-
-The final layout should remain visually coherent with the current dashboard.
-
----
-
-# 23. Detail-page hierarchy
-
-Recommended structure:
-
-```text id="hierarchy21"
-[Back]
-
-Foundation — Block B
-External ID: ACT-1042
-WBS: 03.02
-Location: East Wing
-
-┌─────────────────────────────────────────────┐
-│ CURRENT STATUS                              │
-│ 60% Actual   75% Planned   -15 pts         │
-│ AT RISK                                     │
-│ Planned: Aug 20 → Aug 30                    │
-└─────────────────────────────────────────────┘
-
-TIMELINE
-──────────────────────────────────────────────
-Aug 22   Started
-Aug 23   35%
-Aug 24   60%
-
-PROGRESS SOURCES
-──────────────────────────────────────────────
-Report-003   XLSX   Aug 23
-Report-004   PDF    Aug 24
-
-EVIDENCE
-──────────────────────────────────────────────
-Report-004.pdf
-Report-003.xlsx
-
-MATCH / REVIEW
-──────────────────────────────────────────────
-Confirmed
-Suggested — Medium
-```
-
-Adapt to the current UI style rather than blindly reproducing this wireframe.
-
----
-
-# 24. Timeline UX
-
-The timeline should make change over time visually obvious.
-
-Each observation should show:
-
-```text id="timelineui21"
-date
-progress/status
-optional quantity
-source/update
-```
-
-Use a vertical timeline or similarly clear chronology.
-
-Avoid giant tables.
-
-Make the latest observation visually distinct.
-
-Do not use color as the only status signal.
-
----
-
-# 25. Progress trend
-
-A small simple progress trend visualization is allowed if it can be rendered from existing ActivityProgress observations.
-
-Example:
-
-```text
-35% ───── 60% ───── 72%
-```
-
-Do NOT introduce:
-
-```text id="noforecast21"
-forecasting
-regression
-trend prediction
-schedule prediction
-AI trend interpretation
-```
-
-This is historical visualization only.
-
----
-
-# 26. Current vs history distinction
-
-Clearly label:
-
-```text id="currenthistory21"
-CURRENT STATE
-```
-
-versus:
-
-```text
-ACTIVITY HISTORY
-```
-
-Do not allow a historical 35% observation to look like today's 35% state.
-
----
-
-# 27. Navigation into activity detail
-
-The Activity Detail View should be reachable from existing surfaces:
-
-```text id="nav21"
-Dashboard
-Project Intelligence
-Schedule/activity listings
-Recent Updates where activity identity exists
-```
-
-Use existing callbacks/state patterns.
-
-Do not introduce a large routing framework if the application currently uses local workspace state.
-
----
-
-# 28. Navigation back
-
-Provide a clear:
-
-```text id="back21"
-Back to Project
-```
-
-or:
-
-```text Back to Dashboard
-```
-
-that returns to the previous project workspace context.
-
-Do not lose the selected project.
-
----
-
-# 29. Loading / empty / error states
-
-Handle:
-
-```text id="states21"
-loading
-activity not found
-no progress history
-no evidence
-no matches
-network/API failure
-```
-
-Examples:
-
-```text
-No progress observations yet.
-No evidence is linked to this activity.
-No AI matches are associated with this activity.
-```
-
-Do not render misleading blank sections.
-
----
-
-# 30. Project isolation
-
-Every request must enforce:
-
-```text id="isolation21"
-activity.projectId === requested projectId
-progress.projectId === requested projectId
-matches.projectId === requested projectId
-updates.projectId === requested projectId
-evidence.projectId === requested projectId
-```
-
-Add tests for cross-project access.
-
----
-
-# 31. `asOfDate` semantics
-
-If the detail view allows an as-of selector, pass that date to the backend.
-
-If omitted, use canonical current date behavior.
-
-For historical views:
-
-```text id="historical21"
-current state = as-of snapshot
-timeline = progress observations <= asOfDate
-```
-
-Evidence itself may have upload timestamps after the snapshot date.
-
-Do not incorrectly rewrite evidence upload dates or hide provenance simply because the user is inspecting historical activity state.
-
-If this distinction creates ambiguity, label it clearly rather than inventing historical evidence availability.
-
----
-
-# 32. Tests — service
-
-Add:
-
-```text id="servicetests21"
-[ ] activity exists
-[ ] missing activity → NotFound
-[ ] cross-project activity → NotFound
-[ ] current snapshot state is correct
-[ ] risk classification matches canonical service
-[ ] full progress history returned
-[ ] progress history is deterministic
-[ ] historical asOfDate excludes future observations
-[ ] progress updates are correctly associated
-[ ] matches are project-scoped
-[ ] evidence is project/activity-scoped
-[ ] evidence is deduplicated
-```
-
----
-
-# 33. Tests — router
-
-Add:
-
-```text id="routertests21"
-[ ] GET activity detail returns 200
-[ ] project/activity validation
-[ ] invalid asOfDate rejected
-[ ] cross-project access rejected
-[ ] response shape correct
-```
-
----
-
-# 34. Tests — frontend
-
-If the repository has an existing frontend test framework, add:
-
-```text id="uitests21"
-[ ] loading state
-[ ] current state rendered
-[ ] timeline rendered chronologically
-[ ] latest observation visually distinguished
-[ ] evidence links/actions rendered
-[ ] review state visible
-[ ] back navigation works
-[ ] empty states work
-```
-
-Do not introduce a large frontend testing framework solely for this pass.
-
----
-
-# 35. Integration scenario
-
-Create a realistic activity:
-
-```text id="scenario21"
-Foundation — Block B
-
-planned = 75%
-observations:
-Aug 22 → 0%, started
-Aug 23 → 35%
-Aug 24 → 60%
-
-risk = AT_RISK
-
-evidence:
-Report-003.xlsx
-Report-004.pdf
-```
-
-Verify the complete API response and UI.
-
-Then verify:
-
-```text id="historicalscenario21"
-asOfDate = Aug 23
-```
-
-shows:
-
-```text
-current actual = 35%
-```
-
-and does not expose Aug 24 as a current progress observation.
-
----
-
-# 36. Preserve canonical semantics
-
-Do not modify:
-
-```text id="preserve21"
-ProgressSnapshotService
-RiskClassificationService
-ProgressService normalization rules
-ActivityProgress semantics
-Evidence provenance
-Match review semantics
-```
-
-unless a very small adapter is necessary.
-
-This pass should consume those systems.
-
----
-
-# 37. Documentation
-
-Update:
-
-```text id="docs21"
-README.md
-docs/ARCHITECTURE.md
-```
-
-to document:
-
-```text
-Activity Detail
-    ↓
-canonical Activity
-    +
-current Snapshot/Risk
-    +
-historical ActivityProgress
-    +
-ProgressUpdate provenance
-    +
-Match/review context
-    +
-Evidence provenance
-```
-
-Explicitly state:
-
-```text
-Activity Detail is read-only.
-It does not create or alter project truth.
-```
-
----
-
-# 38. Scope guard
-
-Do NOT implement:
-
-```text id="scope21"
-voice input
-activity editing
-activity mutation
-activity dependencies
-forecasting
-AI activity summaries
-chat changes
-notifications
-new analytics
-new risk formulas
-new progress formulas
-Pass 22+
-```
-
-A small historical progress visualization is allowed.
-
-Nothing predictive.
-
----
-
-# 39. Definition of done
-
-Pass 21 is complete only when:
-
-```text id="done21"
-[ ] A project-scoped activity-detail endpoint exists.
-
-[ ] The activity's canonical identity is shown.
-
-[ ] Current actual progress is shown.
-
-[ ] Current planned progress is shown.
-
-[ ] Current variance is shown.
-
-[ ] Current risk/status is shown.
-
-[ ] Planned dates are shown.
-
-[ ] Actual start/finish are shown where available.
-
-[ ] Complete ActivityProgress history is visible.
-
-[ ] History is chronologically deterministic.
-
-[ ] Historical asOfDate semantics are correct.
-
-[ ] ProgressUpdate source/context is visible.
-
-[ ] Match/review state is visible.
-
-[ ] Evidence provenance is visible.
-
-[ ] Evidence filesystem paths remain hidden.
-
-[ ] Evidence can be opened through existing safe APIs.
-
-[ ] Cross-project access is rejected.
-
-[ ] Current state and historical state are clearly distinguished.
-
-[ ] Dashboard/intelligence/schedule can navigate to an activity detail.
-
-[ ] Back navigation works.
-
-[ ] Loading/empty/error states work.
-
-[ ] No new business-truth engine is introduced.
-
-[ ] No mutation is introduced.
-
-[ ] Existing Pass 13–20 behavior remains intact.
-
-[ ] Full regression suite passes.
-
-[ ] npm run build passes.
-
-[ ] No Pass 22+ functionality is implemented.
-```
-
----
-
-# 40. Final verification
-
-Before committing, inspect the diff specifically for:
-
-```text id="review21"
-duplicate risk calculations
-duplicate variance calculations
-N+1 ProgressUpdate queries
-unbounded activity history queries
-future observations leaking into asOfDate views
-cross-project evidence leakage
-filesystem path exposure
-suggested/rejected matches displayed as canonical
-new mutation endpoints
-forecasting
-AI-generated activity summaries
-Pass 22+ scope leakage
-```
-
-Run:
-
-```bash id="verify21"
-npm test
-npm run build
-```
+`a3d056e7c63c06c199369df35cc62ef624bfd4aa`
 
 Commit:
 
-```text id="commit21"
-feat: implement FieldLine activity detail view
+`feat: implement FieldLine activity detail view`
+
+Do NOT assume this is still the latest commit. Verify first.
+
+FieldLine already contains a substantial Vitest-based test suite with:
+
+* unit tests
+* repository tests
+* service tests
+* router/API tests
+* schedule validation tests
+* document extractor tests
+* document ingestion tests
+* job/worker tests
+* idempotency tests
+* transactional failure tests
+* canonical truth protection tests
+* assistant grounding/security tests
+* Project Intelligence E2E tests
+* fixtures
+* golden extraction fixtures
+* CSV/XLSX equivalence tests
+
+Do NOT rebuild the test system from scratch.
+
+---
+
+# PASS 23 OBJECTIVE
+
+Create a coherent, deterministic **critical-workflow evaluation suite** that proves the entire FieldLine project-truth pipeline works together.
+
+The key question this pass must answer is:
+
+> Can a clean local FieldLine instance take a schedule and field report, process the report through the existing ingestion/matching/review pipeline, create canonical progress safely, calculate deterministic intelligence, expose that state through the dashboard, and answer a grounded assistant question?
+
+This pass is primarily about **system-level regression**, not adding arbitrary numbers of isolated unit tests.
+
+---
+
+# CORE ARCHITECTURE TO PRESERVE
+
+FieldLine's existing architecture is authoritative:
+
+```text
+Raw Evidence
+→ ingestion
+→ extracted structured field facts
+→ Activity Matching
+→ confidence/review policy
+→ human/system confirmation
+→ canonical ActivityProgress
+→ Progress Snapshot
+→ Risk Classification
+→ Project Intelligence
+→ Dashboard / Activity Detail
+→ grounded Assistant
 ```
 
-Push to:
+Preserve all existing architectural invariants:
 
-```text id="main21"
-main
+1. Project isolation
+2. AI is not the source of truth
+3. Only confirmed matches are eligible for canonical progress
+4. Review history remains immutable
+5. Review mutation + mandatory audit event remain atomic
+6. Failed ingestion leaves no partial canonical state
+7. Repeated processing remains idempotent
+8. Evidence remains content-addressably deduplicated
+9. ActivityProgress remains canonical historical progress
+10. Historical views use canonical `asOfDate`
+11. `completedToday` uses actual completion semantics
+12. Dashboard remains a presentation/aggregation layer
+13. Activity Detail remains read-only composition
+14. Assistant claims remain field-verifiable
+15. Assistant is read-only
+16. No LLM-generated SQL
+17. Uncertainty remains visible
+18. Server filesystem paths never leak to clients
+19. Queries remain bounded
+20. Deterministic domain calculations remain authoritative
+
+---
+
+# FIRST TASK — REPOSITORY AUDIT
+
+Before editing anything:
+
+1. Inspect the latest `main` HEAD.
+2. Inspect the existing test directory.
+3. Identify current test helpers/fixtures.
+4. Identify the current app composition / dependency injection pattern.
+5. Identify how the processing worker is instantiated.
+6. Identify the current schedule import route/service.
+7. Identify the current evidence upload route/service.
+8. Identify the current document-processing job route/service/worker.
+9. Identify the current matching confirmation path.
+10. Identify the current ProgressService path.
+11. Identify the current snapshot/intelligence/dashboard path.
+12. Identify the current AssistantService path.
+13. Identify existing tests that already cover each layer.
+
+Do not duplicate tests blindly.
+
+---
+
+# NEW FLAGSHIP TEST
+
+Create one authoritative system-level regression test, conceptually:
+
+`backend/tests/critical_workflow_e2e.test.ts`
+
+You may choose a better filename if repository conventions suggest one, but keep the intent obvious.
+
+This must be an **application/backend E2E test**, using the current Node/Express/Vitest/Supertest architecture.
+
+Do NOT add Playwright or Cypress.
+
+Use in-memory SQLite for isolation.
+
+Use `MockAIProvider` or an equivalent deterministic provider.
+
+Do NOT make network requests to Gemini or any external API.
+
+---
+
+# FLAGSHIP WORKFLOW
+
+The primary test must cover:
+
+```text
+clean test DB
+↓
+create project
+↓
+import schedule
+↓
+verify activities
+↓
+upload field evidence
+↓
+create/process document job
+↓
+worker processes job
+↓
+document extraction
+↓
+AI field-fact extraction
+↓
+activity matching
+↓
+review/confirmation
+↓
+ProgressService
+↓
+ActivityProgress
+↓
+ProgressSnapshotService
+↓
+RiskClassification
+↓
+ProjectIntelligenceService
+↓
+dashboard endpoint
+↓
+assistant endpoint
 ```
 
-Report:
+Use the EXISTING production services and repositories.
 
-```text id="report21"
-1. exact files changed
-2. activity-detail API contract
-3. current-state data sources
-4. historical timeline source
-5. asOfDate behavior
-6. match/review presentation
-7. evidence provenance behavior
-8. navigation integration
-9. tests added
-10. npm test result
-11. npm run build result
-12. commit SHA
-13. known limitations
+Do not mock away the business logic.
+
+Mock only external/non-deterministic AI behavior where required.
+
+---
+
+# DETERMINISTIC GOLDEN FIXTURE
+
+Create a reusable fixture for a small realistic construction project.
+
+The fixture should include approximately 4–6 activities.
+
+Cover:
+
+* one on-track activity
+* one delayed activity
+* one at-risk activity
+* one activity that can be completed from the report
+* one ambiguous/non-matching activity
+* optionally one milestone
+
+The field report fixture must include:
+
+* explicit report date
+* a clearly matchable activity
+* a deterministic progress percentage
+* a completed activity or completion signal
+* an ambiguous observation
+
+Also define expected outputs for the fixture:
+
+* normalized schedule activity
+* extracted field fact
+* expected matching result
+* expected confidence/review state
+* expected canonical ActivityProgress
+* expected snapshot values
+* expected variance
+* expected risk classification
+* expected intelligence result
+* expected dashboard values
+* expected grounded assistant facts
+
+Keep generated IDs/timestamps out of the golden comparison unless they are normalized.
+
+Reuse the existing golden-fixture conventions already present in the repository.
+
+---
+
+# HAPPY-PATH ASSERTIONS
+
+The flagship test must assert meaningful values, not just HTTP 200.
+
+## Schedule
+
+Verify:
+
+* correct number of activities
+* correct normalized names/IDs
+* correct dates/quantities where relevant
+
+Do not duplicate all schedule-validator test coverage.
+
+## Evidence
+
+Verify:
+
+* correct project association
+* evidence persisted
+* no client-visible filesystem path leakage
+
+## Job
+
+Verify:
+
+* job created
+* processing occurs
+* job reaches the correct final state
+* result payload is bounded/sanitized
+
+## Extraction
+
+Verify:
+
+* deterministic MockAI output is accepted
+* extracted facts are structured
+* no fabricated activity IDs are introduced by the application
+
+## Matching
+
+Verify:
+
+* expected activity receives expected candidate
+* confidence tier/status are correct
+* ambiguous fact does not become canonical
+
+## Review
+
+Confirm the intended match using the existing review workflow.
+
+Verify:
+
+* match becomes confirmed
+* reviewer metadata exists
+* corresponding audit event exists
+* the state transition remains atomic
+
+## Canonical Progress
+
+Use the EXISTING ProgressService.
+
+Verify:
+
+* confirmed match creates ActivityProgress
+* expected progress percentage is stored
+* expected observation/as-of date is preserved
+* rejected/unresolved facts do not create canonical progress
+
+## Snapshot / Variance / Risk
+
+Query the existing canonical services.
+
+Assert exact expected values.
+
+Do NOT recreate production formulas inside the test.
+
+## Intelligence
+
+Call the real ProjectIntelligenceService or endpoint.
+
+Assert the expected entries in:
+
+* delayed
+* atRisk
+* completedToday
+* behindSchedule
+* approachingMilestones
+* staleActivities
+* recentChanges
+
+## Dashboard
+
+Call:
+
+`GET /api/projects/:projectId/dashboard`
+
+Assert the displayed aggregate values match the canonical snapshot/intelligence state.
+
+The test must detect disagreement between dashboard aggregation and domain truth.
+
+## Assistant
+
+Call:
+
+`POST /api/projects/:projectId/assistant/query`
+
+Use a deterministic question such as:
+
+`What is delayed?`
+
+Verify:
+
+* correct intent
+* correct verified fact reference
+* grounded result
+* authoritative value
+* no invented project data
+
+The assistant should be connected to the REAL intelligence state created by the workflow.
+
+---
+
+# FAILURE EVALUATION
+
+Add focused high-value failure scenarios.
+
+Do not duplicate existing tests unnecessarily.
+
+## 1. Malformed schedule
+
+Verify:
+
+* request rejected
+* no partial schedule/activity truth
+* existing records remain unchanged
+
+Prefer existing invalid schedule fixtures.
+
+## 2. Malformed document
+
+Verify:
+
+* processing fails
+* job becomes failed
+* no partial ProgressUpdate
+* no new ActivityProgress
+
+## 3. AI extraction failure
+
+Replace only the AI dependency with a deterministic failing provider.
+
+Verify:
+
+* processing fails
+* no ProgressUpdate
+* no Match
+* no ActivityProgress
+* existing canonical state remains unchanged
+
+## 4. Missing activity
+
+Field report refers to an activity not present in the schedule.
+
+Verify:
+
+* no canonical progress
+* safe unresolved/not-found behavior
+
+## 5. Ambiguous activity
+
+Create two plausible candidates.
+
+Verify:
+
+* match remains suggested/unresolved according to the existing policy
+* no automatic canonical truth
+
+## 6. Rejected match
+
+Reject an otherwise plausible match.
+
+Verify:
+
+* no ActivityProgress is created
+
+## 7. Duplicate evidence
+
+Upload/process the same raw bytes twice within the same project.
+
+Verify:
+
+* content-addressable deduplication remains intact
+* no duplicated canonical truth
+* processing idempotency remains intact
+
+## 8. Contradictory report
+
+Create a second report containing conflicting progress information.
+
+Do NOT invent a new conflict-resolution policy.
+
+Instead, test the repository's current actual semantics and verify that contradictory input cannot silently corrupt canonical state.
+
+## 9. Invalid date
+
+Use malformed/invalid report-date information.
+
+Verify deterministic validation/fallback behavior consistent with existing implementation.
+
+Never use the current wall clock to create arbitrary project truth.
+
+## 10. Missing quantity / missing percentage
+
+Verify the application's current behavior for incomplete facts.
+
+Do not fabricate a number just to make the test pass.
+
+## 11. Malformed assistant claim
+
+Configure MockAI so it returns:
+
+* a valid factRef
+* a valid-looking claim
+* but an incorrect authoritative value
+
+Verify the existing field-level grounding protection rejects the claim.
+
+---
+
+# CROSS-PROJECT ISOLATION
+
+The flagship evaluation should also create Project A and Project B.
+
+Populate each with distinct data.
+
+Verify that Project A's:
+
+* evidence
+* processing
+* matches
+* progress
+* intelligence
+* dashboard
+* assistant
+
+never expose Project B data.
+
+Also verify the inverse.
+
+Do not rely only on repository-level isolation tests; this is a whole-workflow regression.
+
+---
+
+# DETERMINISM
+
+Run the same deterministic fixture twice.
+
+Compare the resulting logical outputs:
+
+* extracted fields
+* match results
+* canonical progress
+* snapshot
+* intelligence
+* dashboard facts
+* assistant verified facts
+
+Normalize generated:
+
+* UUIDs
+* creation timestamps
+* other non-semantic metadata
+
+The two logical results must be equivalent.
+
+---
+
+# TEST COMMAND
+
+The repository currently has Vitest configured for backend tests.
+
+Keep:
+
+`npm test`
+
+as the complete regression suite.
+
+Add:
+
+`npm run test:evaluation`
+
+for the critical evaluation test.
+
+Optionally add:
+
+`npm run test:coverage`
+
+only if cleanly compatible with the current setup.
+
+Do NOT introduce arbitrary coverage thresholds simply to produce a numeric target.
+
+---
+
+# FILES / AREAS LIKELY TO CHANGE
+
+Inspect before editing. Likely areas include:
+
+* `backend/tests/`
+* `backend/tests/fixtures/`
+* `package.json`
+* possibly a new test helper under `backend/tests/`
+* possibly test-only dependency-composition helpers if the current architecture needs one
+
+Do not modify production services unless absolutely necessary for testability.
+
+If dependency injection prevents the flagship workflow from being composed with `MockAIProvider`, solve that minimally and architecturally.
+
+Do NOT add production behavior merely for testing.
+
+---
+
+# REGRESSION REQUIREMENTS
+
+After implementation run:
+
+```bash
+npm test
+npm run build
+npm run test:evaluation
 ```
+
+All must pass.
+
+Do not weaken existing tests.
+
+Do not remove existing tests.
+
+Do not change existing expected project semantics merely to satisfy the new evaluation suite.
+
+If the new system-level test exposes a genuine contradiction in the current implementation, STOP and report the inconsistency rather than silently changing production semantics.
+
+---
+
+# SCOPE GUARD
+
+This is a TEST/EVALUATION pass.
+
+Do NOT implement:
+
+* speech-to-text
+* new AI providers
+* new dashboard features
+* new assistant capabilities
+* new persistence concepts
+* new project-truth semantics
+* new conflict-resolution policy
+* Playwright/Cypress browser testing
+* cloud test infrastructure
+* CI/CD redesign
+* performance/load testing
+* production observability
+
+Keep Pass 23 focused on proving the current system.
+
+---
+
+# DEFINITION OF DONE
+
+Pass 23 is complete when all of the following are true:
+
+1. The complete existing regression suite passes.
+2. The build passes.
+3. A dedicated critical evaluation command exists and passes.
+4. A deterministic end-to-end test proves:
+
+```text
+schedule
+→ evidence
+→ job
+→ ingestion
+→ extraction
+→ matching
+→ review
+→ canonical progress
+→ snapshot
+→ variance/risk
+→ intelligence
+→ dashboard
+→ assistant
+```
+
+5. Failure scenarios prove malformed or uncertain input cannot silently become canonical truth.
+6. Cross-project isolation is proven across the complete workflow.
+7. Assistant field-level grounding is exercised against real generated intelligence.
+8. Repeated identical fixtures produce equivalent logical outputs.
+9. No existing approved invariant is weakened.
+10. No duplicate business engine is introduced.
+
+---
+
+# COMMIT
+
+Use:
+
+`test: add FieldLine critical workflow evaluation suite`

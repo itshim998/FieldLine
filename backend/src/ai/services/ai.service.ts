@@ -30,6 +30,14 @@ export class DefaultAIService implements AIService {
     this.provider = provider;
   }
 
+  getProvider(): AIProvider {
+    return this.provider;
+  }
+
+  setProvider(provider: AIProvider): void {
+    this.provider = provider;
+  }
+
   async generateText(prompt: string, options?: AIRequestOptions): Promise<string> {
     try {
       logger.debug(`AIService invoking provider [${this.provider.name}] for text generation`);
