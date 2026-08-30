@@ -388,7 +388,14 @@ export class GroqKeyRouter {
 
     let isFailoverEligible = false;
     if (status) {
-      if (status === 429 || status === 401 || status === 403 || (status >= 500 && status < 600)) {
+      if (
+        status === 429 ||
+        status === 401 ||
+        status === 403 ||
+        (status >= 500 && status < 600) ||
+        message.includes('json_validate_failed') ||
+        message.includes('Failed to validate JSON')
+      ) {
         isFailoverEligible = true;
       } else {
         // 400, 404, 422, etc. are client/request errors

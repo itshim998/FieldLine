@@ -4,6 +4,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    env: {
+      AI_PROVIDER: 'mock',
+      NODE_ENV: 'test'
+    },
     include: ['backend/tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',

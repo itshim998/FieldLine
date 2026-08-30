@@ -15,22 +15,23 @@ export interface AIService {
 }
 
 export function createDefaultAIProvider(): AIProvider {
-  if (env.AI_PROVIDER === 'groq') {
+  const providerType = process.env.AI_PROVIDER || env.AI_PROVIDER;
+  if (providerType === 'groq') {
     return new GroqAIProvider({
       apiKeys: env.groqApiKeys,
-      defaultModel: env.GROQ_MODEL
+      defaultModel: process.env.GROQ_MODEL || env.GROQ_MODEL
     });
   }
-  if (env.AI_PROVIDER === 'gemini') {
+  if (providerType === 'gemini') {
     return new GeminiAIProvider({
-      apiKey: env.GEMINI_API_KEY,
-      defaultModel: env.GEMINI_MODEL
+      apiKey: process.env.GEMINI_API_KEY || env.GEMINI_API_KEY,
+      defaultModel: process.env.GEMINI_MODEL || env.GEMINI_MODEL
     });
   }
-  if (env.AI_PROVIDER === 'mock') {
+  if (providerType === 'mock') {
     return new MockAIProvider();
   }
-  throw new AIProviderError(`Unsupported AI_PROVIDER: ${env.AI_PROVIDER}`);
+  throw new AIProviderError(`Unsupported AI_PROVIDER: ${providerType}`);
 }
 
 export class DefaultAIService implements AIService {

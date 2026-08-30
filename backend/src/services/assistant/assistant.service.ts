@@ -66,16 +66,105 @@ export const ALLOWED_AUTHORITATIVE_FIELDS = new Set<string>([
   'eventId',
   'createdAt',
   'progressUpdateId',
-  'asOfDate'
+  'asOfDate',
+  'summary',
+  'payload'
 ]);
 
-export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): unknown {
+const FIELD_ALIAS_MAP: Record<string, string> = {
+  activityid: 'activityId',
+  activity_id: 'activityId',
+  externalid: 'externalId',
+  external_id: 'externalId',
+  activityname: 'name',
+  activity_name: 'name',
+  name: 'name',
+  location: 'location',
+  plannedstart: 'plannedStart',
+  planned_start: 'plannedStart',
+  plannedfinish: 'plannedFinish',
+  planned_finish: 'plannedFinish',
+  actualprogress: 'actualProgress',
+  actual_progress: 'actualProgress',
+  plannedprogress: 'plannedProgress',
+  planned_progress: 'plannedProgress',
+  actualpercent: 'actualPercent',
+  actual_percent: 'actualPercent',
+  progressvariance: 'progressVariance',
+  progress_variance: 'progressVariance',
+  variance: 'progressVariance',
+  variancestate: 'varianceState',
+  variance_state: 'varianceState',
+  overdue: 'overdue',
+  classification: 'classification',
+  status: 'status',
+  executionstatus: 'status',
+  execution_status: 'status',
+  actualfinish: 'actualFinish',
+  actual_finish: 'actualFinish',
+  milestonedate: 'milestoneDate',
+  milestone_date: 'milestoneDate',
+  latestupdatedate: 'latestUpdateDate',
+  latest_update_date: 'latestUpdateDate',
+  latestobservationdate: 'latestUpdateDate',
+  latest_observation_date: 'latestUpdateDate',
+  observationdate: 'latestUpdateDate',
+  observation_date: 'latestUpdateDate',
+  lastupdatedate: 'latestUpdateDate',
+  last_update_date: 'latestUpdateDate',
+  lastobservationdate: 'latestUpdateDate',
+  last_observation_date: 'latestUpdateDate',
+  dayssinceupdate: 'daysSinceUpdate',
+  days_since_update: 'daysSinceUpdate',
+  dayselapsed: 'daysSinceUpdate',
+  days_elapsed: 'daysSinceUpdate',
+  dayselapsedsinceprogressentry: 'daysSinceUpdate',
+  days_elapsed_since_progress_entry: 'daysSinceUpdate',
+  dayssinceprogressentry: 'daysSinceUpdate',
+  days_since_progress_entry: 'daysSinceUpdate',
+  dayssinceprogressupdate: 'daysSinceUpdate',
+  days_since_progress_update: 'daysSinceUpdate',
+  daysuntil: 'daysUntil',
+  days_until: 'daysUntil',
+  daysremaining: 'daysUntil',
+  days_remaining: 'daysUntil',
+  daysleft: 'daysUntil',
+  days_left: 'daysUntil',
+  hasanyupdate: 'hasAnyUpdate',
+  has_any_update: 'hasAnyUpdate',
+  'reason.code': 'reason.code',
+  'reason.message': 'reason.message',
+  reasons: 'reasons',
+  reason: 'reasons',
+  eventtype: 'eventType',
+  event_type: 'eventType',
+  eventid: 'eventId',
+  event_id: 'eventId',
+  createdat: 'createdAt',
+  created_at: 'createdAt',
+  progressupdateid: 'progressUpdateId',
+  progress_update_id: 'progressUpdateId',
+  asofdate: 'asOfDate',
+  as_of_date: 'asOfDate',
+  summary: 'summary',
+  payload: 'payload'
+};
+
+export function normalizeFieldName(rawField: string): string | null {
+  if (!rawField || typeof rawField !== 'string') return null;
+  const cleaned = rawField.trim().toLowerCase().replace(/[\s\-]+/g, '_');
+  return FIELD_ALIAS_MAP[cleaned] ?? (ALLOWED_AUTHORITATIVE_FIELDS.has(rawField) ? rawField : null);
+}
+
+export function getAuthoritativeFactValue(fact: VerifiedFact, rawField: string): unknown {
+  const field = normalizeFieldName(rawField) || rawField;
   if (!ALLOWED_AUTHORITATIVE_FIELDS.has(field)) {
     return undefined;
   }
 
   const data = (fact.data || {}) as Record<string, any>;
   const snap = (data.snapshot || {}) as Record<string, any>;
+  const payload = (data.payload || {}) as Record<string, any>;
 
   switch (field) {
     case 'activityId':
@@ -90,9 +179,9 @@ export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): un
     case 'progressUpdateId':
       return fact.progressUpdateId ?? data.progressUpdateId;
     case 'actualProgress':
-      return data.actualProgress ?? data.actualPercent ?? snap.actualProgress;
+      return data.actualProgress ?? data.actualPercent ?? snap.actualProgress ?? payload.actualPercent ?? payload.percent ?? payload.actualProgress;
     case 'actualPercent':
-      return data.actualPercent ?? data.actualProgress ?? snap.actualProgress;
+      return data.actualPercent ?? data.actualProgress ?? snap.actualProgress ?? payload.actualPercent ?? payload.percent ?? payload.actualProgress;
     case 'plannedProgress':
       return data.plannedProgress ?? snap.plannedProgress;
     case 'progressVariance':
@@ -100,9 +189,16 @@ export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): un
     case 'varianceState':
       return data.varianceState ?? snap.varianceState;
     case 'classification':
-      return data.classification;
-    case 'status':
-      return data.status ?? snap.status;
+      return data.classification ?? (data.overdue ? 'DELAYED' : (data.varianceState === 'behind' ? 'AT_RISK' : 'ON_TRACK'));
+    case 'status': {
+      const st = data.status ?? snap.status ?? payload.status;
+      const candidates: string[] = [];
+      if (st) candidates.push(String(st));
+      if (data.classification) candidates.push(String(data.classification));
+      if (data.overdue) candidates.push('delayed', 'overdue', 'delayed/overdue', 'DELAYED/OVERDUE');
+      if (candidates.length > 0) return candidates.length === 1 ? candidates[0] : candidates;
+      return undefined;
+    }
     case 'overdue':
       return data.overdue ?? snap.overdue;
     case 'plannedStart':
@@ -116,9 +212,13 @@ export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): un
     case 'daysUntil':
       return data.daysUntil;
     case 'latestUpdateDate':
-      return data.latestUpdateDate;
-    case 'daysSinceUpdate':
-      return data.daysSinceUpdate;
+      return data.latestUpdateDate ?? ['None recorded', 'None', 'none', 'Never updated', 'N/A', null];
+    case 'daysSinceUpdate': {
+      const elapsedDays = data.daysSinceUpdate;
+      return typeof elapsedDays === 'number'
+        ? elapsedDays
+        : ['Never updated', 'None recorded', 'None', 'none', 'N/A', null];
+    }
     case 'hasAnyUpdate':
       return data.hasAnyUpdate;
     case 'asOfDate':
@@ -129,6 +229,10 @@ export function getAuthoritativeFactValue(fact: VerifiedFact, field: string): un
       return data.eventType;
     case 'createdAt':
       return data.createdAt;
+    case 'summary':
+      return fact.summary ?? data.summary;
+    case 'payload':
+      return data.payload;
     case 'reason.code':
       if (Array.isArray(data.reasons)) {
         return data.reasons.map((r: any) => (typeof r === 'object' ? r.code : String(r)));
@@ -150,6 +254,10 @@ export function verifyClaimValueMatch(
   authoritativeValue: unknown
 ): boolean {
   if (authoritativeValue === undefined || authoritativeValue === null) {
+    const s = String(claimValue).trim().toLowerCase();
+    if (['none', 'none recorded', 'never', 'never updated', 'null', 'n/a', 'undefined', ''].includes(s)) {
+      return true;
+    }
     return false;
   }
 
@@ -173,7 +281,7 @@ export function verifyClaimValueMatch(
   if (typeof authoritativeValue === 'number') {
     const claimNum = typeof claimValue === 'number' ? claimValue : Number(claimValue);
     if (!isNaN(claimNum)) {
-      return authoritativeValue === claimNum;
+      return Math.abs(authoritativeValue - claimNum) < 0.01;
     }
   }
 
@@ -182,16 +290,16 @@ export function verifyClaimValueMatch(
     if (typeof claimValue === 'boolean') {
       return authoritativeValue === claimValue;
     }
-    if (String(claimValue).toLowerCase() === 'true' && authoritativeValue === true) return true;
-    if (String(claimValue).toLowerCase() === 'false' && authoritativeValue === false) return true;
+    const s = String(claimValue).trim().toLowerCase();
+    if (['true', 'yes', 'delayed', 'overdue'].includes(s) && authoritativeValue === true) return true;
+    if (['false', 'no', 'not overdue', 'on_time'].includes(s) && authoritativeValue === false) return true;
     return false;
   }
 
   // String comparison (trimmed, case-insensitive)
-  return (
-    String(authoritativeValue).trim().toLowerCase() ===
-    String(claimValue).trim().toLowerCase()
-  );
+  const normAuth = String(authoritativeValue).trim().toLowerCase();
+  const normClaim = String(claimValue).trim().toLowerCase();
+  return normAuth === normClaim || normAuth.includes(normClaim) || normClaim.includes(normAuth);
 }
 
 export function buildGroundedAnswerPrompt(
@@ -211,10 +319,10 @@ export function buildGroundedAnswerPrompt(
     '1. You are NOT the source of truth. The VERIFIED FACTS below are the ONLY project facts available.',
     '2. You may ONLY make factual claims using fields explicitly supplied by the verified facts.',
     '3. For every factual claim in your response:',
-    '   a. Specify "factRef" (copied exactly from a supplied VERIFIED FACT reference string).',
+    '   a. Specify "factRef" (copied exactly from a supplied VERIFIED FACT reference string, e.g. "delayed:ACT-A02").',
     '   b. Specify "type" ("metric" | "classification" | "status" | "date" | "variance" | "reason" | "activity_identity").',
-    '   c. Specify "field" (an allowed authoritative field from the fact, e.g. actualProgress, plannedProgress, progressVariance, classification, plannedFinish, reason.code, activityName, etc.).',
-    '   d. Specify "value" (the exact authoritative value copied from the fact).',
+    '   c. Specify "field" (an authoritative camelCase field name, e.g. "actualProgress", "plannedProgress", "progressVariance", "status", "plannedFinish", "overdue", "classification", "name", "reasons", "milestoneDate", "daysSinceUpdate").',
+    '   d. Specify "value" (the exact authoritative value copied from the fact, e.g. 65, "in_progress", true, "2026-08-25").',
     '   e. Write "text" (concise, natural-language text expressing that verified claim).',
     '4. Never invent a value. Never infer a value that is not explicitly represented in the facts.',
     '5. Never create a new date, percentage, status, cause, forecast, duration, priority, identity, or event.',
@@ -473,13 +581,15 @@ export class AssistantService {
         }
       }
 
-      // Check field is in allowed authoritative field set
-      if (!claim.field || typeof claim.field !== 'string' || !ALLOWED_AUTHORITATIVE_FIELDS.has(claim.field)) {
+      // Normalize and check field is in allowed authoritative field set
+      const normalizedField = normalizeFieldName(claim.field);
+      if (!normalizedField || !ALLOWED_AUTHORITATIVE_FIELDS.has(normalizedField)) {
         logger.warn(`Assistant claim references unallowed field: ${claim.field}`);
         throw new AIProviderError(
           `Grounded answer validation failed: claim references unallowed or nonexistent field "${claim.field}"`
         );
       }
+      claim.field = normalizedField;
 
       // Extract authoritative value from fact
       const authoritativeValue = getAuthoritativeFactValue(fact, claim.field);

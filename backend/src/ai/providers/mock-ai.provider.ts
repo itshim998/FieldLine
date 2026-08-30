@@ -68,7 +68,7 @@ export class MockAIProvider implements AIProvider {
       const questionText = questionMatch ? questionMatch[1].trim() : _prompt;
       const lowerQ = questionText.toLowerCase();
 
-      let detectedIntent = 'delayed';
+      let detectedIntent = 'unsupported';
       let activityQuery: string | null = null;
       let explicitDate: string | null = null;
 
