@@ -40,6 +40,7 @@ import {
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
+import { FloatingAIAssistant } from './components/assistant/FloatingAIAssistant.js';
 import {
   WorkspaceTab,
   RouteState,
@@ -2898,7 +2899,7 @@ export function App(): React.JSX.Element {
                 <button
                   id="query-intelligence-btn"
                   type="button"
-                  className="btn btn-primary btn-sm"
+                  className="intelligence-refresh-btn"
                   onClick={() => {
                     if (selectedProject) {
                       fetchIntelligence(
@@ -2910,10 +2911,10 @@ export function App(): React.JSX.Element {
                     }
                   }}
                   disabled={loadingIntelligence}
-                  style={{ gap: '0.4rem' }}
+                  aria-label="Refresh Intelligence"
+                  title="Refresh Intelligence"
                 >
-                  <RefreshCw size={14} className={loadingIntelligence ? 'pulse-dot' : ''} />
-                  <span>{loadingIntelligence ? 'Evaluating Facts...' : 'Refresh Intelligence'}</span>
+                  <RefreshCw size={17} className={loadingIntelligence ? 'pulse-dot' : ''} />
                 </button>
               </div>
 
@@ -2938,10 +2939,6 @@ export function App(): React.JSX.Element {
                       </p>
                     </div>
                   </div>
-                  <span className="assistant-guard-badge">
-                    <ShieldCheck size={14} />
-                    Verified Facts &bull; Zero Hallucinations
-                  </span>
                 </div>
 
                 <form
@@ -3034,33 +3031,17 @@ export function App(): React.JSX.Element {
                   <div className="assistant-response-box" id="assistant-response-box">
                     <div className="assistant-response-meta">
                       <div className="assistant-meta-tags">
-                        <span className="intent-pill">
-                          Intent: {assistantResponse.intent.intent}
-                        </span>
-
                         {assistantResponse.grounded ? (
                           <span className="grounding-pill success">
                             <CheckCircle2 size={13} />
                             Grounded &bull; {assistantResponse.factRefs.length} Cited Facts
-                          </span>
-                        ) : assistantResponse.intent.intent === 'general' || assistantResponse.status === 'success' ? (
-                          <span
-                            className="grounding-pill success"
-                            style={{
-                              background: 'rgba(99, 102, 241, 0.15)',
-                              color: '#818cf8',
-                              borderColor: 'rgba(99, 102, 241, 0.3)'
-                            }}
-                          >
-                            <Sparkles size={13} />
-                            AI Assistant Response
                           </span>
                         ) : assistantResponse.status === 'unsupported' ? (
                           <span className="grounding-pill unsupported">
                             <HelpCircle size={13} />
                             General Response
                           </span>
-                        ) : (
+                        ) : assistantResponse.status !== 'success' && assistantResponse.intent?.intent !== 'general' ? (
                           <span className="grounding-pill warning">
                             <AlertTriangle size={13} />
                             {assistantResponse.status === 'activity_not_found'
@@ -3069,7 +3050,7 @@ export function App(): React.JSX.Element {
                               ? 'Ambiguous Activity Match'
                               : 'Insufficient Facts'}
                           </span>
-                        )}
+                        ) : null}
 
                         {assistantResponse.resolvedActivity && (
                           <span
@@ -3119,10 +3100,6 @@ export function App(): React.JSX.Element {
 
                     {/* Natural-Language Synthesis Body (Pass 28 GFM Markdown) */}
                     <div className="assistant-synthesis-container">
-                      <div className="assistant-synthesis-header">
-                        <Sparkles size={14} />
-                        <span>AI Assistant Response</span>
-                      </div>
                       <div className="assistant-answer-body">
                         <AssistantMarkdown content={assistantResponse.answer} />
                       </div>
@@ -4293,6 +4270,14 @@ export function App(): React.JSX.Element {
           </div>
         </div>
       )}
+
+      {/* Floating AI Assistant (Always accessible) */}
+      <FloatingAIAssistant
+        projects={projects}
+        currentProject={selectedProject}
+        onNavigateToProject={(p) => handleOpenProject(p)}
+        asOfDate={intelligenceAsOfDate}
+      />
     </div>
   );
 }

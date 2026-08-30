@@ -98,9 +98,15 @@ describe('Cross-Format Equivalence (CSV vs XLSX Normalization)', () => {
   });
 
   afterEach(() => {
-    if (db) db.close();
-    if (fs.existsSync(csvTestPath)) fs.unlinkSync(csvTestPath);
-    if (fs.existsSync(xlsxTestPath)) fs.unlinkSync(xlsxTestPath);
+    if (db) {
+      try { db.close(); } catch {}
+    }
+    try {
+      if (fs.existsSync(csvTestPath)) fs.unlinkSync(csvTestPath);
+    } catch {}
+    try {
+      if (fs.existsSync(xlsxTestPath)) fs.unlinkSync(xlsxTestPath);
+    } catch {}
   });
 
   it('should parse and normalize CSV and XLSX into EXACTLY equivalent NormalizedScheduleActivity arrays', async () => {
