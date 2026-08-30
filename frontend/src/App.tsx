@@ -1389,13 +1389,6 @@ export function App(): React.JSX.Element {
             <span>{isOnline ? 'System Online' : 'System Degraded'}</span>
             {latency !== null && <span style={{ opacity: 0.6 }}>({latency}ms)</span>}
           </button>
-          <div className="badge-sih">
-            <ShieldCheck size={14} />
-            SIH 2026 &bull; SIH26122
-          </div>
-          <div className="badge-pass">
-            Deterministic Core &bull; Verified
-          </div>
         </div>
       </header>
 
@@ -3767,7 +3760,7 @@ export function App(): React.JSX.Element {
 
                   <div className="project-card-footer">
                     <button
-                      className="btn btn-secondary btn-sm"
+                      className="project-open-btn"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleOpenProject(project);
