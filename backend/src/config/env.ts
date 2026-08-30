@@ -51,7 +51,12 @@ export const envSchema = z.object({
   AI_PROVIDER: z.enum(['mock', 'gemini', 'groq']).default('mock'),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash'),
-  GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b')
+  GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b'),
+  AUTO_SEED_DEMO: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
+    if (typeof val === 'boolean') return val;
+    return true;
+  }, z.boolean()).default(true)
 }).passthrough().transform((data) => {
   const { keys } = extractGroqApiKeys(data as Record<string, string | undefined>);
   return {

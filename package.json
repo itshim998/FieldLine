@@ -5,6 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node dist/backend/src/index.js",
+    "start:backend": "node dist/backend/src/index.js",
     "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"tsx watch backend/src/index.ts\" \"vite --config frontend/vite.config.ts frontend\"",
     "dev:backend": "tsx watch backend/src/index.ts",
     "dev:frontend": "vite --config frontend/vite.config.ts frontend",

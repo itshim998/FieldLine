@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: fieldline-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build:backend
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: AUTO_SEED_DEMO
+        value: "true"
+      - key: DATABASE_PATH
+        value: ./database/fieldline.db
+      - key: UPLOAD_DIR
+        value: ./uploads

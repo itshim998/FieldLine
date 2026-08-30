@@ -1,17 +1,35 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { initDatabase, closeDatabase } from './database/db.js';
+import { projectRepository } from './repositories/project.repository.js';
 import { jobRepository } from './jobs/job.repository.js';
 import { workerRunner } from './jobs/worker-runner.js';
 import { reconcileLegacyEvidenceHashes } from './services/evidence/legacy-hash-reconciler.js';
+import { seedGoldenDemo } from '../../demo/golden-demo-seeder.js';
 
 async function startServer(): Promise<void> {
   try {
-    console.log('⚡ Starting FieldLine Local Monolith...');
+    console.log('⚡ Starting FieldLine Server...');
     
     // Initialize SQLite database
     initDatabase();
-    console.log(`📦 Local SQLite initialized at: ${env.DATABASE_PATH}`);
+    console.log(`📦 SQLite database initialized at: ${env.DATABASE_PATH}`);
+
+    // Auto-seed golden demo dataset if requested and database is empty
+    if (env.AUTO_SEED_DEMO) {
+      const projectCount = projectRepository.count();
+      if (projectCount === 0) {
+        console.log('🌱 Fresh/empty database detected. Auto-seeding Golden Demo Dataset...');
+        try {
+          const seedResult = await seedGoldenDemo();
+          console.log(`✨ Golden Demo seeded successfully: [${seedResult.projectCode}] ${seedResult.projectName} (${seedResult.activitiesCount} activities, ${seedResult.evidenceCount} evidence files)`);
+        } catch (seedErr) {
+          console.error('⚠️ Auto-seeding Golden Demo encountered an error:', seedErr);
+        }
+      } else {
+        console.log(`ℹ️ Existing data preserved: ${projectCount} project(s) found in database.`);
+      }
+    }
 
     // Reconcile any legacy evidence rows without content hashes
     const reconciliation = reconcileLegacyEvidenceHashes();

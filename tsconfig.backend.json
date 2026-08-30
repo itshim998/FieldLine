@@ -3,9 +3,11 @@
   "compilerOptions": {
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "outDir": "./dist/backend",
+    "outDir": "./dist",
+    "rootDir": "./",
     "noEmit": false
   },
-  "include": ["backend/src/**/*.ts"],
+  "include": ["backend/src/**/*.ts", "demo/**/*.ts"],
   "exclude": ["backend/tests/**/*", "node_modules", "dist"]
 }
+
