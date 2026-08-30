@@ -109,13 +109,13 @@ export function ProjectHealth({
           {onRefresh && (
             <button
               type="button"
-              className="btn btn-secondary btn-sm"
+              className="health-refresh-btn"
               onClick={onRefresh}
               disabled={isLoading}
               title="Refresh project dashboard snapshot"
+              aria-label="Refresh project dashboard snapshot"
             >
-              <RefreshCw size={13} className={isLoading ? 'pulse-dot' : ''} />
-              <span>Refresh</span>
+              <RefreshCw size={15} className={isLoading ? 'spinning' : ''} />
             </button>
           )}
         </div>
