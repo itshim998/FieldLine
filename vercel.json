@@ -6,7 +6,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://fieldline-backend.onrender.com/api/:path*"
+      "destination": "https://fieldline-backend-pcs3.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
