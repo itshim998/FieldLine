@@ -2296,6 +2296,208 @@ body {
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
 
+/* ==========================================================================
+   ASSISTANT MARKDOWN & PRESENTATION STYLES (PASS 28)
+   ========================================================================== */
+
+.assistant-markdown {
+  font-size: 0.9375rem;
+  line-height: 1.72;
+  letter-spacing: -0.005em;
+  color: #f1f5f9;
+}
+
+.assistant-markdown > *:first-child {
+  margin-top: 0 !important;
+}
+
+.assistant-markdown > *:last-child {
+  margin-bottom: 0 !important;
+}
+
+.assistant-markdown .assistant-heading {
+  font-weight: 700;
+  color: #f8fafc;
+  margin-top: 1.25rem;
+  margin-bottom: 0.6rem;
+  line-height: 1.35;
+  letter-spacing: -0.015em;
+}
+
+.assistant-markdown .assistant-h1 {
+  font-size: 1.25rem;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+  padding-bottom: 0.35rem;
+}
+
+.assistant-markdown .assistant-h2 {
+  font-size: 1.125rem;
+  color: #e0e7ff;
+}
+
+.assistant-markdown .assistant-h3 {
+  font-size: 1rem;
+  color: #cbd5e1;
+}
+
+.assistant-markdown .assistant-h4 {
+  font-size: 0.9375rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.assistant-markdown .assistant-paragraph {
+  margin-top: 0;
+  margin-bottom: 0.85rem;
+  color: #e2e8f0;
+}
+
+.assistant-markdown strong {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.assistant-markdown em {
+  font-style: italic;
+  color: #e2e8f0;
+}
+
+.assistant-markdown .assistant-list {
+  margin-top: 0.25rem;
+  margin-bottom: 0.85rem;
+  padding-left: 1.4rem;
+}
+
+.assistant-markdown .assistant-ul {
+  list-style-type: disc;
+}
+
+.assistant-markdown .assistant-ol {
+  list-style-type: decimal;
+}
+
+.assistant-markdown .assistant-list-item {
+  margin-bottom: 0.4rem;
+  color: #e2e8f0;
+  line-height: 1.65;
+}
+
+.assistant-markdown .assistant-list-item::marker {
+  color: #818cf8;
+}
+
+.assistant-markdown .assistant-blockquote {
+  margin: 0.9rem 0;
+  padding: 0.6rem 1rem;
+  background: rgba(99, 102, 241, 0.06);
+  border-left: 3px solid #818cf8;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: #cbd5e1;
+  font-style: italic;
+}
+
+.assistant-markdown .assistant-blockquote > p {
+  margin-bottom: 0;
+}
+
+.assistant-markdown .assistant-divider {
+  border: 0;
+  height: 1px;
+  background: rgba(148, 163, 184, 0.15);
+  margin: 1.25rem 0;
+}
+
+.assistant-markdown .assistant-md-link {
+  color: #818cf8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s ease;
+}
+
+.assistant-markdown .assistant-md-link:hover {
+  color: #a5b4fc;
+}
+
+/* Inline Code & Code Blocks */
+.assistant-markdown .assistant-inline-code {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.15rem 0.4rem;
+  background: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 4px;
+}
+
+.assistant-markdown .assistant-code-block {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  background: #0f172a;
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 0.85rem 1rem;
+  margin: 0.9rem 0;
+  overflow-x: auto;
+  color: #e2e8f0;
+}
+
+.assistant-markdown .assistant-code-block code {
+  background: transparent;
+  padding: 0;
+  border: none;
+  color: inherit;
+}
+
+/* Markdown Tables */
+.assistant-markdown .assistant-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.9rem 0 1rem 0;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.6);
+  -webkit-overflow-scrolling: touch;
+}
+
+.assistant-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.assistant-markdown thead {
+  background: rgba(30, 41, 59, 0.85);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.assistant-markdown th {
+  padding: 0.65rem 0.9rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.assistant-markdown td {
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
+  vertical-align: middle;
+}
+
+.assistant-markdown tbody tr:nth-child(even) {
+  background: rgba(30, 41, 59, 0.3);
+}
+
+.assistant-markdown tbody tr:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
 /* Factual Claims Display */
 .assistant-claims-section {
   display: flex;

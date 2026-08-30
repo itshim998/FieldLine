@@ -147,7 +147,23 @@ export class MockAIProvider implements AIProvider {
       }
       if (/speed up|accelerate|fast track|faster|catch up/i.test(lower)) {
         return {
-          answer: 'To accelerate project progress and recover delays: (1) Fast-track critical path activities by sequencing predecessor and successor tasks in parallel where site conditions permit; (2) Crash critical schedule activities by deploying additional specialized crews or authorizing selective overtime; (3) Proactively resolve procurement and material delivery lead times; and (4) Conduct daily progress standups with area superintendents.'
+          answer: [
+            '## Ways to Recover Schedule',
+            '',
+            'To accelerate project progress and recover delays, focus first on activities affecting the **critical path**:',
+            '',
+            '### 1. Fast-track Parallel Activities',
+            'Run compatible predecessor and successor activities in parallel where site conditions, crane access, and safety permits allow.',
+            '',
+            '### 2. Resource Crashing',
+            'Deploy additional specialized crews, authorize selective overtime, or add secondary equipment on constrained work packages.',
+            '',
+            '### 3. Eliminate Bottlenecks',
+            'Prioritize long-lead procurement deliveries, contractor submittals, and engineering inspection approvals.',
+            '',
+            '### 4. Monitor Daily',
+            'Conduct short daily coordination standups with area superintendents to detect and resolve emerging schedule slippage early.'
+          ].join('\n')
         };
       }
       return {
@@ -280,7 +296,52 @@ export class MockAIProvider implements AIProvider {
         });
       }
 
-      const answerText = claims.map((c) => c.text).join(' ');
+      let answerText: string;
+      const delayedClaims = claims.filter((c) => c.factRef.startsWith('delayed:'));
+      const atRiskClaims = claims.filter((c) => c.factRef.startsWith('at_risk:'));
+
+      if (delayedClaims.length >= 2) {
+        const rows = delayedClaims
+          .map((c) => {
+            const actName = c.text.replace(/\s*\([^)]*\)\s*is delayed at.*$/i, '').trim();
+            return `| ${actName} | ${c.value}% | Delayed |`;
+          })
+          .join('\n');
+        answerText = [
+          '## Delayed Activities',
+          '',
+          `There are **${delayedClaims.length} delayed activities** requiring immediate schedule recovery:`,
+          '',
+          '| Activity | Actual Progress | Status |',
+          '|---|---:|:---:|',
+          rows,
+          '',
+          '### Key Takeaways',
+          'Prioritize critical path resolution for these work packages to prevent compound downstream slippage.'
+        ].join('\n');
+      } else if (atRiskClaims.length >= 2) {
+        const rows = atRiskClaims
+          .map((c) => {
+            const actName = c.text.replace(/\s*\([^)]*\)\s*is at risk with.*$/i, '').trim();
+            return `| ${actName} | ${c.value}% | At Risk |`;
+          })
+          .join('\n');
+        answerText = [
+          '## At-Risk Activities',
+          '',
+          `There are **${atRiskClaims.length} activities at risk** of falling behind schedule:`,
+          '',
+          '| Activity | Actual Progress | Risk State |',
+          '|---|---:|:---:|',
+          rows,
+          '',
+          '### Recommended Action',
+          'Review labor allocation and material availability to recover planned pacing.'
+        ].join('\n');
+      } else {
+        answerText = claims.map((c) => c.text).join(' ');
+      }
+
       return {
         answer: answerText,
         claims

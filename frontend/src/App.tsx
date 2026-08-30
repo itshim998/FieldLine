@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
+import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 
@@ -2956,7 +2957,7 @@ export function App(): React.JSX.Element {
                         {assistantResponse.grounded ? (
                           <span className="grounding-pill success">
                             <CheckCircle2 size={13} />
-                            Grounded ({assistantResponse.factRefs.length} Cited Facts)
+                            Grounded &bull; {assistantResponse.factRefs.length} Cited Facts
                           </span>
                         ) : assistantResponse.intent.intent === 'general' || assistantResponse.status === 'success' ? (
                           <span
@@ -3032,6 +3033,17 @@ export function App(): React.JSX.Element {
                       </div>
                     )}
 
+                    {/* Natural-Language Synthesis Body (Pass 28 GFM Markdown) */}
+                    <div className="assistant-synthesis-container">
+                      <div className="assistant-synthesis-header">
+                        <Sparkles size={14} />
+                        <span>AI Assistant Response</span>
+                      </div>
+                      <div className="assistant-answer-body">
+                        <AssistantMarkdown content={assistantResponse.answer} />
+                      </div>
+                    </div>
+
                     {/* Factual Claims Grid (Section 18 & 19 Grounding) */}
                     {assistantResponse.claims && assistantResponse.claims.length > 0 && (
                       <div className="assistant-claims-section">
@@ -3062,17 +3074,6 @@ export function App(): React.JSX.Element {
                         </div>
                       </div>
                     )}
-
-                    {/* Natural-Language Synthesis Body */}
-                    <div className="assistant-synthesis-container">
-                      <div className="assistant-synthesis-header">
-                        <Sparkles size={14} />
-                        <span>Natural-Language Synthesis (AI Generated)</span>
-                      </div>
-                      <div className="assistant-answer-body">
-                        {assistantResponse.answer}
-                      </div>
-                    </div>
 
                     {/* Verified Facts & Citations Accordion */}
                     {assistantResponse.verifiedFacts.length > 0 && (

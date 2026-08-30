@@ -29,6 +29,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "multer": "^2.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "tesseract.js": "^7.0.0",
     "unpdf": "^1.8.1",
     "xlsx": "^0.18.5",

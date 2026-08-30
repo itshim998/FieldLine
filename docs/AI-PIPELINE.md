@@ -205,3 +205,43 @@ export interface AIProvider {
 6. **Zero Credential Exposure**: API keys and authorization headers are strictly redacted. Logging and health snapshots expose only key slots (e.g. `Slot 01`, `Slot 07`).
 7. **Acceptance Smoke Test**: Run `npm run ai:smoke` to validate real Groq connectivity and model responses without altering deterministic test suites.
 
+---
+
+## 6. Assistant Presentation Layer & Markdown Architecture (Pass 28)
+
+FieldLine establishes GitHub-Flavored Markdown (GFM) as the canonical presentation format for AI Assistant responses while strictly preserving the underlying deterministic factual grounding architecture.
+
+```text
+             GROQ GPT-OSS 20B / MockAI
+                         │
+                         ▼
+             Structured JSON Contract
+        { "answer": "...", "claims": [...] }
+                         │
+                         ▼
+               Markdown Answer String
+      (Headings, Tables, Lists, Bold Takeaways)
+                         │
+                         ▼
+             React Markdown + remark-gfm
+             (<AssistantMarkdown /> AST)
+                         │
+                         ▼
+            FieldLine CSS Design System
+          (.assistant-markdown & Tables)
+                         │
+                         ▼
+             Polished Executive Response
+```
+
+### Key Presentation Invariants:
+1. **Presentation vs Grounding Boundary**: Markdown formatting affects visual layout only. It does NOT participate in project truth or factual validation. Grounded claims continue to be verified against authoritative `VerifiedFact` objects.
+2. **Untrusted LLM Output Security**: Model output is treated as untrusted text. `react-markdown` with `remark-gfm` parses Markdown AST without `rehype-raw` or `dangerouslySetInnerHTML`, completely neutralizing arbitrary `<script>` or raw HTML injection vectors.
+3. **Responsive Table Containers**: All Markdown tables (`| Col 1 | Col 2 |`) are automatically wrapped in a `.assistant-table-wrapper` container with `overflow-x: auto`, ensuring that dense comparative matrices scroll smoothly without overflowing narrow mobile screens (390px–430px).
+4. **Literal Linebreak Normalization**: Accidental escaped `\n` character sequences in model outputs are normalized to genuine Markdown line breaks outside code blocks.
+5. **Clear Visual Hierarchy**:
+   - Response Status & Provider Diagnostic Badge (`AI Assistant Response · Groq / LLM` or `Grounded · X Cited Facts`)
+   - Natural-language Markdown Synthesis
+   - Verified Factual Claims Grid
+   - Collapsible Verified Fact Set & Citations Accordion
+

@@ -330,8 +330,22 @@ export function buildGroundedAnswerPrompt(
     '6. If the verified facts do not contain the requested information, state clearly that available project data is insufficient.',
     '7. Never cite a fact that does not support the claim.',
     '',
+    'PRESENTATION & GITHUB-FLAVORED MARKDOWN CONTRACT FOR "answer":',
+    '- Provide a polished, executive-ready GitHub-Flavored Markdown summary in the "answer" field.',
+    '- Use a clear section heading (## Title) when the response contains multiple sections.',
+    '- Use short, scannable paragraphs rather than dense blocks of text.',
+    '- When presenting 3+ activities, milestones, or metrics, format them as a Markdown table (e.g. | Activity | Actual Progress | Planned | Variance |). Keep table columns concise.',
+    '- Use bullet or numbered lists where appropriate for multiple items.',
+    '- Use bold (**term**) to emphasize key conclusions and critical path items, not every sentence.',
+    '- Include blank lines between paragraphs, headings, lists, and tables.',
+    '- Do NOT output raw HTML tags (e.g. <table\>, <div\>, <br\>). Use only standard Markdown.',
+    '- Do NOT wrap the JSON response in a Markdown code block (```json). Return ONLY valid parseable JSON.',
+    '- Do NOT emit literal "\\n" character sequences in rendered text.',
+    '- All data in the Markdown answer must strictly match the verified facts provided below.',
+    '',
     'Return ONLY a valid JSON object matching this schema:',
     '{',
+    '  "answer": "## Summary\\n\\nMarkdown presentation with tables, headings, and bold key points...",',
     '  "claims": [',
     '    {',
     '      "type": "metric",',
@@ -366,16 +380,22 @@ export function buildGeneralAnswerPrompt(
     '',
     projectName ? `Current active project context: "${projectName}".` : '',
     '',
-    'INSTRUCTIONS:',
-    '1. Answer the user prompt directly, naturally, accurately, and professionally.',
-    '2. If the user is greeting you (e.g. "hie", "hello", "how are you"), reply warmly, introduce yourself, and offer assistance with their project tracking, risk analysis, or general engineering questions.',
-    '3. If the user asks for advice or recommendations (e.g. "How to speed up the work?"), provide sound, realistic project management and construction engineering practices (e.g., critical path analysis, resource leveling/crashing, parallel work sequencing, fast-tracking, addressing contractor bottleneck causes).',
-    '4. If the user asks general technical, industry, or factual questions, answer clearly and concisely.',
-    '5. Do NOT output markdown code fences (```json). Return ONLY a valid JSON object.',
+    'PRESENTATION & GITHUB-FLAVORED MARKDOWN CONTRACT:',
+    '1. Return the natural-language answer formatted in clean GitHub-Flavored Markdown (GFM).',
+    '2. For greetings and simple conversational replies (e.g. "hello", "how are you"), keep the response concise, warm, and natural (do not over-format simple greetings).',
+    '3. For advisory, engineering, or project management questions (e.g. "How to speed up the work?"):',
+    '   - Use a clear section heading (## Title) when the response contains distinct sections.',
+    '   - Use short, readable paragraphs rather than monolithic blocks of text.',
+    '   - Use bullet points or numbered subheadings (### 1. Fast-track) for multi-step strategies.',
+    '   - Use bold emphasis for key terms and conclusions (e.g. **critical path**).',
+    '   - Insert blank lines between paragraphs, headings, and list items.',
+    '4. Do NOT output raw HTML tags (e.g. <div>, <span>, <br>).',
+    '5. Do NOT wrap the JSON response inside a markdown code fence (```json). Return ONLY a valid, parseable JSON object.',
+    '6. Do NOT emit literal "\\n" character sequences in the rendered text.',
     '',
     'Return ONLY a JSON object with this schema:',
     '{',
-    '  "answer": "Your comprehensive, natural-language response string"',
+    '  "answer": "## Heading\\n\\nFormatted GitHub-Flavored Markdown response..."',
     '}',
     '',
     '--- USER QUESTION ---',
@@ -679,15 +699,18 @@ export class AssistantService {
       );
     }
 
-    // 11. Final Answer Assembly: Construct exclusively from validated claims
-    const constructedAnswer = rawAnswer.claims.map((c) => c.text.trim()).join(' ');
+    // 11. Final Answer Assembly: Use rich Markdown answer if provided by model, or fallback to validated claims
+    const finalAnswer =
+      typeof rawAnswer.answer === 'string' && rawAnswer.answer.trim().length > 0
+        ? rawAnswer.answer.trim()
+        : rawAnswer.claims.map((c) => c.text.trim()).join(' ');
 
     return {
       question: trimmedQuestion,
       intent,
       resolvedActivity,
       ambiguousCandidates: null,
-      answer: constructedAnswer,
+      answer: finalAnswer,
       claims: rawAnswer.claims,
       factRefs: finalFactRefs,
       grounded: true,

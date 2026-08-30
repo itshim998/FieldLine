@@ -123,16 +123,19 @@ This orchestrates:
 2. Under **Ask FieldLine Assistant**, use one of the quick suggested chips or type a question:
 
 #### Question A: `"What is delayed?"`
-- **Synthesis**: The assistant summarizes the 4 overdue activities (`ACT-A02`, `ACT-B02`, `ACT-D02`, `ACT-F01`).
+- **Markdown Presentation (Pass 28)**: Renders a clean GFM response with section headings (`## Delayed Activities`), responsive tabular comparison (`| Activity | Actual Progress | Status |`), and bold takeaways.
 - **Verified Factual Claims**: Highlights structured claim tags with exact percentage variance and reasons.
-- **Verified Facts Accordion**: Expand to show the 4 cited deterministic fact records.
+- **Verified Facts Accordion**: Expand to show the cited deterministic fact records.
 
 #### Question B: `"Tell me about the crude pump foundation"`
 - **Synthesis**: Identifies `ACT-B02` (Crude Pump Foundation Piling Works) in Area B, notes current progress is 65% against planned 100% (delayed by -35 pts).
 - **Target Badge**: Click the `Target: ACT-B02` badge to immediately open its full Activity Detail view!
 
 #### Question C: `"Which activities are at risk?"`
-- **Synthesis**: Explains `ACT-A03`, `ACT-B03`, `ACT-C01`, and `ACT-D03` with specific variance warnings and approaching finish deadlines.
+- **Synthesis**: Explains `ACT-A03`, `ACT-B03`, `ACT-C01`, and `ACT-D03` formatted in structured Markdown with specific variance warnings and approaching finish deadlines.
+
+#### Question D: `"How to speed up the work?"`
+- **Executive Advisory Markdown**: Demonstrates structured general advice formatted in numbered sections (fast-tracking, resource crashing, bottleneck elimination, daily coordination standups) without raw text dumps.
 
 ---
 
