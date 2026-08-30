@@ -34,28 +34,46 @@ async function runDeepEvaluation(): Promise<void> {
 
   const testCases: TestCase[] = [
     {
-      name: '1. Advisory / Open-ended (Unsupported Intent)',
-      question: 'How to speed up the work?',
-      expectedIntent: 'unsupported',
-      expectedStatus: 'unsupported',
+      name: '1. Greeting / Conversational ("Hie")',
+      question: 'Hie',
+      expectedIntent: 'general',
+      expectedStatus: 'success',
       expectedGrounded: false,
       check: (res) => {
         if (!res.answer || res.answer.length === 0) return 'Empty answer string';
-        if (!res.answer.toLowerCase().includes('cannot be answered') && !res.answer.toLowerCase().includes('supported queries')) {
-          return `Unexpected unsupported message: ${res.answer}`;
+        if (res.answer.toLowerCase().includes('cannot be answered')) {
+          return 'Assistant incorrectly refused greeting';
         }
         return true;
       }
     },
     {
-      name: '2. Out-of-domain Question (Unsupported Intent)',
-      question: 'What is the weather in New York today?',
-      expectedIntent: 'unsupported',
-      expectedStatus: 'unsupported',
-      expectedGrounded: false
+      name: '2. Conversational Status ("how are you")',
+      question: 'how are you',
+      expectedIntent: 'general',
+      expectedStatus: 'success',
+      expectedGrounded: false,
+      check: (res) => {
+        if (!res.answer || res.answer.length === 0) return 'Empty answer string';
+        return true;
+      }
     },
     {
-      name: '3. Delayed Activities Query',
+      name: '3. Advisory / Open-ended ("How to speed up the work?")',
+      question: 'How to speed up the work?',
+      expectedIntent: 'general',
+      expectedStatus: 'success',
+      expectedGrounded: false,
+      check: (res) => {
+        if (!res.answer || res.answer.length === 0) return 'Empty answer string';
+        if (res.answer.toLowerCase().includes('cannot be answered')) {
+          return 'Assistant incorrectly refused advisory question';
+        }
+        return true;
+      }
+    },
+    {
+      name: '4. Delayed Activities Query',
       question: 'What is delayed?',
       expectedIntent: 'delayed',
       expectedStatus: 'success',

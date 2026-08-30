@@ -1,6 +1,7 @@
 import { AIService, aiService as defaultAiService } from '../../ai/services/ai.service.js';
 import {
   assistantAnswerSchema,
+  generalAssistantAnswerSchema,
   AssistantAnswer,
   AssistantIntent
 } from '../../ai/contracts/assistant.contract.js';
@@ -355,6 +356,34 @@ export function buildGroundedAnswerPrompt(
   ].join('\n');
 }
 
+export function buildGeneralAnswerPrompt(
+  question: string,
+  projectName?: string
+): string {
+  return [
+    'You are FieldLine AI Assistant, an expert, helpful, and professional AI engineering and project intelligence companion.',
+    'You assist project managers, EPC executives, planning engineers, and field personnel with infrastructure project queries, general conversational greetings, engineering best practices, and construction management advice.',
+    '',
+    projectName ? `Current active project context: "${projectName}".` : '',
+    '',
+    'INSTRUCTIONS:',
+    '1. Answer the user prompt directly, naturally, accurately, and professionally.',
+    '2. If the user is greeting you (e.g. "hie", "hello", "how are you"), reply warmly, introduce yourself, and offer assistance with their project tracking, risk analysis, or general engineering questions.',
+    '3. If the user asks for advice or recommendations (e.g. "How to speed up the work?"), provide sound, realistic project management and construction engineering practices (e.g., critical path analysis, resource leveling/crashing, parallel work sequencing, fast-tracking, addressing contractor bottleneck causes).',
+    '4. If the user asks general technical, industry, or factual questions, answer clearly and concisely.',
+    '5. Do NOT output markdown code fences (```json). Return ONLY a valid JSON object.',
+    '',
+    'Return ONLY a JSON object with this schema:',
+    '{',
+    '  "answer": "Your comprehensive, natural-language response string"',
+    '}',
+    '',
+    '--- USER QUESTION ---',
+    question,
+    '--- END USER QUESTION ---'
+  ].join('\n');
+}
+
 export class AssistantService {
   private aiService: AIService;
   private intentService: AssistantIntentService;
@@ -378,7 +407,8 @@ export class AssistantService {
 
   /**
    * Answers a natural language query for a specific project.
-   * Completely grounded in deterministic Project Intelligence facts.
+   * Grounded in deterministic Project Intelligence facts for project queries,
+   * with natural conversational synthesis for general inquiries.
    */
   async answerQuestion(
     projectId: string,
@@ -425,22 +455,50 @@ export class AssistantService {
       canonicalDate = getTodayDateString();
     }
 
-    // 5. Handle unsupported questions safely
-    if (intent.intent === 'unsupported') {
-      return {
-        question: trimmedQuestion,
-        intent,
-        resolvedActivity: null,
-        ambiguousCandidates: null,
-        answer:
-          'This question cannot be answered from project tracking data. Supported queries include delayed activities, at-risk activities, completed tasks, behind-schedule activities, upcoming milestones, stale activities, recent changes, and activity status.',
-        claims: [],
-        factRefs: [],
-        grounded: false,
-        status: 'unsupported',
-        asOfDate: canonicalDate,
-        verifiedFacts: []
-      };
+    // 5. Handle general / conversational / advisory questions naturally
+    if (intent.intent === 'general' || intent.intent === 'unsupported') {
+      try {
+        const generalPrompt = buildGeneralAnswerPrompt(trimmedQuestion, project.name);
+        const res = await this.aiService.extractStructured<{ answer: string }>(
+          generalPrompt,
+          generalAssistantAnswerSchema
+        );
+
+        return {
+          question: trimmedQuestion,
+          intent,
+          resolvedActivity: null,
+          ambiguousCandidates: null,
+          answer: res.answer || 'Hello! How can I assist you with your project today?',
+          claims: [],
+          factRefs: [],
+          grounded: false,
+          status: 'success',
+          asOfDate: canonicalDate,
+          verifiedFacts: []
+        };
+      } catch (err) {
+        logger.warn(`AssistantService: General answer generation fallback: ${(err as Error).message}`);
+        let fallbackAnswer = 'Hello! I am your FieldLine Project Assistant, ready to help you with schedule tracking, risk intelligence, activity status, or construction management.';
+        if (/how are you/i.test(trimmedQuestion)) {
+          fallbackAnswer = 'I am doing well, thank you! I am ready to assist you with FieldLine. How can I help you today?';
+        } else if (/hie|hello|hey|hi/i.test(trimmedQuestion)) {
+          fallbackAnswer = 'Hello! I am your FieldLine Project Assistant. How can I assist you today?';
+        }
+        return {
+          question: trimmedQuestion,
+          intent,
+          resolvedActivity: null,
+          ambiguousCandidates: null,
+          answer: fallbackAnswer,
+          claims: [],
+          factRefs: [],
+          grounded: false,
+          status: 'success',
+          asOfDate: canonicalDate,
+          verifiedFacts: []
+        };
+      }
     }
 
     // 6. Deterministic Activity Resolution (if query contains entity reference)

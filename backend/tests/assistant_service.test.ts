@@ -364,7 +364,7 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
   it('Query 6: "What is the weather?" -> returns unsupported query without querying project data', async () => {
     const fakeIntentService = {
       interpret: vi.fn().mockResolvedValue({
-        intent: 'unsupported',
+        intent: 'general',
         activityQuery: null,
         explicitDate: null
       })
@@ -372,7 +372,9 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
 
     const fakeAIService: AIService = {
       generateText: vi.fn(),
-      extractStructured: vi.fn()
+      extractStructured: vi.fn().mockResolvedValue({
+        answer: 'Hello! I am your FieldLine Assistant, ready to help with project tracking and engineering questions.'
+      })
     };
 
     const service = new AssistantService(
@@ -383,10 +385,10 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
       fakeProjectRepo
     );
 
-    const res = await service.answerQuestion(projectId, 'What is the weather?');
-    expect(res.status).toBe('unsupported');
+    const res = await service.answerQuestion(projectId, 'Hie');
+    expect(res.status).toBe('success');
     expect(res.grounded).toBe(false);
-    expect(res.answer).toContain('This question cannot be answered from project tracking data');
-    expect(fakeAIService.extractStructured).not.toHaveBeenCalled();
+    expect(res.answer).toContain('FieldLine Assistant');
+    expect(fakeAIService.extractStructured).toHaveBeenCalled();
   });
 });

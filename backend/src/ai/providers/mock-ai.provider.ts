@@ -68,7 +68,7 @@ export class MockAIProvider implements AIProvider {
       const questionText = questionMatch ? questionMatch[1].trim() : _prompt;
       const lowerQ = questionText.toLowerCase();
 
-      let detectedIntent = 'unsupported';
+      let detectedIntent = 'general';
       let activityQuery: string | null = null;
       let explicitDate: string | null = null;
 
@@ -129,7 +129,33 @@ export class MockAIProvider implements AIProvider {
       };
     }
 
-    // 2. Dynamic Assistant Grounded Answer parsing from Verified Facts
+    // 2. Dynamic General / Conversational Assistant Answer
+    if (_prompt.includes('--- USER QUESTION ---')) {
+      const qMatch = _prompt.match(/--- USER QUESTION ---\r?\n([\s\S]*?)\r?\n--- END USER QUESTION ---/);
+      const q = qMatch ? qMatch[1].trim() : _prompt;
+      const lower = q.toLowerCase();
+
+      if (/^(hi|hie|hello|hey|greetings|good\s*(morning|afternoon|evening))/i.test(lower) || lower === 'hie') {
+        return {
+          answer: 'Hello! I am your FieldLine Project Assistant. I can help you with project progress tracking, risk intelligence, schedule variance, activity details, or construction management advice. How can I help you today?'
+        };
+      }
+      if (/how are you/i.test(lower)) {
+        return {
+          answer: 'I am doing well, thank you! I am ready to assist you with your project management, schedule tracking, or engineering questions. What would you like to explore?'
+        };
+      }
+      if (/speed up|accelerate|fast track|faster|catch up/i.test(lower)) {
+        return {
+          answer: 'To accelerate project progress and recover delays: (1) Fast-track critical path activities by sequencing predecessor and successor tasks in parallel where site conditions permit; (2) Crash critical schedule activities by deploying additional specialized crews or authorizing selective overtime; (3) Proactively resolve procurement and material delivery lead times; and (4) Conduct daily progress standups with area superintendents.'
+        };
+      }
+      return {
+        answer: 'I am here to assist you with FieldLine project intelligence and construction management. You can ask me about delayed activities, project risk analysis, upcoming milestones, recent field changes, or general engineering best practices.'
+      };
+    }
+
+    // 3. Dynamic Assistant Grounded Answer parsing from Verified Facts
     const testAssistantPayload = {
       claims: [
         {

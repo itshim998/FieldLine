@@ -12,6 +12,7 @@ export const assistantIntentTypeEnum = z.enum([
   'stale_activities',
   'recent_changes',
   'activity_status',
+  'general',
   'unsupported'
 ]);
 
@@ -68,4 +69,13 @@ export const assistantAnswerSchema = z.object({
 });
 
 export type AssistantAnswer = z.infer<typeof assistantAnswerSchema>;
+
+/**
+ * Structured general / conversational assistant answer schema
+ */
+export const generalAssistantAnswerSchema = z.object({
+  answer: z.string().min(1, 'Answer must not be empty')
+});
+
+export type GeneralAssistantAnswer = z.infer<typeof generalAssistantAnswerSchema>;
 

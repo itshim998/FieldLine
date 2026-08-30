@@ -2958,10 +2958,22 @@ export function App(): React.JSX.Element {
                             <CheckCircle2 size={13} />
                             Grounded ({assistantResponse.factRefs.length} Cited Facts)
                           </span>
+                        ) : assistantResponse.intent.intent === 'general' || assistantResponse.status === 'success' ? (
+                          <span
+                            className="grounding-pill success"
+                            style={{
+                              background: 'rgba(99, 102, 241, 0.15)',
+                              color: '#818cf8',
+                              borderColor: 'rgba(99, 102, 241, 0.3)'
+                            }}
+                          >
+                            <Sparkles size={13} />
+                            AI Assistant Response
+                          </span>
                         ) : assistantResponse.status === 'unsupported' ? (
                           <span className="grounding-pill unsupported">
                             <HelpCircle size={13} />
-                            Unsupported Question
+                            General Response
                           </span>
                         ) : (
                           <span className="grounding-pill warning">
