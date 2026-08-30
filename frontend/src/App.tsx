@@ -40,6 +40,13 @@ import {
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
+import {
+  WorkspaceTab,
+  RouteState,
+  parseRoute,
+  pushRoute,
+  replaceRoute
+} from './router.js';
 
 export type ProjectStatus = 'planning' | 'active' | 'paused' | 'completed' | 'archived';
 
@@ -320,13 +327,9 @@ export function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Workspace View State
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<
-    'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence' | 'activity-detail'
-  >('overview');
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<WorkspaceTab>('overview');
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
-  const [previousWorkspaceTab, setPreviousWorkspaceTab] = useState<
-    'overview' | 'schedules' | 'progress' | 'evidence' | 'intelligence'
-  >('overview');
+  const [previousWorkspaceTab, setPreviousWorkspaceTab] = useState<WorkspaceTab>('overview');
 
   // FieldLine Assistant State (PASS 18)
   const [assistantQuestion, setAssistantQuestion] = useState<string>('');
@@ -534,6 +537,22 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
+  // Fetch matches for a specific report (PASS 19)
+  const fetchReportMatches = useCallback(async (projectId: string, updateId: string) => {
+    setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: true }));
+    try {
+      const res = await fetch(`/api/projects/${projectId}/progress-updates/${updateId}/matches`);
+      const data = await res.json();
+      if (res.ok) {
+        setReportMatchesMap((prev) => ({ ...prev, [updateId]: data.matches || [] }));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: false }));
+    }
+  }, []);
+
   // Fetch Project Intelligence (PASS 17)
   const fetchIntelligence = useCallback(
     async (
@@ -571,7 +590,7 @@ export function App(): React.JSX.Element {
     []
   );
 
-  // Fetch Projects and restore saved selection
+  // Fetch Projects and restore saved selection / URL route
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
     try {
@@ -585,12 +604,22 @@ export function App(): React.JSX.Element {
       const projectList: Project[] = data.projects || [];
       setProjects(projectList);
 
-      const targetId = preferredSelectId || localStorage.getItem(STORAGE_KEY_SELECTED_PROJECT);
+      const initialRoute = parseRoute();
+      const targetId = preferredSelectId || initialRoute.projectId;
+
       if (targetId) {
         const found = projectList.find((p) => p.id === targetId);
         if (found) {
           setSelectedProject(found);
           localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, found.id);
+          const targetTab: WorkspaceTab = initialRoute.tab || 'overview';
+          setActiveWorkspaceTab(targetTab);
+          setSelectedActivityId(initialRoute.activityId || null);
+          replaceRoute({
+            projectId: found.id,
+            tab: targetTab,
+            activityId: initialRoute.activityId || null
+          });
           fetchSchedules(found.id);
           fetchProgressUpdates(found.id);
           fetchEvidence(found.id);
@@ -598,20 +627,18 @@ export function App(): React.JSX.Element {
         } else {
           localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
           setSelectedProject(null);
+          setSelectedActivityId(null);
+          setActiveWorkspaceTab('overview');
+          replaceRoute({ projectId: null, tab: 'overview' });
           if (targetId && !preferredSelectId) {
-            showNotification('info', 'Previously selected project was not found; returned to project list.');
+            showNotification('info', 'Project requested in URL was not found; returned to project list.');
           }
         }
-      } else if (projectList.length === 1) {
-        const soleProject = projectList[0];
-        setSelectedProject(soleProject);
-        localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, soleProject.id);
-        fetchSchedules(soleProject.id);
-        fetchProgressUpdates(soleProject.id);
-        fetchEvidence(soleProject.id);
-        fetchIntelligence(soleProject.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
       } else {
         setSelectedProject(null);
+        setSelectedActivityId(null);
+        setActiveWorkspaceTab('overview');
+        replaceRoute({ projectId: null, tab: 'overview' });
       }
     } catch (err: any) {
       showNotification('error', err.message || 'Error connecting to API server');
@@ -628,10 +655,81 @@ export function App(): React.JSX.Element {
     return () => clearInterval(interval);
   }, [fetchHealth, fetchProjects]);
 
+  // Handle Opening Activity Detail View (PASS 21)
+  const handleOpenActivityDetail = useCallback((activityId: string) => {
+    setActiveWorkspaceTab((currentTab) => {
+      if (currentTab !== 'activity-detail') {
+        setPreviousWorkspaceTab(currentTab as any);
+      }
+      return 'activity-detail';
+    });
+    setSelectedActivityId(activityId);
+    if (selectedProject) {
+      pushRoute({
+        projectId: selectedProject.id,
+        tab: 'activity-detail',
+        activityId,
+        previousTab: activeWorkspaceTab !== 'activity-detail' ? activeWorkspaceTab : previousWorkspaceTab
+      });
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [selectedProject, activeWorkspaceTab, previousWorkspaceTab]);
+
+  // Handle Tab Change with browser history update
+  const handleTabChange = useCallback(
+    (tab: WorkspaceTab, extra?: { updateId?: string; activityId?: string; statusFilter?: string }) => {
+      if (tab === 'activity-detail' && extra?.activityId) {
+        handleOpenActivityDetail(extra.activityId);
+        return;
+      }
+      setActiveWorkspaceTab(tab);
+      setSelectedActivityId(null);
+      if (selectedProject) {
+        pushRoute({ projectId: selectedProject.id, tab });
+        if (tab === 'progress') {
+          fetchProgressUpdates(selectedProject.id);
+          if (extra?.updateId) {
+            setExpandedReportMatches((prev) => ({ ...prev, [extra.updateId!]: true }));
+            fetchReportMatches(selectedProject.id, extra.updateId);
+          }
+        } else if (tab === 'schedules') {
+          if (schedules.length > 0) {
+            fetchActivities(selectedProject.id, selectedSchedule?.id || schedules[0].id);
+          }
+        } else if (tab === 'intelligence') {
+          fetchIntelligence(
+            selectedProject.id,
+            intelligenceAsOfDate,
+            intelligenceRecentDays,
+            intelligenceApproachingDays
+          );
+        } else if (tab === 'evidence') {
+          fetchEvidence(selectedProject.id);
+          fetchProgressUpdates(selectedProject.id);
+        }
+      }
+    },
+    [
+      selectedProject,
+      schedules,
+      selectedSchedule,
+      fetchProgressUpdates,
+      fetchReportMatches,
+      fetchActivities,
+      fetchIntelligence,
+      fetchEvidence,
+      intelligenceAsOfDate,
+      intelligenceRecentDays,
+      intelligenceApproachingDays,
+      handleOpenActivityDetail
+    ]
+  );
+
   // Handle Opening a Project
-  const handleOpenProject = (project: Project) => {
+  const handleOpenProject = (project: Project, targetTab: WorkspaceTab = 'overview', activityId?: string | null) => {
     setSelectedProject(project);
-    setActiveWorkspaceTab('overview');
+    setActiveWorkspaceTab(targetTab);
+    setSelectedActivityId(activityId || null);
     setSelectedFile(null);
     setUploadError(null);
     setImportSummary(null);
@@ -649,30 +747,25 @@ export function App(): React.JSX.Element {
       rawText: ''
     });
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
+    pushRoute({ projectId: project.id, tab: targetTab, activityId: activityId || null });
     setAssistantQuestion('');
     setAssistantError(null);
     setAssistantResponse(null);
-    setSelectedActivityId(null);
     fetchSchedules(project.id);
     fetchProgressUpdates(project.id);
     fetchEvidence(project.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Handle Opening Activity Detail View (PASS 21)
-  const handleOpenActivityDetail = (activityId: string) => {
-    if (activeWorkspaceTab !== 'activity-detail') {
-      setPreviousWorkspaceTab(activeWorkspaceTab as any);
-    }
-    setSelectedActivityId(activityId);
-    setActiveWorkspaceTab('activity-detail');
+    fetchIntelligence(project.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // Handle Returning from Activity Detail View
   const handleBackFromActivityDetail = () => {
     setSelectedActivityId(null);
-    setActiveWorkspaceTab(previousWorkspaceTab || 'overview');
+    const targetTab = (previousWorkspaceTab && previousWorkspaceTab !== 'activity-detail') ? previousWorkspaceTab : 'overview';
+    setActiveWorkspaceTab(targetTab);
+    if (selectedProject) {
+      pushRoute({ projectId: selectedProject.id, tab: targetTab });
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -700,7 +793,73 @@ export function App(): React.JSX.Element {
     setAssistantError(null);
     setAssistantResponse(null);
     localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
+    pushRoute({ projectId: null, tab: 'overview', activityId: null });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Listen to browser Back / Forward (popstate) navigation
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const route: RouteState = event.state || parseRoute();
+
+      if (!route.projectId) {
+        setSelectedProject(null);
+        setSelectedActivityId(null);
+        setActiveWorkspaceTab('overview');
+        localStorage.removeItem(STORAGE_KEY_SELECTED_PROJECT);
+        return;
+      }
+
+      const found = projects.find((p) => p.id === route.projectId);
+      if (found) {
+        if (selectedProject?.id !== found.id) {
+          setSelectedProject(found);
+          localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, found.id);
+          fetchSchedules(found.id);
+          fetchProgressUpdates(found.id);
+          fetchEvidence(found.id);
+          fetchIntelligence(found.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
+        }
+
+        const targetTab = route.tab || 'overview';
+        setActiveWorkspaceTab(targetTab);
+        setSelectedActivityId(route.activityId || null);
+        if (route.previousTab) {
+          setPreviousWorkspaceTab(route.previousTab);
+        }
+
+        if (targetTab === 'progress') {
+          fetchProgressUpdates(found.id);
+        } else if (targetTab === 'evidence') {
+          fetchEvidence(found.id);
+        } else if (targetTab === 'intelligence') {
+          fetchIntelligence(found.id, intelligenceAsOfDate, intelligenceRecentDays, intelligenceApproachingDays);
+        } else if (targetTab === 'schedules') {
+          if (schedules.length > 0) {
+            fetchActivities(found.id, selectedSchedule?.id || schedules[0].id);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [
+    projects,
+    selectedProject,
+    schedules,
+    selectedSchedule,
+    fetchSchedules,
+    fetchProgressUpdates,
+    fetchEvidence,
+    fetchIntelligence,
+    fetchActivities,
+    intelligenceAsOfDate,
+    intelligenceRecentDays,
+    intelligenceApproachingDays
+  ]);
 
   // Handle Asking FieldLine Assistant (PASS 18)
   const handleAskAssistant = async (overrideQuestion?: string) => {
@@ -1055,22 +1214,6 @@ export function App(): React.JSX.Element {
       setSubmittingReport(false);
     }
   };
-
-  // Fetch matches for a specific report (PASS 19)
-  const fetchReportMatches = useCallback(async (projectId: string, updateId: string) => {
-    setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: true }));
-    try {
-      const res = await fetch(`/api/projects/${projectId}/progress-updates/${updateId}/matches`);
-      const data = await res.json();
-      if (res.ok) {
-        setReportMatchesMap((prev) => ({ ...prev, [updateId]: data.matches || [] }));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingReportMatchesMap((prev) => ({ ...prev, [updateId]: false }));
-    }
-  }, []);
 
   // Toggle report matches panel (PASS 19)
   const handleToggleReportMatches = (updateId: string) => {
@@ -1482,7 +1625,7 @@ export function App(): React.JSX.Element {
             <button
               id="tab-overview"
               className={`workspace-tab ${activeWorkspaceTab === 'overview' ? 'active' : ''}`}
-              onClick={() => setActiveWorkspaceTab('overview')}
+              onClick={() => handleTabChange('overview')}
             >
               <LayoutDashboard size={16} />
               <span>Project Dashboard</span>
@@ -1490,7 +1633,7 @@ export function App(): React.JSX.Element {
             <button
               id="tab-schedules"
               className={`workspace-tab ${activeWorkspaceTab === 'schedules' ? 'active' : ''}`}
-              onClick={() => setActiveWorkspaceTab('schedules')}
+              onClick={() => handleTabChange('schedules')}
             >
               <FileSpreadsheet size={16} />
               <span>Schedules & Activities</span>
@@ -1503,12 +1646,7 @@ export function App(): React.JSX.Element {
             <button
               id="tab-progress"
               className={`workspace-tab ${activeWorkspaceTab === 'progress' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveWorkspaceTab('progress');
-                if (selectedProject) {
-                  fetchProgressUpdates(selectedProject.id);
-                }
-              }}
+              onClick={() => handleTabChange('progress')}
             >
               <Activity size={16} />
               <span>Progress Updates</span>
@@ -1521,13 +1659,7 @@ export function App(): React.JSX.Element {
             <button
               id="tab-evidence"
               className={`workspace-tab ${activeWorkspaceTab === 'evidence' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveWorkspaceTab('evidence');
-                if (selectedProject) {
-                  fetchEvidence(selectedProject.id);
-                  fetchProgressUpdates(selectedProject.id);
-                }
-              }}
+              onClick={() => handleTabChange('evidence')}
             >
               <FileText size={16} />
               <span>Evidence</span>
@@ -1540,17 +1672,7 @@ export function App(): React.JSX.Element {
             <button
               id="tab-intelligence"
               className={`workspace-tab ${activeWorkspaceTab === 'intelligence' ? 'active' : ''}`}
-              onClick={() => {
-                setActiveWorkspaceTab('intelligence');
-                if (selectedProject) {
-                  fetchIntelligence(
-                    selectedProject.id,
-                    intelligenceAsOfDate,
-                    intelligenceRecentDays,
-                    intelligenceApproachingDays
-                  );
-                }
-              }}
+              onClick={() => handleTabChange('intelligence')}
             >
               <TrendingUp size={16} />
               <span>Project Intelligence</span>
@@ -1576,40 +1698,9 @@ export function App(): React.JSX.Element {
             /* Tab 1: Pass 20 Primary Project Dashboard View */
             <ProjectDashboardView
               projectId={selectedProject.id}
-              onNavigateTab={(tab, extra) => {
-                if (tab === 'activity-detail' && extra?.activityId) {
-                  handleOpenActivityDetail(extra.activityId);
-                  return;
-                }
-                setActiveWorkspaceTab(tab);
-                if (tab === 'progress' && selectedProject) {
-                  fetchProgressUpdates(selectedProject.id);
-                  if (extra?.updateId) {
-                    setExpandedReportMatches((prev) => ({ ...prev, [extra.updateId!]: true }));
-                    fetchReportMatches(selectedProject.id, extra.updateId);
-                  }
-                } else if (tab === 'schedules' && selectedProject) {
-                  if (schedules.length > 0) {
-                    fetchActivities(selectedProject.id, selectedSchedule?.id || schedules[0].id);
-                  }
-                } else if (tab === 'intelligence' && selectedProject) {
-                  fetchIntelligence(
-                    selectedProject.id,
-                    intelligenceAsOfDate,
-                    intelligenceRecentDays,
-                    intelligenceApproachingDays
-                  );
-                } else if (tab === 'evidence' && selectedProject) {
-                  fetchEvidence(selectedProject.id);
-                }
-              }}
+              onNavigateTab={(tab, extra) => handleTabChange(tab, extra)}
               onSelectActivity={handleOpenActivityDetail}
-              onTraceEvidence={() => {
-                setActiveWorkspaceTab('evidence');
-                if (selectedProject) {
-                  fetchEvidence(selectedProject.id);
-                }
-              }}
+              onTraceEvidence={() => handleTabChange('evidence')}
             />
           ) : activeWorkspaceTab === 'schedules' ? (
             /* Tab 2: Schedules & Importer Content (PASS 4) */
@@ -3639,9 +3730,7 @@ export function App(): React.JSX.Element {
               activityId={selectedActivityId}
               onBack={handleBackFromActivityDetail}
               onSelectUpdate={(updateId) => {
-                setActiveWorkspaceTab('progress');
-                setExpandedReportMatches((prev) => ({ ...prev, [updateId]: true }));
-                fetchReportMatches(selectedProject.id, updateId);
+                handleTabChange('progress', { updateId });
               }}
             />
           ) : null}

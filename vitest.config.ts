@@ -8,11 +8,11 @@ export default defineConfig({
       AI_PROVIDER: 'mock',
       NODE_ENV: 'test'
     },
-    include: ['backend/tests/**/*.test.ts'],
+    include: ['backend/tests/**/*.test.ts', 'frontend/tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['node_modules/', 'dist/', 'frontend/']
+      exclude: ['node_modules/', 'dist/']
     }
   }
 });
