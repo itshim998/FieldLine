@@ -430,6 +430,9 @@ export function App(): React.JSX.Element {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [latency, setLatency] = useState<number | null>(null);
 
+  // Golden Demo Seeding State
+  const [isSeedingDemo, setIsSeedingDemo] = useState<boolean>(false);
+
   // Show notification helper
   const showNotification = useCallback((type: 'success' | 'error' | 'info', message: string) => {
     setNotification({ type, message });
@@ -595,7 +598,7 @@ export function App(): React.JSX.Element {
   const fetchProjects = useCallback(async (preferredSelectId?: string) => {
     setLoadingProjects(true);
     try {
-      const res = await fetch('/api/projects');
+      const res = await fetch('/api/projects?autoSeed=true');
       const data = await res.json();
 
       if (!res.ok) {
@@ -972,6 +975,32 @@ export function App(): React.JSX.Element {
       setFormError(err.message || 'An error occurred while creating project.');
     } finally {
       setFormSubmitting(false);
+    }
+  };
+
+  // Seed or Reset Golden Demo Repository
+  const handleSeedGoldenDemo = async (force: boolean = false) => {
+    setIsSeedingDemo(true);
+    try {
+      showNotification('info', 'Initializing Golden Demo Project (Refinery Expansion — Unit 4)...');
+      const res = await fetch('/api/demo/seed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force })
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to initialize Golden Demo');
+      }
+
+      showNotification('success', data.message || 'Golden Demo initialized successfully!');
+      const targetId = data.project?.id || data.seedResult?.projectId;
+      await fetchProjects(targetId);
+    } catch (err: any) {
+      showNotification('error', err.message || 'Failed to initialize Golden Demo repository');
+    } finally {
+      setIsSeedingDemo(false);
     }
   };
 
@@ -1524,6 +1553,18 @@ export function App(): React.JSX.Element {
         </div>
 
         <div className="header-right">
+          <button
+            id="header-golden-demo-btn"
+            className="btn btn-secondary btn-sm"
+            onClick={() => handleSeedGoldenDemo()}
+            disabled={isSeedingDemo}
+            title="Seed or restore the presentation-ready Golden Demo repository (Refinery Expansion — Unit 4)"
+            style={{ fontSize: '0.75rem', gap: '0.35rem' }}
+          >
+            {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <Sparkles size={13} color="var(--accent-indigo)" />}
+            <span>{isSeedingDemo ? 'Seeding Demo...' : 'Golden Demo'}</span>
+          </button>
+
           <button
             className="system-status-trigger"
             onClick={() => setIsDiagnosticsOpen(true)}
@@ -3722,16 +3763,32 @@ export function App(): React.JSX.Element {
           </div>
           <h2 className="empty-title">No Projects Found</h2>
           <p className="empty-desc">
-            FieldLine needs at least one infrastructure project to begin tracking schedules and field progress. Create your first project below.
+            FieldLine needs at least one infrastructure project to begin tracking schedules and field progress. Load the presentation-ready Golden Demo repository or create a custom project.
           </p>
-          <button
-            id="create-first-project-btn"
-            className="btn btn-primary"
-            onClick={openCreateModal}
-          >
-            <Plus size={16} />
-            <span>Create Project</span>
-          </button>
+          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+            <button
+              id="seed-golden-demo-btn"
+              className="btn btn-primary"
+              onClick={() => handleSeedGoldenDemo()}
+              disabled={isSeedingDemo}
+              style={{
+                background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)',
+                boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)'
+              }}
+            >
+              {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <Sparkles size={16} />}
+              <span>{isSeedingDemo ? 'Seeding Golden Demo...' : 'Load Golden Demo Project'}</span>
+            </button>
+            <button
+              id="create-first-project-btn"
+              className="btn btn-secondary"
+              onClick={openCreateModal}
+              disabled={isSeedingDemo}
+            >
+              <Plus size={16} />
+              <span>Create Project</span>
+            </button>
+          </div>
         </div>
       ) : (
         /* ========================================================================= */
@@ -3760,6 +3817,16 @@ export function App(): React.JSX.Element {
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
+              <button
+                id="reset-golden-demo-btn"
+                className="btn btn-secondary"
+                onClick={() => handleSeedGoldenDemo(true)}
+                disabled={isSeedingDemo}
+                title="Reset or refresh the canonical Golden Demo dataset"
+              >
+                {isSeedingDemo ? <RefreshCw size={14} className="pulse-dot" /> : <Sparkles size={14} color="var(--accent-indigo)" />}
+                <span>{isSeedingDemo ? 'Resetting...' : 'Reset Demo Data'}</span>
+              </button>
               <button
                 id="create-project-btn"
                 className="btn btn-primary"

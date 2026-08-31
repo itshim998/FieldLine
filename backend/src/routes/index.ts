@@ -14,6 +14,7 @@ import { intelligenceRouter } from './intelligence.router.js';
 import { assistantRouter } from './assistant.router.js';
 import { dashboardRouter } from './dashboard.router.js';
 import { activityDetailRouter } from './activity-detail.router.js';
+import { demoRouter } from './demo.router.js';
 
 export const apiRouter = Router();
 
@@ -32,6 +33,7 @@ apiRouter.use(intelligenceRouter);
 apiRouter.use(assistantRouter);
 apiRouter.use(dashboardRouter);
 apiRouter.use(activityDetailRouter);
+apiRouter.use(demoRouter);
 
 
 

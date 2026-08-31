@@ -26,6 +26,7 @@ uploads/*
 !uploads/evidence/
 uploads/evidence/*
 !uploads/evidence/.gitkeep
+temp-*
 
 # Testing & Coverage
 coverage/

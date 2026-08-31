@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { projectRepository } from '../backend/src/repositories/project.repository.js';
 import { scheduleImportService } from '../backend/src/services/schedule-import.service.js';
 import { activityRepository } from '../backend/src/repositories/activity.repository.js';
@@ -29,14 +30,38 @@ export interface SeedGoldenDemoResult {
   asOfDate: string;
 }
 
+function resolveDemoFixturesDir(): string {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const currentDir = path.dirname(currentFilePath);
+
+  const candidates = [
+    path.resolve(process.cwd(), 'demo/fixtures'),
+    path.resolve(process.cwd(), 'dist/demo/fixtures'),
+    path.resolve(currentDir, 'fixtures'),
+    path.resolve(currentDir, '../demo/fixtures'),
+    path.resolve(currentDir, '../../demo/fixtures'),
+    path.resolve(currentDir, '../fixtures')
+  ];
+
+  for (const candidate of candidates) {
+    const testFile = path.join(candidate, 'schedules', 'refinery_unit4_schedule.csv');
+    if (fs.existsSync(testFile)) {
+      return candidate;
+    }
+  }
+
+  return path.resolve(process.cwd(), 'demo/fixtures');
+}
+
 export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
   const rootDir = process.cwd();
-  const demoFixturesDir = path.resolve(rootDir, 'demo/fixtures');
+  const demoFixturesDir = resolveDemoFixturesDir();
   const schedulesFixtureDir = path.join(demoFixturesDir, 'schedules');
   const evidenceFixtureDir = path.join(demoFixturesDir, 'evidence');
 
   logger.info('====================================================');
   logger.info('🏭 Seeding Golden Demo Project: Refinery Expansion — Unit 4');
+  logger.info(`📁 Resolved fixtures directory: ${demoFixturesDir}`);
   logger.info('====================================================');
 
   // 1. Check or Create Golden Project (Idempotency)
@@ -63,7 +88,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
   }
 
   // Create temporary copy for importService to process (as it cleans up the source file)
-  const tempImportPath = path.resolve(rootDir, `temp-golden-schedule-${Date.now()}.csv`);
+  const tempImportPath = path.resolve(rootDir, `temp-golden-schedule-${crypto.randomUUID()}.csv`);
   fs.copyFileSync(scheduleCsvPath, tempImportPath);
 
   const importSummary = await scheduleImportService.importSchedule(projectId, {
@@ -90,7 +115,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     }
 
     // Temporary upload copy so original fixture is preserved
-    const tempUploadPath = path.resolve(rootDir, `temp-evidence-${Date.now()}-${fileName}`);
+    const tempUploadPath = path.resolve(rootDir, `temp-evidence-${crypto.randomUUID()}-${fileName}`);
     fs.copyFileSync(fixtureFilePath, tempUploadPath);
 
     const ext = path.extname(fileName).toLowerCase();

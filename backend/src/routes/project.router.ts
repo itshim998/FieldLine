@@ -6,14 +6,29 @@ import {
   updateProjectSchema,
   projectIdParamSchema
 } from '../validation/project.schema.js';
+import { env } from '../config/env.js';
+import { seedGoldenDemo } from '../../../demo/golden-demo-seeder.js';
+import { logger } from '../config/logger.js';
 
 export function createProjectRouter(service: ProjectService = projectService): Router {
   const router = Router();
 
-  // GET /projects - List all projects
-  router.get('/projects', (_req: Request, res: Response, next: NextFunction): void => {
+  // GET /projects - List all projects (supports ?autoSeed=true for on-demand self-healing)
+  router.get('/projects', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const projects = service.listProjects();
+      let projects = service.listProjects();
+
+      // On-demand self-healing auto-seed when requested via ?autoSeed=true
+      if (projects.length === 0 && req.query.autoSeed === 'true' && env.AUTO_SEED_DEMO) {
+        logger.info('🌱 Empty project list with ?autoSeed=true detected. Auto-seeding Golden Demo...');
+        try {
+          await seedGoldenDemo();
+          projects = service.listProjects();
+        } catch (seedErr) {
+          logger.error('⚠️ On-demand golden demo seeding encountered an error:', seedErr);
+        }
+      }
+
       res.status(200).json({ projects });
     } catch (error) {
       next(error);
