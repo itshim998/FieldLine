@@ -323,6 +323,40 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       const url = resolveGatewayWsUrl('proj-xyz', 'ws://localhost:3001/ws/live-session');
       expect(url).toBe('ws://localhost:3001/ws/live-session?projectId=proj-xyz');
     });
+
+    it('should resolve to Render backend wss URL when running on Vercel deployment', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = {
+        protocol: 'https:',
+        hostname: 'field-line.vercel.app',
+        port: '',
+        host: 'field-line.vercel.app'
+      };
+
+      const url = resolveGatewayWsUrl('9ab5b8cb-3ded-4a5b-b292-1bc785f78df4');
+      expect(url).toBe(
+        'wss://fieldline-backend-pcs3.onrender.com/ws/live-session?projectId=9ab5b8cb-3ded-4a5b-b292-1bc785f78df4'
+      );
+
+      (window as any).location = originalLocation;
+    });
+
+    it('should resolve to localhost:3001 when running on localhost', () => {
+      const originalLocation = window.location;
+      delete (window as any).location;
+      (window as any).location = {
+        protocol: 'http:',
+        hostname: 'localhost',
+        port: '3000',
+        host: 'localhost:3000'
+      };
+
+      const url = resolveGatewayWsUrl('local-proj');
+      expect(url).toBe('ws://localhost:3001/ws/live-session?projectId=local-proj');
+
+      (window as any).location = originalLocation;
+    });
   });
 
   describe('useLiveVoiceSession Hook Pipeline', () => {

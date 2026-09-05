@@ -104,18 +104,54 @@ export function resampleTo16k(input: Float32Array, inputSampleRate: number): Flo
   return result;
 }
 
+// Canonical production backend host on Render
+export const PRODUCTION_RENDER_BACKEND_HOST = 'fieldline-backend-pcs3.onrender.com';
+
 // Helper to determine the WebSocket gateway URL
 export function resolveGatewayWsUrl(projectId: string, customWsUrl?: string): string {
   if (customWsUrl) {
     const sep = customWsUrl.includes('?') ? '&' : '?';
     return `${customWsUrl}${sep}projectId=${encodeURIComponent(projectId)}`;
   }
+
+  // 1. Check Vite environment variables safely
+  const metaEnv =
+    typeof import.meta !== 'undefined'
+      ? (import.meta as unknown as { env?: Record<string, string | undefined> })?.env
+      : undefined;
+
+  const envWsUrl = metaEnv?.VITE_WS_URL;
+  if (envWsUrl && typeof envWsUrl === 'string' && envWsUrl.trim().length > 0) {
+    const trimmed = envWsUrl.trim();
+    const sep = trimmed.includes('?') ? '&' : '?';
+    return `${trimmed}${sep}projectId=${encodeURIComponent(projectId)}`;
+  }
+
+  // 2. Check Vite environment variable for Backend HTTP URL
+  const envBackendUrl = metaEnv?.VITE_BACKEND_URL;
+  if (envBackendUrl && typeof envBackendUrl === 'string' && envBackendUrl.trim().length > 0) {
+    const base = envBackendUrl.trim().replace(/^http/, 'ws').replace(/\/+$/, '');
+    return `${base}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+  }
+
+  // 3. Inspect browser runtime location
   if (typeof window !== 'undefined' && window.location) {
     const loc = window.location;
-    const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-    const port = (loc.port === '3000' || loc.port === '5173') ? '3001' : (loc.port || (loc.protocol === 'https:' ? '443' : '80'));
-    return `${protocol}//${loc.hostname}:${port}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+    const isLocal = loc.hostname === 'localhost' || loc.hostname === '127.0.0.1';
+
+    if (isLocal) {
+      const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const port = (loc.port === '3000' || loc.port === '5173') ? '3001' : (loc.port || '3001');
+      return `${protocol}//${loc.hostname}:${port}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+    }
+
+    // When deployed on Vercel or any remote frontend domain, route WebSockets to the Render backend service
+    const isRenderDirect = loc.hostname.endsWith('onrender.com');
+    const targetHost = isRenderDirect ? loc.host : PRODUCTION_RENDER_BACKEND_HOST;
+    const protocol = loc.protocol === 'http:' ? 'ws:' : 'wss:';
+    return `${protocol}//${targetHost}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
   }
+
   return `ws://localhost:3001/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
 }
 
@@ -427,7 +463,10 @@ export function useLiveVoiceSession({
         }
         connectionTimeoutRef.current = setTimeout(() => {
           if (isSessionActiveRef.current || wsRef.current) {
-            const timeoutMsg = 'Connection timed out. Please verify the FieldLine backend is running on port 3001 and your Gemini keys are configured.';
+            const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+            const timeoutMsg = isLocal
+              ? 'Connection timed out. Please verify the FieldLine backend is running on port 3001 and your Gemini keys are configured.'
+              : 'Connection timed out connecting to Gemini Live Gateway at fieldline-backend-pcs3.onrender.com. Please verify the Render service is running.';
             setError(timeoutMsg);
             setConnectionState('error');
             onError?.(timeoutMsg);
@@ -619,7 +658,10 @@ export function useLiveVoiceSession({
             clearTimeout(connectionTimeoutRef.current);
             connectionTimeoutRef.current = null;
           }
-          const errMsg = 'WebSocket connection to Gemini Live Gateway failed. Is the backend running on port 3001?';
+          const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+          const errMsg = isLocal
+            ? 'WebSocket connection to Gemini Live Gateway failed. Is the backend running on port 3001?'
+            : 'WebSocket connection to Gemini Live Gateway failed (fieldline-backend-pcs3.onrender.com). Please verify the backend is active on Render.';
           setError(errMsg);
           setConnectionState('error');
           onError?.(errMsg);
