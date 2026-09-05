@@ -9,6 +9,13 @@ export interface GroqEnvFields {
   groqModel: string;
 }
 
+export interface GeminiEnvFields {
+  geminiApiKeys: string[];
+  geminiModel: string;
+  geminiLiveModel: string;
+  geminiLiveTokenLimitPerKey: number;
+}
+
 /**
  * Extracts GROQ_API_KEY_01 through GROQ_API_KEY_20 preserving numeric order.
  * Empty or whitespace-only unused slots are ignored.
@@ -42,6 +49,40 @@ export function extractGroqApiKeys(source: Record<string, string | undefined>): 
   return { keys };
 }
 
+/**
+ * Extracts GEMINI_API_KEY_01 through GEMINI_API_KEY_20 preserving numeric order.
+ * Empty or whitespace-only unused slots are ignored.
+ * Supports sparse configuration (e.g. Key 01 and Key 05 only).
+ * Falls back to single GEMINI_API_KEY if no numbered keys were found.
+ */
+export function extractGeminiApiKeys(source: Record<string, string | undefined>): { keys: string[] } {
+  const keys: string[] = [];
+
+  for (let i = 1; i <= 20; i++) {
+    const padded = String(i).padStart(2, '0');
+    const varNamePadded = `GEMINI_API_KEY_${padded}`;
+    const varNameUnpadded = `GEMINI_API_KEY_${i}`;
+
+    const rawVal = source[varNamePadded] ?? (source[varNameUnpadded] !== undefined ? source[varNameUnpadded] : undefined);
+    if (rawVal !== undefined) {
+      const trimmed = rawVal.trim();
+      if (trimmed.length > 0) {
+        keys.push(trimmed);
+      }
+    }
+  }
+
+  // Fallback to single GEMINI_API_KEY if no numbered keys were found
+  if (keys.length === 0 && source.GEMINI_API_KEY !== undefined) {
+    const singleTrimmed = source.GEMINI_API_KEY.trim();
+    if (singleTrimmed.length > 0) {
+      keys.push(singleTrimmed);
+    }
+  }
+
+  return { keys };
+}
+
 export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -51,6 +92,8 @@ export const envSchema = z.object({
   AI_PROVIDER: z.enum(['mock', 'gemini', 'groq']).default('mock'),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().min(1).default('gemini-3.7-flash'),
+  GEMINI_LIVE_MODEL: z.string().min(1).default('gemini-3.1-flash-live-preview'),
+  GEMINI_LIVE_TOKEN_LIMIT_PER_KEY: z.coerce.number().int().positive().default(55000),
   GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b'),
   AUTO_SEED_DEMO: z.preprocess((val) => {
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
@@ -58,13 +101,16 @@ export const envSchema = z.object({
     return true;
   }, z.boolean()).default(true)
 }).passthrough().transform((data) => {
-  const { keys } = extractGroqApiKeys(data as Record<string, string | undefined>);
+  const { keys: groqKeys } = extractGroqApiKeys(data as Record<string, string | undefined>);
+  const { keys: geminiKeys } = extractGeminiApiKeys(data as Record<string, string | undefined>);
   return {
     ...data,
-    groqApiKeys: keys
+    groqApiKeys: groqKeys,
+    geminiApiKeys: geminiKeys
   };
 }).superRefine((data, ctx) => {
-  if (data.AI_PROVIDER === 'gemini' && (!data.GEMINI_API_KEY || data.GEMINI_API_KEY.trim().length === 0)) {
+  const hasGeminiKey = (data.GEMINI_API_KEY && data.GEMINI_API_KEY.trim().length > 0) || (data.geminiApiKeys && data.geminiApiKeys.length > 0);
+  if (data.AI_PROVIDER === 'gemini' && !hasGeminiKey) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: 'GEMINI_API_KEY is required when AI_PROVIDER=gemini',

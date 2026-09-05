@@ -6192,6 +6192,343 @@ body {
   cursor: not-allowed;
 }
 
+/* ==========================================================================
+   LIVE VOICE MULTIMODAL ASSISTANT & AUDIO HUD (GEMINI 3 FLASH LIVE)
+   ========================================================================== */
+
+/* Live Voice Mic Toggle Button in Footer */
+.floating-ai-mic-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.floating-ai-mic-btn:hover:not(:disabled) {
+  color: #ffffff;
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.5);
+  transform: translateY(-1px);
+}
+
+.floating-ai-mic-btn.active {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  border-color: rgba(165, 180, 252, 0.5);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.5);
+}
+
+.floating-ai-mic-btn.active.speaking {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.6);
+}
+
+.floating-ai-mic-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Pulsating Animation Ring on Active Mic */
+.floating-ai-mic-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: calc(var(--radius-md) + 4px);
+  border: 2px solid rgba(99, 102, 241, 0.6);
+  pointer-events: none;
+  animation: micPulseRing 1.8s cubic-bezier(0.25, 0, 0.35, 1) infinite;
+}
+
+@keyframes micPulseRing {
+  0% {
+    transform: scale(0.96);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+/* Animated Live Voice HUD Banner inside Panel */
+.floating-ai-live-hud {
+  margin: 0.6rem 0.85rem 0.5rem 0.85rem;
+  padding: 0.75rem 0.9rem;
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.96) 0%, rgba(30, 41, 59, 0.96) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  animation: hudFadeIn 0.22s ease-out;
+}
+
+@keyframes hudFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.live-hud-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.live-hud-status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.live-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.live-status-dot.connecting {
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
+  animation: pulseDot 0.9s infinite;
+}
+
+.live-status-dot.listening {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulseDot 1.4s infinite;
+}
+
+.live-status-dot.speaking {
+  background: #a855f7;
+  box-shadow: 0 0 10px #c084fc;
+  animation: pulseDot 0.8s infinite;
+}
+
+.live-status-dot.handover {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  animation: pulseDot 0.6s infinite;
+}
+
+.live-status-dot.error {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.live-status-text {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #ffffff;
+}
+
+.live-hud-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.live-slot-badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(99, 102, 241, 0.2);
+  color: #c7d2fe;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  letter-spacing: 0.02em;
+}
+
+.live-model-badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  letter-spacing: 0.02em;
+}
+
+/* Frequency Wave Visualizer */
+.live-voice-visualizer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 24px;
+  margin: 0.4rem 0;
+}
+
+.live-voice-bar {
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  transform-origin: bottom;
+  transition: transform 0.07s ease-out;
+}
+
+.live-voice-bar.listening {
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+}
+
+.live-voice-bar.speaking {
+  background: linear-gradient(180deg, #c084fc 0%, #6366f1 100%);
+}
+
+/* Real-time Streaming Captions */
+.live-voice-captions {
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  max-height: 85px;
+  overflow-y: auto;
+}
+
+.live-caption-item {
+  display: flex;
+  gap: 0.4rem;
+  font-size: 0.735rem;
+  line-height: 1.4;
+  margin-bottom: 0.25rem;
+}
+
+.live-caption-item:last-child {
+  margin-bottom: 0;
+}
+
+.caption-sender {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.live-caption-item.user .caption-sender {
+  color: #38bdf8;
+}
+
+.live-caption-item.gemini .caption-sender {
+  color: #a5b4fc;
+}
+
+.caption-text {
+  color: #e2e8f0;
+  word-break: break-word;
+}
+
+.live-voice-hint {
+  font-size: 0.685rem;
+  color: #94a3b8;
+  font-style: italic;
+  text-align: center;
+  padding: 0.35rem 0 0.15rem 0;
+  line-height: 1.35;
+}
+
+/* Verified Progress Confirmation Cards */
+.live-verified-container {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.live-verified-card {
+  padding: 0.55rem 0.7rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.16) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.15);
+  animation: hudFadeIn 0.25s ease-out;
+}
+
+.verified-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.25rem;
+}
+
+.verified-card-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.verified-check-icon {
+  color: #34d399;
+}
+
+.verified-card-title {
+  font-size: 0.725rem;
+  font-weight: 700;
+  color: #6ee7b7;
+}
+
+.verified-progress-pill {
+  font-size: 0.675rem;
+  font-weight: 800;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.25);
+  color: #a7f3d0;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.verified-card-msg {
+  font-size: 0.72rem;
+  color: #f1f5f9;
+  margin: 0.2rem 0 0.4rem 0;
+  line-height: 1.35;
+}
+
+.verified-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.verified-act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #6ee7b7;
+  font-size: 0.685rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.verified-act-btn:hover {
+  background: rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
+  color: #ffffff;
+}
+
 @media (max-width: 480px) {
   .floating-ai-modal {
     bottom: 12px;
@@ -6208,4 +6545,5 @@ body {
     height: 48px;
   }
 }
+
 

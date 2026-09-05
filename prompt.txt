@@ -1,16 +1,195 @@
-- The floating AI button seems to be animated instead of static, with AI and an animated star inside it. Make it static, AND remove 'AI', instead, put the static star, colour in WHITE, AND change the colour of the button from neonish purple to solid dark violet, ALMOST just like the background. Make the floating circle icon's boundary slim bluish white to separate it from the background.
-- Remove 'Grounded Assistant'. 
-- Remove the icon to the left of 'FieldLine AI'. 
-- Remove the 'boxy' boundaries around the refresh button and the close button. 
-I sent a query unrelated to the project, and there it says 'Insufficient Facts'. 
-Remove: 
-- Insufficient Facts completely.
+# MISSION BRIEF: GEMINI LIVE SPEECH-TO-SPEECH INTERACTION CAPABILITY FOR FIELDLINE
 
-When queries related to the project were sent: 
-- Grounded • 1 Facts
-- Below Grounded • 1 Facts, A citation relating to the project was recieved: Crude Pump Foundation Piling Works (ACT-B02)
-- At the bottom, 'Verified Claims (1):
-activity_status:ACT-B02
-The activity is in progress.' appears. 
-Remove these too. 
-- Preserve the rest features like 'Citations & Fact Set()', time. 
+## OVERVIEW & OBJECTIVE
+FieldLine is an intelligent infrastructure project management platform. Non-technical workers on construction sites need a seamless, hands-free voice interface to:
+1. **Report Progress**: Workers verbally describe task completions (e.g., "We finished casting the concrete slab on Pier 12"). Gemini Live acknowledges receipt conversationally, sends the isolated statement to Groq (`openai/gpt-oss-20b`) for deterministic structured extraction and schedule linking, and—once the database update commits—verbally announces confirmation: *"Update verified: Pier 12 excavation is saved at 100%"*.
+2. **Ask Context-Aware Project Questions**: Workers confused about the next best step can ask questions (e.g., "What are we scheduled to work on next at Block B?"). Gemini Live answers conversationally using injected project context and real-time SQLite database queries (tools).
+3. **Handle Accents & Site Noise ("Pardon Me" Protocol)**: When speech is muffled, noisy, or accented, Gemini Live MUST ask for polite clarification instead of guessing or hallucinating.
+4. **20-Key Gemini Rotation & Seamless Session Handover**: Utilizes 20 Gemini API keys (`GEMINI_API_KEY_01` to `GEMINI_API_KEY_20`) created from distinct Google AI Studio accounts in a sticky round-robin order. When a session approaches the 65,000 TPM limit or encounters a rate limit, the system smoothly switches to the next key without dropping the audio stream or losing conversational context.
+5. **UI Integration**: The Live Voice button is embedded directly inside the existing floating AI assistant panel (`FloatingAIAssistant.tsx`).
+
+---
+
+## CRITICAL ARCHITECTURAL CONSTRAINTS & VERIFIED SPECS
+- **Model**: Strictly use Gemini 3 Flash Live (`gemini-3.1-flash-live-preview` via `GEMINI_LIVE_MODEL` in `.env`).
+- **Connection Architecture**: Browser connects to a **FieldLine Backend WebSocket Gateway** (`ws://localhost:3001/ws/live-session`). The backend proxies the connection to Google's Multimodal Live API (`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=...`). **DO NOT** connect the browser directly to Google (protects API keys and enables invisible key handovers).
+- **Session Handover Strategy**: Google's native `session_resumption.handle` is cryptographically locked to the initiating Google Cloud project and yields `PERMISSION_DENIED` across different keys. Therefore, the backend gateway maintains an **application-level rolling conversation buffer**. When rotating keys, the gateway boots a new upstream WebSocket on Key $N+1$, hydrates it with the recent conversation summary + active context, transfers the browser's audio stream, and terminates Key $N$.
+- **Audio Specifications**:
+  - Client Input: 16-bit Linear PCM, Little-Endian, 16,000 Hz (16 kHz), mono, Base64-encoded (`audio/pcm;rate=16000`).
+  - Server Output: 16-bit Linear PCM, Little-Endian, 24,000 Hz (24 kHz), mono, Base64-encoded (`audio/pcm;rate=24000`).
+- **Transcription**: Native `inputAudioTranscription: {}` and `outputAudioTranscription: {}` must be enabled in the session `setup` message.
+- **Two-Stage Verbal Verification**:
+  - Stage 1 (Immediate Voice Acknowledgment): Gemini Live acknowledges receipt verbally (e.g. *"Understood, recording that Pier 12 excavation is finished. Logging that now."*).
+  - Stage 2 (Post-Groq & DB Confirmation): When Groq + SQLite commit the record, the backend prompts Gemini Live to verbally confirm: *"Update verified: [Activity Name] is saved at [Progress]%."*
+
+---
+
+## CODING AGENT WORKFLOW INSTRUCTIONS
+You must implement this feature across sequential, self-contained passes.
+For **EACH PASS**, you must strictly follow this execution cycle:
+1. **Read**: Read only the requirements for the specific Pass you are about to execute.
+2. **Plan & Implement**: Write the code, configure dependencies, and verify types for that specific Pass only.
+3. **Evaluate**: Run all relevant unit/integration tests and verify that the pass passes 100%.
+4. **Mark as Done**: Strike off the pass title inside this file (`prompt.txt`) using markdown strikethrough (e.g., `~~### Pass 1: Core Configuration...~~`), **WITHOUT REMOVING OR DELETING** any text.
+5. **Proceed**: Move to the next Pass only after the previous Pass is fully verified and marked as done.
+
+---
+
+~~### Pass 1: Environment Configuration, 20-Key Gemini Router & Quota Resilience~~
+**Objective**: Build the multi-key router and environment infrastructure for 20 Gemini API keys with sticky failover, health tracking, and proactive token estimation.
+
+**Requirements**:
+1. **Update `backend/src/config/env.ts` and `.env.example`**:
+   - Add `extractGeminiApiKeys(source)` mirroring `extractGroqApiKeys` to extract `GEMINI_API_KEY_01` through `GEMINI_API_KEY_20` (and fallback `GEMINI_API_KEY`).
+   - Add `GEMINI_LIVE_MODEL` (default: `'gemini-3.1-flash-live-preview'`).
+   - Add `GEMINI_LIVE_TOKEN_LIMIT_PER_KEY` (default: `55000` tokens, triggering proactive rotation before the 65K ceiling).
+   - Export typed configuration fields in `EnvConfig`.
+2. **Implement `backend/src/ai/providers/gemini-key-router.ts`**:
+   - Create `GeminiKeyRouter` modeled after `backend/src/ai/providers/groq-key-router.ts`.
+   - Maintain a 20-slot `KeyHealthState` array: `index`, `slot`, `apiKey`, `healthEpoch`, `failureCount`, `successCount`, `cooldownUntil`, `isPermanentlyInvalid`, and `estimatedSessionTokens`.
+   - Implement `acquireLiveSessionKey()`: Returns the current active sticky key. Advances to the next healthy key in round-robin order if the current key is in cooldown or permanently invalid (401/403).
+   - Implement `recordTokenUsage(keyIndex, tokens)`: Tracks cumulative session tokens against the 55K safety threshold.
+   - Implement `recordSuccess` and `recordFailure(keyIndex, error)`: Classifies errors (`429 RESOURCE_EXHAUSTED`, network timeouts, 5xx) and applies exponential backoff cooldowns.
+   - Implement `rotateToNextKey(currentKeyIndex, reason)`: Atomically transitions the active cursor to the next key slot and logs the epoch change.
+3. **Tests**:
+   - Write comprehensive unit tests in `backend/tests/gemini_key_router.test.ts` covering:
+     - Extraction of sparse and 20-slot keys.
+     - Sticky key acquisition and round-robin progression.
+     - Cooldown on 429 errors and permanent invalidation on 401/403.
+     - Proactive key rotation when token budget reaches safety threshold.
+     - Concurrency and stale epoch protection.
+
+---
+
+~~### Pass 2: Backend Live WebSocket Gateway & Upstream Gemini Live Engine~~
+**Objective**: Create the backend WebSocket server and upstream Gemini Live WebSocket bridge with application-level session handover.
+
+**Requirements**:
+1. **Dependencies & Server Setup**:
+   - Install `ws` and `@types/ws` if not present (`npm install ws`, `npm install --save-dev @types/ws`).
+   - In `backend/src/index.ts` and `backend/src/app.ts`, integrate the `ws` WebSocketServer attached to the main HTTP server on the path `/ws/live-session`.
+2. **Implement `backend/src/ai/live/upstream-gemini-socket.ts`**:
+   - Manages a persistent WebSocket connection to:
+     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`
+   - Sends the initial `setup` frame:
+     - `model`: `models/${env.GEMINI_LIVE_MODEL}`
+     - `generationConfig.responseModalities`: `["AUDIO"]`
+     - `generationConfig.inputAudioTranscription`: `{}`
+     - `generationConfig.outputAudioTranscription`: `{}`
+     - `systemInstruction`: Site worker persona + "Pardon Me" accent/clarification rules + Project Context summary.
+     - `tools`: Function declarations for `get_next_recommended_activities`, `lookup_activity_status`, and `record_field_progress`.
+   - Parses upstream server messages:
+     - Extracts `audio/pcm;rate=24000` from `serverContent.modelTurn.parts` and emits to client.
+     - Extracts `serverContent.inputTranscription` (worker speech) and `serverContent.outputTranscription` (Gemini speech).
+     - Extracts `toolCall` and `usageMetadata`.
+     - Handles `turnComplete` and `interrupted` events.
+3. **Implement `backend/src/ai/live/gemini-live-gateway.ts`**:
+   - Manages client browser WebSocket connections: accepts `projectId` as query parameter.
+   - Allocates an active key from `GeminiKeyRouter`.
+   - Bridges client audio chunks (16kHz PCM Base64) to the upstream Gemini socket via `realtimeInput.mediaChunks`.
+   - Maintains an in-memory **Rolling Conversation Buffer**:
+     - Keeps the last $N$ turns of user input and model output text.
+     - Keeps active project summary and progress reports in flight.
+   - **Seamless Handover Engine**:
+     - When Key $N$ reaches the token limit or triggers 429:
+       1. Requests Key $N+1$ from `GeminiKeyRouter`.
+       2. Opens a new upstream Gemini connection with Key $N+1$.
+       3. Injects a context summary of the ongoing conversation into the new setup / `clientContent`.
+       4. Redirects the incoming browser audio stream to the new connection.
+       5. Gracefully closes the old connection. The browser connection is NEVER interrupted.
+4. **Tests**:
+   - Write integration tests in `backend/tests/gemini_live_gateway.test.ts`:
+     - Gateway client connection and query parameter validation.
+     - Protocol message routing (audio chunks, transcriptions, interruptions).
+     - Key handover simulation on mock rate limit / token limit event.
+
+---
+
+~~### Pass 3: Real-Time Context Grounding, Live Tool Execution & Groq Verbal Confirmation Loop~~
+**Objective**: Connect Gemini Live's tools to FieldLine's SQLite database and wire the two-stage progress update loop to Groq (`openai/gpt-oss-20b`) with verbal confirmation.
+
+**Requirements**:
+1. **Implement `backend/src/ai/live/live-tool-handlers.ts`**:
+   - `get_next_recommended_activities(projectId, location)`:
+     - Queries `activityRepository` for activities with status `not_started` or `in_progress` in the project (optionally filtered by location).
+     - Returns top 5 prioritized tasks with code, name, location, and planned dates.
+   - `lookup_activity_status(projectId, query)`:
+     - Uses `DeterministicActivityResolver` to resolve the activity by code or name.
+     - Returns verified planned/actual progress, variance state, and delays.
+   - `record_field_progress(projectId, rawStatement)`:
+     - Immediately returns a tool execution result to Gemini Live confirming intake:
+       `{ status: "queued", message: "Progress statement captured. Verifying and committing to project schedule." }`
+     - Asynchronously passes `rawStatement` to `FieldProgressExtractionService` (`extractFromReport` using Groq `openai/gpt-oss-20b`).
+     - Calls `progressUpdateService.createManualUpdate` with `sourceType = 'voice'`.
+     - Normalizes and links the extracted item via `progressService.normalizeAndRecordProgress`.
+     - **Verbal Confirmation Trigger**:
+       - Once the database transaction commits, the gateway dispatches a high-priority system turn or `clientContent` to Gemini Live:
+         *"System Event: Progress update committed successfully. Activity: [name] ([code]), Progress: [percentage]%. Verbally inform the worker: 'Update verified: [name] is saved at [percentage]%.'"*
+       - Gemini Live generates audio speaking this confirmation directly to the worker.
+2. **Context Snapshot Builder for `systemInstruction`**:
+   - In `backend/src/ai/live/live-context-builder.ts`:
+     - Builds concise static snapshot for the project: Project code, active milestones, today's date, and high-level progress.
+     - Formats strict "Pardon Me" prompt instructions:
+       *"If any activity code, location, or quantity is phonetically unclear, muffled, or ambiguous, ask back for pardon: 'Pardon me, did you mean Section B or D?' Never guess or hallucinate unconfirmed progress."*
+3. **Tests**:
+   - Write tests in `backend/tests/gemini_live_tools.test.ts`:
+     - Verifying tool declarations format matching Gemini Bidi Live schema.
+     - Database queries returning accurate SQLite records for `get_next_recommended_activities` and `lookup_activity_status`.
+     - End-to-end simulation of `record_field_progress` -> Groq extraction -> SQLite write -> verbal confirmation generation.
+
+---
+
+~~### Pass 4: Frontend Live Voice Client & Floating AI Panel Integration~~
+**Objective**: Build the browser Web Audio pipeline (16kHz capture, 24kHz playback) and embed the Live Voice UI inside the existing `FloatingAIAssistant.tsx` panel.
+
+**Requirements**:
+1. **Implement `frontend/src/components/assistant/live/useLiveVoiceSession.ts`**:
+   - Manages WebSocket connection to `ws://localhost:3001/ws/live-session?projectId=${projectId}`.
+   - **Audio Recording**:
+     - Requests microphone with `navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })`.
+     - Uses an `AudioWorklet` (or `ScriptProcessorNode` fallback) to extract 16kHz 16-bit PCM Linear chunks.
+     - Encodes chunks into Base64 and sends `{ type: "audio_chunk", data: base64Data }` over the WebSocket.
+   - **Audio Playback**:
+     - Receives 24kHz PCM chunks from server.
+     - Decodes Base64 to `Int16Array`, converts to `Float32Array`, and buffers into a Web Audio `AudioContext` scheduled queue.
+     - Handles interruption (`interrupted` event): Immediately flushes scheduled audio buffers so the assistant stops talking when the worker interrupts (barge-in).
+   - **Transcripts & Status State**:
+     - Exposes `isLiveConnected`, `isSpeaking`, `isListening`, `liveTranscript` (rolling worker & assistant speech), and `verifiedUpdates` (list of confirmed progress updates).
+2. **Embed Live Voice Controls into `FloatingAIAssistant.tsx`**:
+   - Locate the input footer area in `FloatingAIAssistant.tsx` (`<div className="floating-ai-footer">`).
+   - Add a sleek, modern Live Voice toggle button (Mic icon with animated pulse ring when active) next to the input field or send button.
+   - When Live Voice is active:
+     - Render an animated Voice HUD banner/overlay inside the panel with an audio frequency/wave visualizer.
+     - Show real-time streaming speech captions ("Listening..." / "Gemini speaking...").
+     - Display a clean confirmation card when an *"Update verified: ..."* event occurs, with a direct link to the updated activity.
+   - Seamlessly sync the selected project from `FloatingAIAssistant` to the live voice session.
+3. **Styling & Polish**:
+   - Add responsive styles in `frontend/src/index.css` for the Live Voice HUD, audio visualizer bars, and status badge.
+   - Ensure dark theme compatibility and match FieldLine's sleek industrial design aesthetic.
+4. **Tests**:
+   - Write component and hook tests in `frontend/tests/live_voice_assistant.test.tsx`:
+     - Verifying toggle state on mic button click.
+     - AudioWorklet initialization and cleanup.
+     - Interruption buffer flush.
+
+---
+
+~~### Pass 5: End-to-End Evaluation, Multi-Key Failover Smoke Test & Verification~~
+**Objective**: Validate the entire end-to-end speech-to-speech loop, multi-key failover robustness, and system recovery.
+
+**Requirements**:
+1. **Implement `scripts/gemini-live-smoke.ts`**:
+   - Automates a mock live audio session over WebSocket:
+     - Connects with mock PCM audio stream.
+     - Simulates worker voice input reporting progress.
+     - Verifies upstream Gemini Live connection and tool invocation.
+     - Verifies Groq extraction and database update in `activity_progress`.
+     - Verifies receipt of the verbal confirmation audio frame.
+2. **Multi-Key Failover Stress Test**:
+   - Simulates reaching the token limit on Key 01.
+   - Verifies that the gateway seamlessly transitions to Key 02 without dropping the client socket.
+   - Verifies that conversation history is preserved across the handoff.
+3. **Sanity Check Full Test Suite**:
+   - Run `npm test` across the entire workspace to ensure zero regressions across existing tests.
+4. **Final Documentation**:
+   - Add instructions to `README.md` explaining how to configure the 20 Gemini keys in `.env` and run the Live Voice Assistant.

@@ -6,7 +6,7 @@ import {
   ProjectRepository,
   projectRepository as defaultProjectRepo
 } from '../repositories/project.repository.js';
-import { ProgressUpdate, CreateProgressUpdateInput } from '../models/domain.types.js';
+import { ProgressUpdate, CreateProgressUpdateInput, ProgressUpdateSourceType } from '../models/domain.types.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
 
 export type ProgressUpdateEntity = ProgressUpdate;
@@ -17,6 +17,7 @@ export interface CreateManualUpdateInput {
   rawText: string;
   reporterName?: string | null;
   reporterRole?: string | null;
+  sourceType?: ProgressUpdateSourceType;
 }
 
 export interface ProgressUpdateService {
@@ -63,14 +64,14 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
       throw new ValidationError('Reporter name cannot be whitespace only');
     }
 
-    // 5. Force sourceType = "manual" and status = "received", preserve rawText verbatim
+    // 5. Default sourceType to "manual" if unspecified and status = "received", preserve rawText verbatim
     const createInput: CreateProgressUpdateInput = {
       projectId: input.projectId,
       reportDate: input.reportDate,
       rawText: input.rawText, // Preserved exactly without aggressive normalization
       reporterName: input.reporterName && input.reporterName.trim().length > 0 ? input.reporterName.trim() : null,
       reporterRole: input.reporterRole && input.reporterRole.trim().length > 0 ? input.reporterRole.trim() : null,
-      sourceType: 'manual',
+      sourceType: input.sourceType || 'manual',
       status: 'received'
     };
 

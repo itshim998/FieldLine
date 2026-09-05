@@ -1,4 +1,5 @@
-import { createApp } from './app.js';
+import { createApp, attachLiveSessionWebSocket } from './app.js';
+import { createLiveToolExecutor } from './ai/live/live-tool-handlers.js';
 import { env } from './config/env.js';
 import { initDatabase, closeDatabase } from './database/db.js';
 import { projectRepository } from './repositories/project.repository.js';
@@ -53,6 +54,12 @@ async function startServer(): Promise<void> {
     const server = app.listen(port, () => {
       console.log(`🚀 FieldLine Backend running locally on http://localhost:${port}`);
       console.log(`🩺 Health check available at: http://localhost:${port}/api/health`);
+      console.log(`🎙️ Gemini Live WebSocket gateway running at: ws://localhost:${port}/ws/live-session`);
+    });
+
+    // Attach Gemini Live WebSocket gateway on /ws/live-session
+    const { wss: liveWss, gateway: liveGateway } = attachLiveSessionWebSocket(server, {
+      toolExecutor: createLiveToolExecutor()
     });
 
     // Graceful shutdown handlers
@@ -63,14 +70,20 @@ async function startServer(): Promise<void> {
 
       console.log(`\n🛑 Received ${signal}. Shutting down FieldLine server gracefully...`);
 
-      // 1. Stop background worker and wait for current job to settle
+      // 1. Close all active live sessions and WebSocket server
+      liveGateway.closeAllSessions();
+      liveWss.close(() => {
+        console.log('🎙️ Live session WebSocket server closed cleanly.');
+      });
+
+      // 2. Stop background worker and wait for current job to settle
       workerRunner.stop();
       await workerRunner.waitForCurrentJob(5000);
       console.log('👷 Background worker stopped cleanly.');
 
-      // 2. Close HTTP server
+      // 3. Close HTTP server
       server.close(() => {
-        // 3. Close database connection
+        // 4. Close database connection
         closeDatabase();
         console.log('🔒 Database connection closed. Server exited cleanly.');
         process.exit(0);

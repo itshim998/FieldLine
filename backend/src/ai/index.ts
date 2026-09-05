@@ -58,4 +58,42 @@ export {
   MAX_RAW_TEXT_LENGTH
 } from './services/field-progress-extraction.service.js';
 
+export { GeminiKeyRouter } from './providers/gemini-key-router.js';
+export type {
+  GeminiKeyRouterOptions,
+  KeyHealthState as GeminiKeyHealthState,
+  KeyHealthSnapshot as GeminiKeyHealthSnapshot,
+  ActiveSessionKey,
+  ProviderAttemptError as GeminiProviderAttemptError
+} from './providers/gemini-key-router.js';
+
+export {
+  RollingConversationBuffer
+} from './live/rolling-conversation-buffer.js';
+export type {
+  ConversationTurn,
+  InFlightProgressReport,
+  RollingConversationBufferOptions
+} from './live/rolling-conversation-buffer.js';
+
+export {
+  UpstreamGeminiSocket,
+  DEFAULT_GEMINI_LIVE_TOOLS,
+  DEFAULT_LIVE_SYSTEM_INSTRUCTION
+} from './live/upstream-gemini-socket.js';
+export type {
+  LiveFunctionCall,
+  LiveFunctionResponse,
+  UpstreamGeminiSocketOptions
+} from './live/upstream-gemini-socket.js';
+
+export {
+  GeminiLiveGateway,
+  LiveGatewaySession
+} from './live/gemini-live-gateway.js';
+export type {
+  GeminiLiveGatewayOptions
+} from './live/gemini-live-gateway.js';
+
+
 

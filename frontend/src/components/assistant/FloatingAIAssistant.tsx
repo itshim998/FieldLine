@@ -9,9 +9,15 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
-  FolderGit2
+  FolderGit2,
+  Mic,
+  MicOff,
+  Radio,
+  CheckCircle2,
+  ExternalLink
 } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown.js';
+import { useLiveVoiceSession } from './live/useLiveVoiceSession.js';
 import type {
   Project,
   AssistantQueryResponse
@@ -32,6 +38,7 @@ export interface FloatingAIAssistantProps {
   projects: Project[];
   currentProject: Project | null;
   onNavigateToProject?: (project: Project) => void;
+  onNavigateToActivity?: (activityId: string) => void;
   asOfDate?: string;
 }
 
@@ -47,6 +54,8 @@ const SUGGESTED_QUESTIONS = [
 export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
   projects,
   currentProject,
+  onNavigateToProject,
+  onNavigateToActivity,
   asOfDate = new Date().toISOString().slice(0, 10)
 }) => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -96,6 +105,30 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
   }, [isOpen]);
 
   const activeTargetProject = projects.find((p) => p.id === selectedProjectId) || currentProject || (projects.length > 0 ? projects[0] : null);
+
+  // Live Voice Session Hook (Gemini 3 Flash Live Multimodal Session)
+  const liveSession = useLiveVoiceSession({
+    projectId: activeTargetProject?.id
+  });
+
+  const isLiveActive =
+    liveSession.isLiveConnected ||
+    liveSession.connectionState === 'connecting' ||
+    liveSession.connectionState === 'handover' ||
+    liveSession.connectionState === 'error';
+
+  // Seamlessly sync selected project to live voice session
+  const prevProjectIdRef = useRef<string>(activeTargetProject?.id || '');
+  useEffect(() => {
+    if (activeTargetProject?.id && prevProjectIdRef.current && prevProjectIdRef.current !== activeTargetProject.id) {
+      if (liveSession.isLiveConnected) {
+        liveSession.startSession(activeTargetProject.id);
+      }
+    }
+    if (activeTargetProject?.id) {
+      prevProjectIdRef.current = activeTargetProject.id;
+    }
+  }, [activeTargetProject?.id, liveSession]);
 
   const handleSendQuery = async (queryToSend?: string) => {
     const text = (queryToSend || inputQuery).trim();
@@ -330,6 +363,99 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
 
             {/* Chat Body */}
             <div className="floating-ai-body">
+              {/* Live Voice HUD Banner / Overlay */}
+              {isLiveActive && (
+                <div id="floating-ai-live-hud" className="floating-ai-live-hud">
+                  <div className="live-hud-header">
+                    <div className="live-hud-status-badge">
+                      <span className={`live-status-dot ${liveSession.connectionState === 'error' ? 'error' : liveSession.connectionState === 'connecting' ? 'connecting' : liveSession.isSpeaking ? 'speaking' : liveSession.connectionState === 'handover' ? 'handover' : 'listening'}`} />
+                      <span className="live-status-text">
+                        {liveSession.connectionState === 'connecting'
+                          ? 'CONNECTING TO GEMINI LIVE...'
+                          : liveSession.connectionState === 'error'
+                          ? (liveSession.error || 'CONNECTION FAILED')
+                          : liveSession.connectionState === 'handover'
+                          ? 'SESSION HANDOVER...'
+                          : liveSession.isSpeaking
+                          ? 'GEMINI SPEAKING...'
+                          : 'LISTENING...'}
+                      </span>
+                    </div>
+                    <div className="live-hud-badges">
+                      {liveSession.activeSlot && (
+                        <span className="live-slot-badge" title="Active Gemini Key Slot">
+                          Slot {liveSession.activeSlot}
+                        </span>
+                      )}
+                      <span className="live-model-badge">Gemini 3 Flash Live</span>
+                    </div>
+                  </div>
+
+                  {/* Audio Equalizer Frequency Bars */}
+                  <div className="live-voice-visualizer" aria-label="Audio Visualizer">
+                    {liveSession.frequencyBars.map((height, idx) => (
+                      <div
+                        key={idx}
+                        className={`live-voice-bar ${liveSession.isSpeaking ? 'speaking' : 'listening'}`}
+                        style={{
+                          transform: `scaleY(${Math.max(0.15, height)})`
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Real-time Streaming Speech Captions */}
+                  {liveSession.liveTranscript.length > 0 ? (
+                    <div className="live-voice-captions">
+                      {liveSession.liveTranscript.slice(-2).map((item) => (
+                        <div key={item.id} className={`live-caption-item ${item.sender}`}>
+                          <span className="caption-sender">
+                            {item.sender === 'user' ? 'Worker' : 'Gemini'}:
+                          </span>
+                          <span className="caption-text">{item.text}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="live-voice-hint">
+                      <span>Speak naturally: "We finished Pier 12 excavation" or "What is scheduled next at Block B?"</span>
+                    </div>
+                  )}
+
+                  {/* Verified Progress Confirmation Cards */}
+                  {liveSession.verifiedUpdates.length > 0 && (
+                    <div className="live-verified-container">
+                      {liveSession.verifiedUpdates.slice(0, 2).map((upd) => (
+                        <div key={upd.id} className="live-verified-card">
+                          <div className="verified-card-header">
+                            <div className="verified-card-title-wrap">
+                              <CheckCircle2 size={15} className="verified-check-icon" />
+                              <span className="verified-card-title">Update Verified &amp; Saved</span>
+                            </div>
+                            <span className="verified-progress-pill">{upd.progressPercent}%</span>
+                          </div>
+                          <p className="verified-card-msg">{upd.message}</p>
+                          <div className="verified-card-actions">
+                            <button
+                              type="button"
+                              className="verified-act-btn"
+                              onClick={() => {
+                                if (onNavigateToActivity) {
+                                  onNavigateToActivity(upd.activityId);
+                                }
+                              }}
+                            >
+                              <span>View Activity ({upd.activityCode})</span>
+                              <ExternalLink size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {messages.length === 0 ? (
                 <div className="floating-ai-welcome">
                   <div className="floating-ai-welcome-badge">
@@ -487,6 +613,21 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                     disabled={isLoading || !activeTargetProject}
                   />
                 </div>
+
+                {/* Live Voice Toggle Button */}
+                <button
+                  id="floating-ai-live-voice-btn"
+                  type="button"
+                  className={`floating-ai-mic-btn ${isLiveActive ? 'active' : ''} ${liveSession.isSpeaking ? 'speaking' : ''}`}
+                  onClick={() => liveSession.toggleSession(activeTargetProject?.id)}
+                  disabled={!activeTargetProject}
+                  aria-label={isLiveActive ? 'Stop Live Voice Assistant' : 'Start Live Voice Assistant'}
+                  title={isLiveActive ? 'Stop Live Voice Assistant' : 'Start Live Voice Assistant (Gemini 3 Flash Live)'}
+                >
+                  {isLiveActive ? <MicOff size={15} /> : <Mic size={15} />}
+                  {isLiveActive && <span className="floating-ai-mic-ring" />}
+                </button>
+
                 <button
                   id="floating-ai-send-btn"
                   type="submit"

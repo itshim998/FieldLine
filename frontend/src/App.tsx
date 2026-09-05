@@ -4343,6 +4343,7 @@ export function App(): React.JSX.Element {
         projects={projects}
         currentProject={selectedProject}
         onNavigateToProject={(p) => handleOpenProject(p)}
+        onNavigateToActivity={(actId) => handleOpenActivityDetail(actId)}
         asOfDate={intelligenceAsOfDate}
       />
     </div>

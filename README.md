@@ -289,7 +289,7 @@ Example response:
 - [x] **PASS 19 — Human Review Workflow** *(Completed)*
 - [x] **PASS 20 — Dashboard** *(Completed)*
 - [x] **PASS 21 — Activity Detail View** *(Completed)*
-- [ ] **PASS 22 — Voice Input** *(Benched)*
+- [x] **PASS 22 — Gemini Live Speech-to-Speech & 20-Key Failover Router** *(Completed)*
 - [x] **PASS 23 — Test and Evaluation Suite** *(Completed)*
 - [x] **PASS 24 — Golden Demo Environment** *(Completed)*
 - [x] **PASS 25 — Final Integration and Presentation Polish** *(Completed)*
@@ -297,8 +297,77 @@ Example response:
 
 ---
 
+## 🎙️ Gemini Live Speech-to-Speech Assistant (Pass 1–5 & Pass 22)
+
+FieldLine features an intelligent, hands-free bidirectional voice interface designed specifically for loud, noisy construction sites and non-technical field workers.
+
+```text
+Worker Voice (16kHz PCM Linear)
+     ↓
+Frontend Web Audio Worklet (FloatingAIAssistant.tsx)
+     ↓ WebSocket (ws://localhost:3001/ws/live-session)
+FieldLine Backend Live Gateway
+     ├── 20-Key Sticky Gemini Router (GEMINI_API_KEY_01 .. 20)
+     ├── Rolling Conversation Buffer & Context Hydration
+     └── Upstream Gemini Live Engine (wss://generativelanguage.googleapis.com)
+            ↓
+   Gemini Live (gemini-3.1-flash-live-preview)
+            ├── "Pardon Me" Site Noise & Heavy Accent Protocol
+            ├── Tools: get_next_recommended_activities, lookup_activity_status
+            └── Tool: record_field_progress
+                   ├── Stage 1: Immediate Conversational Audio Acknowledgment
+                   ├── Stage 2: Groq (openai/gpt-oss-20b) Extraction & Linking
+                   ├── SQLite Persistence (progress_updates & activity_progress)
+                   └── Stage 3: Verbal Confirmation Dispatch
+                          ↓
+   Worker Headset ("Update verified: Pier 12 excavation is saved at 100%.") [24kHz PCM]
+```
+
+### Key Architectural Capabilities:
+1. **Two-Stage Verbal Verification**:
+   - *Stage 1 (Immediate Acknowledgment):* Assistant verbally acknowledges receipt instantly without stalling the worker.
+   - *Stage 2 (Post-Groq & DB Confirmation):* Structured extraction via Groq (`openai/gpt-oss-20b`) commits progress to SQLite; Gemini Live then announces: *"Update verified: [Activity Name] is saved at [Progress]%."*
+2. **"Pardon Me" Noise & Accent Protocol**:
+   - If an activity code, pier number, or quantity is muffled or ambiguous, Gemini Live politely asks for clarification (*"Pardon me, did you mean Pier 12 or Pier 20?"*) rather than guessing.
+3. **20-Key Sticky Gemini Failover Router**:
+   - Stays on the current active key slot until reaching the proactive token ceiling (`55,000` tokens, before the 65K TPM limit) or encountering a `429 RESOURCE_EXHAUSTED` rate limit.
+   - Atomically transitions to Key $N+1$, hydrates the new upstream session with conversation history, and maintains the browser WebSocket without dropping the connection.
+4. **Interactive Floating HUD**:
+   - Embedded directly into `FloatingAIAssistant.tsx` with real-time audio visualizer frequency bars, live worker/assistant speech transcriptions, and interactive verified update cards.
+
+### Configuring 20 Gemini Keys in `.env`:
+Add your Google AI Studio keys to your local `.env` file:
+```env
+# Gemini Live Model & Rotation Thresholds
+GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
+GEMINI_LIVE_TOKEN_LIMIT_PER_KEY=55000
+
+# 20 Gemini API Keys (Sticky Round-Robin Failover)
+GEMINI_API_KEY_01=AIzaSy...
+GEMINI_API_KEY_02=AIzaSy...
+GEMINI_API_KEY_03=AIzaSy...
+GEMINI_API_KEY_04=AIzaSy...
+GEMINI_API_KEY_05=AIzaSy...
+# ... up to GEMINI_API_KEY_20
+```
+
+### Running the Voice Assistant & Smoke Test:
+- **Interactive UI**:
+  ```bash
+  npm run dev
+  ```
+  Open `http://localhost:3000`, open the floating AI assistant in the bottom right, and click the **Live Voice (Mic)** button in the footer.
+- **Automated End-to-End Evaluation & Failover Suite**:
+  ```bash
+  npm run gemini:smoke
+  ```
+  Runs the complete automated evaluation: 16kHz PCM ingestion, tool execution, Groq extraction, SQLite persistence, 24kHz verbal confirmation audio receipt, and Key 01 -> Key 02 token limit failover stress test.
+
+---
+
 ## 🔒 Security & Local Data Policy
 
 FieldLine stores all data locally in `database/fieldline.db` and files in `uploads/`. No sensitive data or API keys are committed to Git. All runtime data is ignored via `.gitignore`.
+
 
 
