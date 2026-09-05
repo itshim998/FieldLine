@@ -121,7 +121,7 @@ export class LiveGatewaySession {
         type: 'status',
         state: 'connected',
         activeSlot: upstream.slot,
-        message: `Connected to Gemini Live via Slot ${upstream.slot}`
+        message: `Connected to Live Voice via Slot ${upstream.slot}`
       });
     });
 
@@ -223,7 +223,7 @@ export class LiveGatewaySession {
         // Initial connection failure: report error and close cleanly without triggering handover
         this.sendToClient({
           type: 'error',
-          message: `Failed to initialize Gemini Live on slot [${upstream.slot}]: ${err.message}`
+          message: `Failed to initialize Live Voice on slot [${upstream.slot}]: ${err.message}`
         });
         this.close();
       }
@@ -245,7 +245,7 @@ export class LiveGatewaySession {
         );
         this.sendToClient({
           type: 'error',
-          message: `Gemini Live connection closed on slot [${upstream.slot}] (${reason || `code ${code}`}).`
+          message: `Live Voice connection closed on slot [${upstream.slot}] (${reason || `code ${code}`}).`
         });
         this.close();
       }

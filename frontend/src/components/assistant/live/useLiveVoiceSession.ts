@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 export interface LiveTranscriptItem {
   id: string;
-  sender: 'user' | 'gemini';
+  sender: 'user' | 'assistant' | 'gemini';
   text: string;
   timestamp: string;
   isFinal?: boolean;
@@ -465,8 +465,8 @@ export function useLiveVoiceSession({
           if (isSessionActiveRef.current || wsRef.current) {
             const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
             const timeoutMsg = isLocal
-              ? 'Connection timed out. Please verify the FieldLine backend is running on port 3001 and your Gemini keys are configured.'
-              : 'Connection timed out connecting to Gemini Live Gateway at fieldline-backend-pcs3.onrender.com. Please verify the Render service is running.';
+              ? 'Connection timed out. Please verify the FieldLine backend is running on port 3001 and your voice services are configured.'
+              : 'Connection timed out connecting to Live Voice Gateway at fieldline-backend-pcs3.onrender.com. Please verify the Render service is running.';
             setError(timeoutMsg);
             setConnectionState('error');
             onError?.(timeoutMsg);
@@ -585,14 +585,14 @@ export function useLiveVoiceSession({
                   const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                   setLiveTranscript((prev) => {
                     const last = prev[prev.length - 1];
-                    if (last && last.sender === 'gemini' && !last.isFinal) {
+                    if (last && (last.sender === 'assistant' || last.sender === 'gemini') && !last.isFinal) {
                       return [...prev.slice(0, -1), { ...last, text: msg.text }];
                     }
                     return [
                       ...prev,
                       {
-                        id: `gemini-${Date.now()}`,
-                        sender: 'gemini',
+                        id: `assistant-${Date.now()}`,
+                        sender: 'assistant',
                         text: msg.text,
                         timestamp: now
                       }
@@ -608,11 +608,11 @@ export function useLiveVoiceSession({
                 break;
 
               case 'interrupted':
-                // Worker interrupted Gemini (barge-in)
+                // Worker interrupted assistant (barge-in)
                 flushScheduledPlayback();
                 setLiveTranscript((prev) => {
                   const last = prev[prev.length - 1];
-                  if (last && last.sender === 'gemini') {
+                  if (last && (last.sender === 'assistant' || last.sender === 'gemini')) {
                     return [...prev.slice(0, -1), { ...last, isFinal: true }];
                   }
                   return prev;
@@ -660,8 +660,8 @@ export function useLiveVoiceSession({
           }
           const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
           const errMsg = isLocal
-            ? 'WebSocket connection to Gemini Live Gateway failed. Is the backend running on port 3001?'
-            : 'WebSocket connection to Gemini Live Gateway failed (fieldline-backend-pcs3.onrender.com). Please verify the backend is active on Render.';
+            ? 'WebSocket connection to Live Voice Gateway failed. Is the backend running on port 3001?'
+            : 'WebSocket connection to Live Voice Gateway failed (fieldline-backend-pcs3.onrender.com). Please verify the backend is active on Render.';
           setError(errMsg);
           setConnectionState('error');
           onError?.(errMsg);

@@ -106,7 +106,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
 
   const activeTargetProject = projects.find((p) => p.id === selectedProjectId) || currentProject || (projects.length > 0 ? projects[0] : null);
 
-  // Live Voice Session Hook (Gemini 3 Flash Live Multimodal Session)
+  // Live Voice Session Hook (Live Voice Multimodal Session)
   const liveSession = useLiveVoiceSession({
     projectId: activeTargetProject?.id
   });
@@ -371,23 +371,23 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       <span className={`live-status-dot ${liveSession.connectionState === 'error' ? 'error' : liveSession.connectionState === 'connecting' ? 'connecting' : liveSession.isSpeaking ? 'speaking' : liveSession.connectionState === 'handover' ? 'handover' : 'listening'}`} />
                       <span className="live-status-text">
                         {liveSession.connectionState === 'connecting'
-                          ? 'CONNECTING TO GEMINI LIVE...'
+                          ? 'CONNECTING TO LIVE VOICE...'
                           : liveSession.connectionState === 'error'
                           ? (liveSession.error || 'CONNECTION FAILED')
                           : liveSession.connectionState === 'handover'
                           ? 'SESSION HANDOVER...'
                           : liveSession.isSpeaking
-                          ? 'GEMINI SPEAKING...'
+                          ? 'ASSISTANT SPEAKING...'
                           : 'LISTENING...'}
                       </span>
                     </div>
                     <div className="live-hud-badges">
                       {liveSession.activeSlot && (
-                        <span className="live-slot-badge" title="Active Gemini Key Slot">
+                        <span className="live-slot-badge" title="Active Key Slot">
                           Slot {liveSession.activeSlot}
                         </span>
                       )}
-                      <span className="live-model-badge">Gemini 3 Flash Live</span>
+                      <span className="live-model-badge">Live Voice</span>
                     </div>
                   </div>
 
@@ -410,7 +410,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       {liveSession.liveTranscript.slice(-2).map((item) => (
                         <div key={item.id} className={`live-caption-item ${item.sender}`}>
                           <span className="caption-sender">
-                            {item.sender === 'user' ? 'Worker' : 'Gemini'}:
+                            {item.sender === 'user' ? 'Worker' : 'Assistant'}:
                           </span>
                           <span className="caption-text">{item.text}</span>
                         </div>
@@ -622,7 +622,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                   onClick={() => liveSession.toggleSession(activeTargetProject?.id)}
                   disabled={!activeTargetProject}
                   aria-label={isLiveActive ? 'Stop Live Voice Assistant' : 'Start Live Voice Assistant'}
-                  title={isLiveActive ? 'Stop Live Voice Assistant' : 'Start Live Voice Assistant (Gemini 3 Flash Live)'}
+                  title={isLiveActive ? 'Stop Live Voice Assistant' : 'Start Live Voice Assistant'}
                 >
                   {isLiveActive ? <MicOff size={15} /> : <Mic size={15} />}
                   {isLiveActive && <span className="floating-ai-mic-ring" />}

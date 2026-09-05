@@ -556,7 +556,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       expect(sessionRef.liveTranscript.length).toBe(2);
       expect(sessionRef.liveTranscript[0].sender).toBe('user');
       expect(sessionRef.liveTranscript[0].text).toContain('Pier 12');
-      expect(sessionRef.liveTranscript[1].sender).toBe('gemini');
+      expect(sessionRef.liveTranscript[1].sender).toBe('assistant');
       expect(sessionRef.liveTranscript[1].text).toContain('Logging that now');
 
       expect(sessionRef.verifiedUpdates.length).toBe(1);
@@ -635,7 +635,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
 
       // Verify HUD renders with status, badges, and visualizer
       expect(document.getElementById('floating-ai-live-hud')).toBeDefined();
-      expect(screen.getByText(/Gemini 3 Flash Live/i)).toBeDefined();
+      expect(screen.getByText('Live Voice', { selector: '.live-model-badge' })).toBeDefined();
       expect(screen.getByLabelText('Audio Visualizer')).toBeDefined();
 
       const ws = MockWebSocket.lastInstance!;
@@ -690,7 +690,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
 
       expect(screen.getByText('Worker:')).toBeDefined();
       expect(screen.getByText('What is our next scheduled task?')).toBeDefined();
-      expect(screen.getByText('Gemini:')).toBeDefined();
+      expect(screen.getByText('Assistant:')).toBeDefined();
       expect(screen.getByText('Pier 14 Reinforcement is scheduled next for Block B.')).toBeDefined();
     });
 
