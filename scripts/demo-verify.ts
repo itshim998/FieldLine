@@ -139,7 +139,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
     asOfDate: GOLDEN_AS_OF_DATE
   });
   assert(assistantDelayed.grounded === true, 'Assistant query "What is delayed?" is grounded');
-  assert(assistantDelayed.claims.length > 0, 'Assistant generated factual claims for delayed query');
+  assert(Array.isArray(assistantDelayed.claims) && assistantDelayed.claims.length > 0, 'Assistant generated factual claims for delayed query');
 
   const assistantRisk = await assistantService.answerQuestion(projectId, 'Which activities are at risk?', {
     asOfDate: GOLDEN_AS_OF_DATE
