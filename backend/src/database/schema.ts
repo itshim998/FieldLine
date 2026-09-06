@@ -3,7 +3,7 @@
  * Authoritative schema evolution is driven by the migration engine in ./migrator.ts.
  */
 
-export const SCHEMA_VERSION = '0.2.0';
+export const SCHEMA_VERSION = '0.3.0';
 
 export const CORE_TABLES = [
   'system_metadata',
@@ -15,7 +15,9 @@ export const CORE_TABLES = [
   'evidence',
   'activity_matches',
   'activity_progress',
-  'project_events'
+  'project_events',
+  'project_accounts'
 ] as const;
 
 export type CoreTableName = (typeof CORE_TABLES)[number];
+

@@ -61,7 +61,7 @@ A pass is **not complete merely because its code compiles or passes a basic test
 | Pass | Phase | Primary Objective | Architectural Focus |
 | :--- | :--- | :--- | :--- |
 | ~~**Pass 27**~~ | ~~Foundation~~ | ~~Baseline Contract Freeze & Test Snapshot~~ | ~~Establish known-good regression & security baseline~~ (COMPLETED) |
-| **Pass 28** | Identity | Project Account Credentials & Session Identity | Two shared accounts per project + human attribution |
+| ~~**Pass 28**~~ | ~~Identity~~ | ~~Project Account Credentials & Session Identity~~ | ~~Two shared accounts per project + human attribution~~ (COMPLETED) |
 | **Pass 29** | Security | Server-Side Authorization & Project Scoping | Route guards, role policies, data projection & privacy |
 | **Pass 30** | Shell | Dual-Shell Architecture & Admin Control Alignment | Split frontend into Worker Cockpit & Admin Control Room |
 | **Pass 31** | Execution | Worker Operational Projection ("Today's Work") | Bounded operational horizon, active tasks, location context |
@@ -108,7 +108,7 @@ Before altering authentication, routing, or data flows, the system must establis
 
 ---
 
-## Pass 28 — Project Account Credentials & Session Identity
+## ~~Pass 28 — Project Account Credentials & Session Identity~~ (COMPLETED)
 
 ### Context & Need
 FieldLine currently relies on client-side project selection without account credentials. Per `long_term_plan.md`, the platform requires an intentional two-account model: **one shared Worker Account + one shared Admin Account per project**, while preserving individual human attribution on operational records.

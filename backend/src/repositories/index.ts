@@ -60,3 +60,10 @@ export type {
   ProjectEventRepository,
   ProjectEventFilterOptions
 } from './project-event.repository.js';
+
+export {
+  SqliteProjectAccountRepository,
+  projectAccountRepository
+} from './project-account.repository.js';
+export type { ProjectAccountRepository } from './project-account.repository.js';
+

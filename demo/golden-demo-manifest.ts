@@ -21,6 +21,18 @@ export const goldenWorkAreas = [
   'Area F — Commissioning & Utilities'
 ] as const;
 
+export const goldenWorkerCredentials = {
+  accountType: 'worker' as const,
+  pin: '4444',
+  displayName: 'Refinery Operations Crew'
+};
+
+export const goldenAdminCredentials = {
+  accountType: 'admin' as const,
+  password: 'RefineryAdmin2026!',
+  displayName: 'Refinery Project Superintendent'
+};
+
 export interface GoldenExpectedInvariants {
   projectCode: string;
   projectName: string;

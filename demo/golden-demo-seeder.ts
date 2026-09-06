@@ -11,9 +11,12 @@ import { progressUpdateRepository } from '../backend/src/repositories/progress-u
 import { activityMatchRepository } from '../backend/src/repositories/activity-match.repository.js';
 import { progressService } from '../backend/src/services/progress/progress.service.js';
 import { projectEventRepository } from '../backend/src/repositories/project-event.repository.js';
+import { authService } from '../backend/src/services/auth.service.js';
 import {
   goldenProjectManifest,
-  goldenManifestInvariants
+  goldenManifestInvariants,
+  goldenWorkerCredentials,
+  goldenAdminCredentials
 } from './golden-demo-manifest.js';
 import { logger } from '../backend/src/config/logger.js';
 import { env } from '../backend/src/config/env.js';
@@ -27,6 +30,7 @@ export interface SeedGoldenDemoResult {
   evidenceCount: number;
   progressReportsCount: number;
   canonicalObservationsCount: number;
+  accountsCount: number;
   asOfDate: string;
 }
 
@@ -80,6 +84,16 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     logger.info(`ℹ️ Found existing Golden Demo Project: [${project.code}] (${project.id})`);
   }
   const projectId = project.id;
+
+  // 1b. Provision Two-Account Credentials (Worker + Admin) per Pass 28
+  authService.provisionDefaultAccounts(projectId, {
+    workerPin: goldenWorkerCredentials.pin,
+    adminPassword: goldenAdminCredentials.password,
+    workerDisplayName: goldenWorkerCredentials.displayName,
+    adminDisplayName: goldenAdminCredentials.displayName,
+    replaceExisting: true
+  });
+  logger.info(`🔐 Provisioned Golden Demo Accounts: Worker (PIN: ${goldenWorkerCredentials.pin}) and Admin`);
 
   // 2. Import Canonical 30-Activity Schedule
   const scheduleCsvPath = path.join(schedulesFixtureDir, 'refinery_unit4_schedule.csv');
@@ -535,6 +549,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     evidenceCount: evidenceFiles.length,
     progressReportsCount: 6,
     canonicalObservationsCount: totalObservations,
+    accountsCount: 2,
     asOfDate: '2026-08-28'
   };
 }

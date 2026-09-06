@@ -500,3 +500,62 @@ export interface CreateProcessingJobInput {
   payload: Record<string, unknown> | DocumentIngestionJobPayload;
 }
 
+// ==========================================
+// 12. Project Accounts & Session Identity (Pass 28)
+// ==========================================
+export type AccountType = 'worker' | 'admin';
+
+export interface ProjectAccount {
+  id: string;
+  projectId: string;
+  accountType: AccountType;
+  credentialHash: string;
+  displayName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectAccountPublic {
+  id: string;
+  projectId: string;
+  accountType: AccountType;
+  displayName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectAccountInput {
+  id?: string;
+  projectId: string;
+  accountType: AccountType;
+  credentialHash: string;
+  displayName: string;
+}
+
+export interface SessionIdentity {
+  sessionId: string;
+  projectId: string;
+  accountType: AccountType;
+  displayName: string;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export interface LoginInput {
+  projectId?: string;
+  projectCode?: string;
+  accountType: AccountType;
+  passcode: string;
+}
+
+export interface AuthResult {
+  token: string;
+  session: SessionIdentity;
+  project: {
+    id: string;
+    code: string;
+    name: string;
+  };
+}
+
+

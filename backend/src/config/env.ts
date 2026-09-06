@@ -95,6 +95,7 @@ export const envSchema = z.object({
   GEMINI_LIVE_MODEL: z.string().min(1).default('gemini-3.1-flash-live-preview'),
   GEMINI_LIVE_TOKEN_LIMIT_PER_KEY: z.coerce.number().int().positive().default(55000),
   GROQ_MODEL: z.string().min(1).default('openai/gpt-oss-20b'),
+  AUTH_SESSION_SECRET: z.string().min(1).default('fieldline-dev-session-secret-key-2026'),
   AUTO_SEED_DEMO: z.preprocess((val) => {
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
     if (typeof val === 'boolean') return val;

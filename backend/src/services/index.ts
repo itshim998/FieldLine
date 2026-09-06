@@ -216,3 +216,10 @@ export type {
   ActivityDetailService
 } from './activity-detail/activity-detail.types.js';
 
+export {
+  AuthService,
+  authService
+} from './auth.service.js';
+export type { AuthServiceOptions } from './auth.service.js';
+
+

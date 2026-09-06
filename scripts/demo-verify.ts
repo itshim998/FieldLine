@@ -10,9 +10,13 @@ import { riskClassificationService } from '../backend/src/services/risk/risk-cla
 import { projectIntelligenceService } from '../backend/src/services/intelligence/project-intelligence.service.js';
 import { projectDashboardService } from '../backend/src/services/dashboard/project-dashboard.service.js';
 import { assistantService } from '../backend/src/services/assistant/assistant.service.js';
+import { projectAccountRepository } from '../backend/src/repositories/project-account.repository.js';
+import { authService } from '../backend/src/services/auth.service.js';
 import {
   GOLDEN_AS_OF_DATE,
-  goldenManifestInvariants
+  goldenManifestInvariants,
+  goldenWorkerCredentials,
+  goldenAdminCredentials
 } from '../demo/golden-demo-manifest.js';
 
 export interface VerificationResult {
@@ -155,6 +159,56 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
     const fullDiskPath = path.resolve(process.cwd(), 'uploads', ev.filePath);
     assert(fs.existsSync(fullDiskPath), `Physical evidence file exists on disk: ${ev.fileName}`);
   }
+
+  // 10. Project Accounts & Two-Account Authentication Invariants (Pass 28)
+  const accounts = projectAccountRepository.listByProjectId(projectId);
+  assert(accounts.length === 2, `Project has exactly 2 accounts, found ${accounts.length}`);
+
+  const workerAcc = accounts.find((a) => a.accountType === 'worker');
+  const adminAcc = accounts.find((a) => a.accountType === 'admin');
+  assert(!!workerAcc, 'Worker account exists for Golden Demo project');
+  assert(!!adminAcc, 'Admin account exists for Golden Demo project');
+
+  // Verify Worker Authentication
+  let workerAuthSuccess = false;
+  try {
+    const workerResult = await authService.authenticate({
+      projectCode: goldenManifestInvariants.projectCode,
+      accountType: 'worker',
+      passcode: goldenWorkerCredentials.pin
+    });
+    workerAuthSuccess = workerResult.session.accountType === 'worker' && !!workerResult.token;
+  } catch (err) {
+    workerAuthSuccess = false;
+  }
+  assert(workerAuthSuccess, 'Worker account authenticates with golden PIN');
+
+  // Verify Admin Authentication
+  let adminAuthSuccess = false;
+  try {
+    const adminResult = await authService.authenticate({
+      projectCode: goldenManifestInvariants.projectCode,
+      accountType: 'admin',
+      passcode: goldenAdminCredentials.password
+    });
+    adminAuthSuccess = adminResult.session.accountType === 'admin' && !!adminResult.token;
+  } catch (err) {
+    adminAuthSuccess = false;
+  }
+  assert(adminAuthSuccess, 'Admin account authenticates with golden password');
+
+  // Verify Invalid Credentials Rejection
+  let invalidPasscodeRejected = false;
+  try {
+    await authService.authenticate({
+      projectCode: goldenManifestInvariants.projectCode,
+      accountType: 'worker',
+      passcode: 'wrong_pin'
+    });
+  } catch {
+    invalidPasscodeRejected = true;
+  }
+  assert(invalidPasscodeRejected, 'Invalid worker passcode is rejected cleanly');
 
   console.log('====================================================');
   if (failures.length === 0) {

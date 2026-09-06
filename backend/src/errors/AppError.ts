@@ -39,6 +39,18 @@ export class ConflictError extends AppError {
   }
 }
 
+export class AuthenticationError extends AppError {
+  constructor(message: string = 'Authentication Failed', details?: unknown) {
+    super(message, 401, 'AUTHENTICATION_ERROR', details);
+  }
+}
+
+export class ForbiddenError extends AppError {
+  constructor(message: string = 'Forbidden', details?: unknown) {
+    super(message, 403, 'FORBIDDEN', details);
+  }
+}
+
 export class AIProviderError extends AppError {
   constructor(message: string = 'AI Provider Error', details?: unknown) {
     super(message, 502, 'AI_PROVIDER_ERROR', details);

@@ -6,6 +6,7 @@ import * as migration0004 from './migrations/0004_upgrade_cross_project_integrit
 import * as migration0005 from './migrations/0005_processing_jobs.js';
 import * as migration0006 from './migrations/0006_evidence_content_hash.js';
 import * as migration0007 from './migrations/0007_match_review_tiers.js';
+import * as migration0008 from './migrations/0008_project_accounts.js';
 
 export interface Migration {
   name: string;
@@ -24,7 +25,8 @@ export const MIGRATIONS: Migration[] = [
   { name: migration0004.name, up: migration0004.up },
   { name: migration0005.name, up: migration0005.up },
   { name: migration0006.name, up: migration0006.up },
-  { name: migration0007.name, up: migration0007.up }
+  { name: migration0007.name, up: migration0007.up },
+  { name: migration0008.name, up: migration0008.up }
 ];
 
 /**
