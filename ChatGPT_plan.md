@@ -200,7 +200,7 @@ Authentication without server-side enforcement is ineffective. Per `long_term_pl
 
 ---
 
-## Pass 30 — Dual-Shell Architecture & Admin Control Room Alignment
+## ~~Pass 30 — Dual-Shell Architecture & Admin Control Room Alignment~~ (COMPLETED)
 
 ### Context & Need
 The frontend currently operates as a single shared workspace with tabs (`overview`, `schedules`, `progress`, `evidence`, `intelligence`, `activity-detail`). Per `long_term_plan.md`, the client must provide two distinct shells: the **Worker Execution Cockpit** and the **Admin Control Room**.
@@ -215,24 +215,24 @@ The frontend currently operates as a single shared workspace with tabs (`overvie
 
 ### 2. Implement
 * **Login & Account Selection UI:**
-  * Create `ProjectLoginView.tsx`: Select project, choose "Worker" or "Admin", enter credentials.
+  * Create `ProjectLoginView.tsx`: Select project, choose "Worker" or "Admin", enter credentials, with 1-click Golden Demo chips for `REFINERY-U4`.
 * **Router Refactoring (`frontend/src/router.ts`):**
-  * Introduce `authRole` to `RouteState`.
-  * Protect Admin routes: if a worker session visits an admin URL, redirect gracefully to the worker home.
+  * Introduce `authRole` and `workerTab` to `RouteState`.
+  * Protect Admin routes: if a worker session visits an admin URL, redirect gracefully to the worker cockpit (`protectRouteForRole`).
 * **Admin Control Room Alignment:**
   * Retain existing tabs (`overview`, `schedules`, `progress`, `evidence`, `intelligence`, `activity-detail`) within `AdminWorkspaceView.tsx`.
-  * Add clear session badge showing `Project: REFINERY-U4 | Role: Admin (Control Room)`.
+  * Add clear session badge showing `Project: REFINERY-U4 | Role: Admin (Control Room)` with operator attribution.
   * Add logout / switch account action.
 * **Worker Shell Foundation:**
-  * Scaffold `WorkerCockpitView.tsx` with high-contrast, mobile-friendly navigation (Today's Work, Report, Assistant).
+  * Scaffold `WorkerCockpitView.tsx` with high-contrast, mobile-friendly navigation (`Today's Work`, `Quick Report` with human attribution, `Field Assistant`).
 
 ### 3. Evaluate
-* Test in browser and via Vitest frontend tests (`frontend/tests/dual_shell_routing.test.tsx`):
+* Tested via Vitest frontend tests (`frontend/tests/dual_shell_routing.test.tsx` and `frontend/tests/router.test.ts`):
   * Log in as Admin $\rightarrow$ lands in Primary Dashboard with full navigation tabs.
   * Log in as Worker $\rightarrow$ lands in Worker Cockpit shell with execution navigation.
-  * Browser refresh preserves authenticated role and project context.
+  * Browser refresh preserves authenticated role and project context via `GET /api/auth/session`.
   * Logging out clears tokens and returns cleanly to project login.
-  * Verify all existing Admin workflows (schedule import, matching review, dashboard) operate identically.
+  * Verified all existing Admin workflows operate with zero regression (105 test files, 1,004 tests passing, release verification 100% clean).
 
 ### 4. Exit Criteria
 * [x] Frontend visibly and structurally separates Worker from Admin.

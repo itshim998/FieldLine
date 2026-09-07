@@ -35,16 +35,24 @@ import {
   ChevronUp,
   MessageSquare,
   LayoutDashboard,
-  Sparkles
+  Sparkles,
+  LogOut
 } from 'lucide-react';
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
 import { FloatingAIAssistant } from './components/assistant/FloatingAIAssistant.js';
+import { AuthProvider, useAuth, AccountType } from './context/AuthContext.js';
+import { ProjectLoginView } from './components/auth/ProjectLoginView.js';
+import { AdminWorkspaceView } from './components/admin/AdminWorkspaceView.js';
+import { WorkerCockpitView } from './components/worker/WorkerCockpitView.js';
 import {
   WorkspaceTab,
+  WorkerTab,
+  RouteRole,
   RouteState,
   parseRoute,
+  protectRouteForRole,
   pushRoute,
   replaceRoute
 } from './router.js';
@@ -320,7 +328,22 @@ interface HealthData {
 
 const STORAGE_KEY_SELECTED_PROJECT = 'fieldline_selected_project_id';
 
-export function App(): React.JSX.Element {
+function MainAppContent(): React.JSX.Element {
+  const { session, token, project: authProject, isAuthenticated, logout, authFetch } = useAuth();
+
+  // Dual-Shell & Login State (PASS 30)
+  const [isLoginView, setIsLoginView] = useState<boolean>(false);
+  const [workerTab, setWorkerTab] = useState<WorkerTab>('work');
+  const [currentRouteRole, setCurrentRouteRole] = useState<RouteRole>(null);
+
+  const effectiveRole: 'worker' | 'admin' =
+    session?.accountType === 'worker'
+      ? 'worker'
+      : currentRouteRole === 'worker'
+      ? 'worker'
+      : 'admin';
+  const isWorkerShell = effectiveRole === 'worker';
+
   // Projects State
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -609,6 +632,15 @@ export function App(): React.JSX.Element {
       setProjects(projectList);
 
       const initialRoute = parseRoute();
+      if (initialRoute.isLogin) {
+        setIsLoginView(true);
+      }
+      if (initialRoute.authRole) {
+        setCurrentRouteRole(initialRoute.authRole);
+      }
+      if (initialRoute.workerTab) {
+        setWorkerTab(initialRoute.workerTab);
+      }
       const targetId = preferredSelectId || initialRoute.projectId;
 
       if (targetId) {
@@ -622,7 +654,10 @@ export function App(): React.JSX.Element {
           replaceRoute({
             projectId: found.id,
             tab: targetTab,
-            activityId: initialRoute.activityId || null
+            activityId: initialRoute.activityId || null,
+            authRole: initialRoute.authRole,
+            workerTab: initialRoute.workerTab,
+            isLogin: initialRoute.isLogin
           });
           fetchSchedules(found.id);
           fetchProgressUpdates(found.id);
@@ -642,7 +677,7 @@ export function App(): React.JSX.Element {
         setSelectedProject(null);
         setSelectedActivityId(null);
         setActiveWorkspaceTab('overview');
-        replaceRoute({ projectId: null, tab: 'overview' });
+        replaceRoute({ projectId: null, tab: 'overview', isLogin: initialRoute.isLogin });
       }
     } catch (err: any) {
       showNotification('error', err.message || 'Error connecting to API server');
@@ -730,8 +765,25 @@ export function App(): React.JSX.Element {
   );
 
   // Handle Opening a Project
-  const handleOpenProject = (project: Project, targetTab: WorkspaceTab = 'overview', activityId?: string | null) => {
+  const handleOpenProject = (
+    project: Project,
+    targetTab: WorkspaceTab = 'overview',
+    activityId?: string | null,
+    role?: 'worker' | 'admin' | null
+  ) => {
+    if (role === 'admin' && session?.accountType === 'worker') {
+      setSelectedProject(project);
+      setIsLoginView(true);
+      pushRoute({ projectId: project.id, tab: 'overview', isLogin: true });
+      return;
+    }
+
+    const targetRole = role || session?.accountType || currentRouteRole;
+    if (targetRole) {
+      setCurrentRouteRole(targetRole);
+    }
     setSelectedProject(project);
+    setIsLoginView(false);
     setActiveWorkspaceTab(targetTab);
     setSelectedActivityId(activityId || null);
     setSelectedFile(null);
@@ -746,12 +798,26 @@ export function App(): React.JSX.Element {
     setProcessingStatusMap({});
     setReportFormData({
       reportDate: new Date().toISOString().slice(0, 10),
-      reporterName: '',
-      reporterRole: '',
+      reporterName: session?.displayName || '',
+      reporterRole: session?.roleTitle || '',
       rawText: ''
     });
     localStorage.setItem(STORAGE_KEY_SELECTED_PROJECT, project.id);
-    pushRoute({ projectId: project.id, tab: targetTab, activityId: activityId || null });
+    if (targetRole === 'worker') {
+      pushRoute({
+        projectId: project.id,
+        tab: 'overview',
+        authRole: 'worker',
+        workerTab
+      });
+    } else {
+      pushRoute({
+        projectId: project.id,
+        tab: targetTab,
+        authRole: 'admin',
+        activityId: activityId || null
+      });
+    }
     setAssistantQuestion('');
     setAssistantError(null);
     setAssistantResponse(null);
@@ -778,6 +844,7 @@ export function App(): React.JSX.Element {
     setSelectedProject(null);
     setSelectedActivityId(null);
     setSelectedSchedule(null);
+    setIsLoginView(false);
     setSchedules([]);
     setActivities([]);
     setProgressUpdates([]);
@@ -804,7 +871,23 @@ export function App(): React.JSX.Element {
   // Listen to browser Back / Forward (popstate) navigation
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      const route: RouteState = event.state || parseRoute();
+      let route: RouteState = event.state || parseRoute();
+      if (session?.accountType) {
+        route = protectRouteForRole(route, session.accountType);
+      }
+
+      if (route.isLogin) {
+        setIsLoginView(true);
+      } else {
+        setIsLoginView(false);
+      }
+
+      if (route.authRole) {
+        setCurrentRouteRole(route.authRole);
+      }
+      if (route.workerTab) {
+        setWorkerTab(route.workerTab);
+      }
 
       if (!route.projectId) {
         setSelectedProject(null);
@@ -1553,6 +1636,70 @@ export function App(): React.JSX.Element {
         </div>
 
         <div className="header-right">
+          {session ? (
+            <div
+              className="header-session-chip"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.3rem 0.65rem',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: '8px',
+                fontSize: '0.75rem'
+              }}
+            >
+              {session.accountType === 'worker' ? (
+                <User size={13} color="var(--accent-amber)" />
+              ) : (
+                <ShieldCheck size={13} color="var(--accent-indigo)" />
+              )}
+              <span style={{ fontWeight: 600 }}>{session.displayName}</span>
+              <span style={{ opacity: 0.6, fontSize: '0.7rem' }}>
+                ({session.accountType === 'worker' ? 'Worker' : 'Admin'})
+              </span>
+              <button
+                type="button"
+                className="header-logout-btn"
+                onClick={() => {
+                  logout();
+                  setIsLoginView(false);
+                  handleBackToProjects();
+                }}
+                title="Sign out"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: '0.1rem',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <LogOut size={13} />
+              </button>
+            </div>
+          ) : (
+            <button
+              id="header-login-btn"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setIsLoginView(true);
+                pushRoute({
+                  projectId: selectedProject?.id || null,
+                  tab: 'overview',
+                  isLogin: true
+                });
+              }}
+              style={{ fontSize: '0.75rem', gap: '0.35rem' }}
+            >
+              <User size={13} color="var(--accent-blue)" />
+              <span>Sign In</span>
+            </button>
+          )}
+
           <button
             id="header-golden-demo-btn"
             className="btn btn-secondary btn-sm"
@@ -1605,135 +1752,109 @@ export function App(): React.JSX.Element {
           <h2 className="empty-title">Loading FieldLine Projects...</h2>
           <p className="empty-desc">Connecting to local SQLite database service</p>
         </div>
+      ) : isLoginView ? (
+        <ProjectLoginView
+          projects={projects}
+          selectedProjectId={selectedProject?.id || null}
+          onSelectProject={(projId) => {
+            const p = projects.find((x) => x.id === projId);
+            if (p) setSelectedProject(p);
+          }}
+          onLoginSuccess={(role, projId) => {
+            setIsLoginView(false);
+            const p = projects.find((x) => x.id === projId);
+            if (p) {
+              handleOpenProject(p, 'overview', null, role);
+            }
+          }}
+          onCancel={() => {
+            setIsLoginView(false);
+            if (selectedProject) {
+              pushRoute({
+                projectId: selectedProject.id,
+                tab: activeWorkspaceTab,
+                authRole: isWorkerShell ? 'worker' : 'admin',
+                workerTab
+              });
+            } else {
+              pushRoute({ projectId: null, tab: 'overview' });
+            }
+          }}
+          onSeedGoldenDemo={handleSeedGoldenDemo}
+          isSeedingDemo={isSeedingDemo}
+        />
       ) : selectedProject ? (
-        /* ========================================================================= */
-        /* CASE 3: OPENED PROJECT WORKSPACE                                          */
-        /* ========================================================================= */
-        <div className="workspace-view">
-          {/* Workspace Header Card */}
-          <div className="workspace-header-card">
-            <div className="workspace-top-bar">
-              <button
-                id="back-to-projects-btn"
-                className="back-btn"
-                onClick={handleBackToProjects}
-              >
-                <ArrowLeft size={16} />
-                <span>All Projects</span>
-              </button>
-
-              <div className="workspace-actions">
-                <button
-                  id="edit-project-btn"
-                  className="btn btn-secondary btn-sm"
-                  onClick={openEditModal}
-                >
-                  <Edit3 size={15} />
-                  <span>Edit Metadata</span>
-                </button>
-                <button
-                  id="delete-project-btn"
-                  className="btn btn-danger btn-sm"
-                  onClick={() => setIsDeleteModalOpen(true)}
-                >
-                  <Trash2 size={15} />
-                  <span>Delete Project</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="workspace-identity">
-              <div className="workspace-title-section">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                  <span className="workspace-code-badge">{selectedProject.code}</span>
-                  <span className={`status-badge ${selectedProject.status}`}>
-                    {selectedProject.status}
-                  </span>
-                </div>
-                <h2 className="workspace-project-title">{selectedProject.name}</h2>
-                {selectedProject.description ? (
-                  <p className="workspace-project-desc">{selectedProject.description}</p>
-                ) : (
-                  <p className="workspace-project-desc" style={{ fontStyle: 'italic', opacity: 0.6 }}>
-                    No project description provided.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Navigation Sub-Tabs */}
-          <div className="workspace-tabs">
-            <button
-              id="tab-overview"
-              className={`workspace-tab ${activeWorkspaceTab === 'overview' ? 'active' : ''}`}
-              onClick={() => handleTabChange('overview')}
-            >
-              <LayoutDashboard size={16} />
-              <span>Project Dashboard</span>
-            </button>
-            <button
-              id="tab-schedules"
-              className={`workspace-tab ${activeWorkspaceTab === 'schedules' ? 'active' : ''}`}
-              onClick={() => handleTabChange('schedules')}
-            >
-              <FileSpreadsheet size={16} />
-              <span>Schedules & Activities</span>
-              {schedules.length > 0 && (
-                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                  {schedules.length}
-                </span>
-              )}
-            </button>
-            <button
-              id="tab-progress"
-              className={`workspace-tab ${activeWorkspaceTab === 'progress' ? 'active' : ''}`}
-              onClick={() => handleTabChange('progress')}
-            >
-              <Activity size={16} />
-              <span>Progress Updates</span>
-              {progressUpdates.length > 0 && (
-                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                  {progressUpdates.length}
-                </span>
-              )}
-            </button>
-            <button
-              id="tab-evidence"
-              className={`workspace-tab ${activeWorkspaceTab === 'evidence' ? 'active' : ''}`}
-              onClick={() => handleTabChange('evidence')}
-            >
-              <FileText size={16} />
-              <span>Evidence</span>
-              {evidenceList.length > 0 && (
-                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                  {evidenceList.length}
-                </span>
-              )}
-            </button>
-            <button
-              id="tab-intelligence"
-              className={`workspace-tab ${activeWorkspaceTab === 'intelligence' ? 'active' : ''}`}
-              onClick={() => handleTabChange('intelligence')}
-            >
-              <TrendingUp size={16} />
-              <span>Project Intelligence</span>
-              {intelligence && (
-                <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-                  {intelligence.delayed.length + intelligence.atRisk.length + intelligence.behindSchedule.length} Facts
-                </span>
-              )}
-            </button>
-            {activeWorkspaceTab === 'activity-detail' && (
-              <button
-                id="tab-activity-detail"
-                className="workspace-tab active"
-              >
-                <TrendingUp size={16} />
-                <span>Activity Detail</span>
-              </button>
-            )}
-          </div>
+        isWorkerShell ? (
+          <WorkerCockpitView
+            projectId={selectedProject.id}
+            projectCode={selectedProject.code}
+            projectName={selectedProject.name}
+            activeWorkerTab={workerTab}
+            onTabChange={(tab) => {
+              setWorkerTab(tab);
+              pushRoute({
+                projectId: selectedProject.id,
+                tab: 'overview',
+                authRole: 'worker',
+                workerTab: tab
+              });
+            }}
+            onLogout={() => {
+              logout();
+              setIsLoginView(false);
+              handleBackToProjects();
+            }}
+            onSwitchToAdmin={() => {
+              if (session?.accountType === 'worker') {
+                setIsLoginView(true);
+                pushRoute({
+                  projectId: selectedProject.id,
+                  tab: 'overview',
+                  isLogin: true
+                });
+              } else {
+                setCurrentRouteRole('admin');
+                pushRoute({
+                  projectId: selectedProject.id,
+                  tab: 'overview',
+                  authRole: 'admin'
+                });
+              }
+            }}
+            asOfDate={intelligenceAsOfDate}
+          />
+        ) : (
+          <AdminWorkspaceView
+            project={selectedProject}
+            activeTab={activeWorkspaceTab}
+            onTabChange={handleTabChange}
+            onBackToProjects={handleBackToProjects}
+            onEditProject={openEditModal}
+            onDeleteProject={() => setIsDeleteModalOpen(true)}
+            onLogout={() => {
+              logout();
+              setIsLoginView(false);
+              handleBackToProjects();
+            }}
+            onSwitchToWorker={() => {
+              setCurrentRouteRole('worker');
+              setWorkerTab('work');
+              pushRoute({
+                projectId: selectedProject.id,
+                tab: 'overview',
+                authRole: 'worker',
+                workerTab: 'work'
+              });
+            }}
+            schedulesCount={schedules.length}
+            progressCount={progressUpdates.length}
+            evidenceCount={evidenceList.length}
+            intelligenceFactsCount={
+              intelligence
+                ? intelligence.delayed.length + intelligence.atRisk.length + intelligence.behindSchedule.length
+                : 0
+            }
+          >
 
           {/* Tab Content */}
           {activeWorkspaceTab === 'overview' ? (
@@ -3752,7 +3873,8 @@ export function App(): React.JSX.Element {
               }}
             />
           ) : null}
-        </div>
+          </AdminWorkspaceView>
+        )
       ) : projects.length === 0 ? (
         /* ========================================================================= */
         /* CASE 1: NO PROJECTS (EMPTY STATE)                                         */
@@ -3891,15 +4013,33 @@ export function App(): React.JSX.Element {
                     </div>
                   </div>
 
-                  <div className="project-card-footer">
+                  <div className="project-card-footer" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                     <button
-                      className="project-open-btn"
+                      id={`open-cockpit-btn-${project.code}`}
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ flex: '1 1 120px', gap: '0.35rem', fontSize: '0.75rem', borderColor: 'rgba(245, 158, 11, 0.4)' }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleOpenProject(project);
+                        setWorkerTab('work');
+                        handleOpenProject(project, 'overview', null, 'worker');
                       }}
                     >
-                      <span>Open Workspace</span>
+                      <User size={13} color="var(--accent-amber)" />
+                      <span>Worker Cockpit</span>
+                    </button>
+                    <button
+                      id={`open-admin-btn-${project.code}`}
+                      type="button"
+                      className="project-open-btn"
+                      style={{ flex: '1 1 120px' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenProject(project, 'overview', null, 'admin');
+                      }}
+                    >
+                      <ShieldCheck size={13} />
+                      <span>Admin Control Room</span>
                       <ChevronRight size={14} />
                     </button>
                   </div>
@@ -4353,6 +4493,14 @@ export function App(): React.JSX.Element {
 function envDatabaseDisplay(health: HealthData | null): string {
   if (!health) return 'SQLite';
   return health.database.path;
+}
+
+export function App(): React.JSX.Element {
+  return (
+    <AuthProvider>
+      <MainAppContent />
+    </AuthProvider>
+  );
 }
 
 export default App;
