@@ -10,7 +10,8 @@ export const assistantBodySchema = z.object({
     .trim()
     .min(1, 'Question must not be empty')
     .max(1000, 'Question must not exceed 1,000 characters'),
-  asOfDate: z.string().optional()
+  asOfDate: z.string().optional(),
+  role: z.enum(['worker', 'admin']).optional()
 });
 
 export type AssistantParamsDto = z.infer<typeof assistantParamsSchema>;

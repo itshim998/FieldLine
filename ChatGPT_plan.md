@@ -62,12 +62,12 @@ A pass is **not complete merely because its code compiles or passes a basic test
 | :--- | :--- | :--- | :--- |
 | ~~**Pass 27**~~ | ~~Foundation~~ | ~~Baseline Contract Freeze & Test Snapshot~~ | ~~Establish known-good regression & security baseline~~ (COMPLETED) |
 | ~~**Pass 28**~~ | ~~Identity~~ | ~~Project Account Credentials & Session Identity~~ | ~~Two shared accounts per project + human attribution~~ (COMPLETED) |
-| **Pass 29** | Security | Server-Side Authorization & Project Scoping | Route guards, role policies, data projection & privacy |
-| **Pass 30** | Shell | Dual-Shell Architecture & Admin Control Alignment | Split frontend into Worker Cockpit & Admin Control Room |
+| ~~**Pass 29**~~ | ~~Security~~ | ~~Server-Side Authorization & Project Scoping~~ | ~~Route guards, role policies, data projection & privacy~~ (COMPLETED) |
+| ~~**Pass 30**~~ | ~~Shell~~ | ~~Dual-Shell Architecture & Admin Control Alignment~~ | ~~Split frontend into Worker Cockpit & Admin Control Room~~ (COMPLETED) |
 | ~~**Pass 31**~~ | ~~Execution~~ | ~~Worker Operational Projection ("Today's Work")~~ | ~~Bounded operational horizon, active tasks, location context~~ (COMPLETED) |
-| **Pass 32** | Capture | Frictionless Field Capture (Voice, Text, Photos) | Live voice dialogue, rapid quantity input, photo evidence |
-| **Pass 33** | Context | Structured Operational Blockers & Safety Context | Blocker logging linked to Risk Engine + hazard notices |
-| **Pass 34** | Intelligence | Role-Partitioned AI Assistant & Live Gateway | Partition Gemini Live tools into Worker vs Admin scopes |
+| ~~**Pass 32**~~ | ~~Capture~~ | ~~Frictionless Field Capture (Voice, Text, Photos)~~ | ~~Live voice dialogue, rapid quantity input, photo evidence~~ (COMPLETED) |
+| ~~**Pass 33**~~ | ~~Context~~ | ~~Structured Operational Blockers & Safety Context~~ | ~~Blocker logging linked to Risk Engine + hazard notices~~ (COMPLETED) |
+| ~~**Pass 34**~~ | ~~Intelligence~~ | ~~Role-Partitioned AI Assistant & Live Gateway~~ | ~~Partition Gemini Live tools into Worker vs Admin scopes~~ (COMPLETED) |
 | **Pass 35** | Hardening | Adversarial Security, Penetration & Audit Review | Role bypass tests, cross-project tampering, provenance |
 | **Pass 36** | Certification| E2E Truth Certification & North-Star Conformance | 13-stage pipeline proof & North-Star Conformance Matrix |
 
@@ -408,7 +408,7 @@ Per `long_term_plan.md` Sections 6 & 10, workers must be able to report operatio
 
 ---
 
-## Pass 34 — Role-Partitioned AI Assistant & Live Voice Gateway
+## ~~Pass 34 — Role-Partitioned AI Assistant & Live Voice Gateway~~ (COMPLETED)
 
 ### Context & Need
 FieldLine already features a Grounded Text Assistant (`AssistantService`) and a Gemini Live WebSocket Gateway (`LiveToolHandlers`). Currently, all tools are mounted globally. This pass partitions assistant capabilities into role-appropriate scopes.
@@ -440,11 +440,22 @@ FieldLine already features a Grounded Text Assistant (`AssistantService`) and a 
 
 ### 3. Evaluate
 * Write automated integration tests in `backend/tests/role_assistant_partition.test.ts`:
+  * 11 integration tests passing (100% pass rate).
   * Worker session calling `record_field_progress` $\rightarrow$ succeeds and confirms.
-  * Worker session calling `get_project_intelligence` $\rightarrow$ blocked by role policy.
+  * Worker session calling `get_project_intelligence` $\rightarrow$ blocked by role policy with graceful boundary message.
   * Worker asking *"What is delayed across all 6 areas?"* $\rightarrow$ returns operational scope boundary.
   * Admin session asking systemic questions $\rightarrow$ returns full grounded fact synthesis.
   * Verify zero hallucination: all claims reference verified SQLite fact IDs.
+* Frontend integration tests in `frontend/tests/role_assistant_partition.test.tsx`:
+  * 3 component tests passing (100% pass rate).
+  * Renders operational voice query chips on Worker Cockpit.
+  * Dispatches assistant queries with `role: 'worker'`.
+  * Renders scope restricted operational boundary notice cleanly in UI.
+* Full regression & release verification:
+  * Full production build succeeded (`tsc -p tsconfig.backend.json` + `vite build`).
+  * All 113 test files and 1,064 automated tests passing cleanly with 100% pass rate.
+  * Golden demo environment re-seeded and all 59 machine-checkable invariants verified.
+  * `npm run verify:release` executed cleanly in 62.2s.
 
 ### 4. Exit Criteria
 * [x] AI Assistant and Gemini Live Gateway enforce role-appropriate tool execution and fact grounding.

@@ -307,14 +307,20 @@ export function buildGroundedAnswerPrompt(
   question: string,
   intent: AssistantIntent,
   asOfDate: string,
-  facts: VerifiedFact[]
+  facts: VerifiedFact[],
+  role?: 'worker' | 'admin'
 ): string {
   const factLines = facts.map(
     (f, idx) => `[FACT ${idx + 1}] (Ref: ${f.ref})\n${f.summary}`
   );
 
+  const persona =
+    role === 'worker'
+      ? 'You are the FieldLine Operational Assistant, providing concise, execution-focused answers to field workers and site crews. Focus strictly on operational task context (status, location, actual progress, planned dates, blockers, and safety precautions). Do NOT cite or use internal variance percentages, variance states, or management portfolio analytics.'
+      : 'You are the FieldLine Project Assistant, providing strictly grounded answers to infrastructure project managers.';
+
   return [
-    'You are the FieldLine Project Assistant, providing strictly grounded answers to infrastructure project managers.',
+    persona,
     '',
     'GROUNDING RULES & CONSTRAINTS:',
     '1. You are NOT the source of truth. The VERIFIED FACTS below are the ONLY project facts available.',
@@ -564,8 +570,63 @@ export class AssistantService {
       resolvedActivity = resolution.activity;
     }
 
+    // Role-based scope partitioning: Worker vs Admin
+    if (options?.role === 'worker') {
+      const isSystemicQuery =
+        (!intent.activityQuery && (
+          intent.intent === 'behind_schedule' ||
+          intent.intent === 'approaching_milestones' ||
+          (intent.intent === 'delayed' && (/all\s*(6|six|\w+)?\s*areas|portfolio|across all|project-wide|every area|whole project|company-wide/i.test(trimmedQuestion) || !intent.activityQuery))
+        )) ||
+        /portfolio|variance matrix|confidence tier|all (\d+|six) areas|across all|executive|systemic delay/i.test(trimmedQuestion);
+
+      if (isSystemicQuery) {
+        return {
+          question: trimmedQuestion,
+          intent,
+          resolvedActivity: null,
+          ambiguousCandidates: null,
+          answer:
+            'This query requires project control room access. As a field worker, your scope is focused on active operational tasks, task progress, locations, and blockers for your work area.',
+          claims: [],
+          factRefs: [],
+          grounded: true,
+          status: 'scope_restricted',
+          asOfDate: canonicalDate,
+          verifiedFacts: []
+        };
+      }
+    }
+
     // 7. Compile verified facts from Project Intelligence layer
     const facts = this.factBuilder.buildFacts(projectId, intent, canonicalDate, resolvedActivity);
+
+    // Sanitize facts for worker role (omit systemic variance metrics)
+    if (options?.role === 'worker') {
+      for (const f of facts) {
+        if (f.data) {
+          delete (f.data as any).progressVariance;
+          delete (f.data as any).varianceState;
+          delete (f.data as any).plannedProgress;
+          if ((f.data as any).snapshot) {
+            delete (f.data as any).snapshot.progressVariance;
+            delete (f.data as any).snapshot.varianceState;
+            delete (f.data as any).snapshot.plannedProgress;
+          }
+        }
+        if (f.summary) {
+          f.summary = f.summary
+            .replace(/, progress variance is [-\d.]+%/gi, '')
+            .replace(/with progress variance of [-\d.]+%/gi, '')
+            .replace(/progress variance of [-\d.]+%/gi, '')
+            .replace(/progress variance: [-\d.]+%/gi, '')
+            .replace(/variance state: \w+/gi, '')
+            .replace(/Planned progress: \d+%, /gi, '')
+            .replace(/\s{2,}/g, ' ')
+            .trim();
+        }
+      }
+    }
 
     // 8. Safe deterministic insufficient data response if fact set is empty
     if (facts.length === 0) {
@@ -602,7 +663,7 @@ export class AssistantService {
     }
 
     // 9. Generate Grounded Structured Claims from Verified Facts
-    const prompt = buildGroundedAnswerPrompt(trimmedQuestion, intent, canonicalDate, facts);
+    const prompt = buildGroundedAnswerPrompt(trimmedQuestion, intent, canonicalDate, facts, options?.role);
     logger.debug(`AssistantService: Generating grounded answer with ${facts.length} verified facts`);
 
     const rawAnswer: AssistantAnswer = await this.aiService.extractStructured(

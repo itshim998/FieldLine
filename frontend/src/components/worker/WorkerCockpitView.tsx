@@ -63,7 +63,7 @@ export interface WorkerCockpitViewProps {
   projectName: string;
   activeWorkerTab: WorkerTab;
   onTabChange: (tab: WorkerTab) => void;
-  onLogout: () => void;
+  onLogout?: () => void;
   onSwitchToAdmin?: () => void;
   asOfDate?: string;
 }
@@ -296,7 +296,8 @@ export function WorkerCockpitView({
         },
         body: JSON.stringify({
           question: q.trim(),
-          asOfDate
+          asOfDate,
+          role: 'worker'
         })
       });
 
@@ -724,38 +725,41 @@ export function WorkerCockpitView({
               <div className="suggestion-chips-grid">
                 <button
                   type="button"
+                  id="worker-suggestion-area-c"
                   className="suggestion-chip"
                   onClick={() => {
-                    const q = 'What activities are delayed or at risk right now?';
+                    const q = 'What are we doing in Area C?';
                     setAssistantQuery(q);
                     handleAskAssistant(q);
                   }}
                 >
-                  "What activities are delayed or at risk?"
+                  "What are we doing in Area C?"
                 </button>
 
                 <button
                   type="button"
+                  id="worker-suggestion-piling"
                   className="suggestion-chip"
                   onClick={() => {
-                    const q = 'What is scheduled for piping in Area D?';
+                    const q = 'Has piling cleared?';
                     setAssistantQuery(q);
                     handleAskAssistant(q);
                   }}
                 >
-                  "What is scheduled for piping in Area D?"
+                  "Has piling cleared?"
                 </button>
 
                 <button
                   type="button"
+                  id="worker-suggestion-crude-pump"
                   className="suggestion-chip"
                   onClick={() => {
-                    const q = 'What work was completed today or this week?';
+                    const q = 'What is blocking crude pump?';
                     setAssistantQuery(q);
                     handleAskAssistant(q);
                   }}
                 >
-                  "What work was completed today?"
+                  "What is blocking crude pump?"
                 </button>
               </div>
             </div>

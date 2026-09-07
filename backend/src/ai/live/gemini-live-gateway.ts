@@ -9,6 +9,7 @@ import { UpstreamGeminiSocket, LiveFunctionCall, LiveFunctionResponse } from './
 import { RollingConversationBuffer } from './rolling-conversation-buffer.js';
 import { buildLiveSystemInstruction } from './live-context-builder.js';
 import { createLiveToolExecutor, LiveToolExecutionContext } from './live-tool-handlers.js';
+import { authService } from '../../services/auth.service.js';
 
 export interface ProjectResolver {
   getById(id: string): Project | null;
@@ -33,6 +34,7 @@ export class LiveGatewaySession {
   public readonly sessionId: string;
   public readonly clientWs: WebSocket;
   public readonly project: Project;
+  public readonly sessionRole: 'worker' | 'admin';
   private readonly keyRouter: GeminiKeyRouter;
   private readonly rollingBuffer: RollingConversationBuffer;
   private readonly upstreamEndpointUrl?: string;
@@ -55,11 +57,13 @@ export class LiveGatewaySession {
       upstreamEndpointUrl?: string;
       upstreamWsFactory?: (url: string) => WebSocket;
       toolExecutor?: LiveToolExecutor;
+      sessionRole?: 'worker' | 'admin';
     } = {}
   ) {
     this.sessionId = sessionId;
     this.clientWs = clientWs;
     this.project = project;
+    this.sessionRole = options.sessionRole || 'worker';
     this.keyRouter = keyRouter;
     this.upstreamEndpointUrl = options.upstreamEndpointUrl;
     this.upstreamWsFactory = options.upstreamWsFactory;
@@ -94,7 +98,7 @@ export class LiveGatewaySession {
   }
 
   private bootUpstreamSocket(sessionKey: ActiveSessionKey, isHandover: boolean = false): UpstreamGeminiSocket {
-    const baseInstruction = buildLiveSystemInstruction(this.project);
+    const baseInstruction = buildLiveSystemInstruction(this.project, { role: this.sessionRole });
     const systemInstruction = isHandover
       ? `${baseInstruction}\n\n[SESSION RESUMPTION SUMMARY]\n${this.rollingBuffer.generateHandoverSummary()}\n\nSpeak naturally and maintain conversational flow.`
       : baseInstruction;
@@ -261,7 +265,10 @@ export class LiveGatewaySession {
       let output: Record<string, any>;
       try {
         if (this.toolExecutor) {
-          output = await this.toolExecutor(this.project.id, call, { session: this });
+          output = await this.toolExecutor(this.project.id, call, {
+            session: this,
+            sessionRole: this.sessionRole
+          });
         } else {
           output = {
             status: 'received',
@@ -606,10 +613,30 @@ export class GeminiLiveGateway {
     }
 
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const roleParam = parsedUrl.searchParams.get('role') || parsedUrl.searchParams.get('sessionRole');
+    const tokenParam = parsedUrl.searchParams.get('token');
+    let sessionRole: 'worker' | 'admin' = 'worker';
+
+    if (tokenParam && tokenParam.trim().length > 0) {
+      try {
+        const verified = authService.verifySessionToken(tokenParam.trim());
+        if (verified.projectId === project.id) {
+          sessionRole = verified.accountType;
+        } else {
+          logger.warn(`GeminiLiveGateway: Token project mismatch. Token: ${verified.projectId}, URL: ${project.id}`);
+        }
+      } catch (err: any) {
+        logger.warn(`GeminiLiveGateway: Invalid token in WebSocket connection: ${err.message}`);
+      }
+    } else if (roleParam === 'admin' || roleParam === 'worker') {
+      sessionRole = roleParam;
+    }
+
     const session = new LiveGatewaySession(sessionId, clientWs, project, this.keyRouter, {
       upstreamEndpointUrl: this.options.upstreamEndpointUrl,
       upstreamWsFactory: this.options.upstreamWsFactory,
-      toolExecutor: this.toolExecutor
+      toolExecutor: this.toolExecutor,
+      sessionRole
     });
 
     this.activeSessions.set(sessionId, session);

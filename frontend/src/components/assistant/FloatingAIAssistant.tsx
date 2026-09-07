@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { AssistantMarkdown } from './AssistantMarkdown.js';
 import { useLiveVoiceSession } from './live/useLiveVoiceSession.js';
+import { useOptionalAuth } from '../../context/AuthContext.js';
 import type {
   Project,
   AssistantQueryResponse
@@ -106,9 +107,16 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
 
   const activeTargetProject = projects.find((p) => p.id === selectedProjectId) || currentProject || (projects.length > 0 ? projects[0] : null);
 
+  const auth = useOptionalAuth();
+  const session = auth?.session ?? null;
+  const authFetch = auth?.authFetch ?? fetch;
+  const sessionRole = session?.accountType || 'admin';
+
   // Live Voice Session Hook (Live Voice Multimodal Session)
   const liveSession = useLiveVoiceSession({
-    projectId: activeTargetProject?.id
+    projectId: activeTargetProject?.id,
+    role: sessionRole,
+    token: auth?.token
   });
 
   const isLiveActive =
@@ -160,12 +168,14 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await fetch(`/api/projects/${activeTargetProject.id}/assistant/query`, {
+      const fetchFn = authFetch || fetch;
+      const res = await fetchFn(`/api/projects/${activeTargetProject.id}/assistant/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           question: text,
-          asOfDate
+          asOfDate,
+          role: sessionRole
         })
       });
 

@@ -50,7 +50,7 @@ export function WorkerReportModal({
   asOfDate = new Date().toISOString().slice(0, 10),
   onSuccess
 }: WorkerReportModalProps): React.JSX.Element | null {
-  const { session, authFetch } = useAuth();
+  const { token, session, authFetch } = useAuth();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<ReportCaptureTab>('quantity');
@@ -89,6 +89,8 @@ export function WorkerReportModal({
   const [voiceUpdates, setVoiceUpdates] = useState<VerifiedProgressUpdate[]>([]);
   const liveVoice = useLiveVoiceSession({
     projectId,
+    role: 'worker',
+    token,
     onVerifiedUpdate: (update) => {
       setVoiceUpdates((prev) => [update, ...prev]);
       if (onSuccess) onSuccess(update);

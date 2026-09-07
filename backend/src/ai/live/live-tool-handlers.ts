@@ -46,6 +46,7 @@ import {
 import { LiveFunctionCall } from './upstream-gemini-socket.js';
 
 export interface LiveToolExecutionContext {
+  sessionRole?: 'worker' | 'admin';
   session?: {
     dispatchVerbalConfirmation: (text: string) => void;
     sendToClient: (payload: Record<string, any>) => void;
@@ -710,7 +711,8 @@ export class LiveToolHandlers {
     statusFilter?: string,
     locationFilter?: string,
     limit: number = 10,
-    sessionProjectId?: string
+    sessionProjectId?: string,
+    role?: 'worker' | 'admin'
   ): Promise<Record<string, any>> {
     logger.info(
       `LiveTool [search_project_activities]: Project [${projectId || 'default'}], Query: "${query || ''}", Status: "${statusFilter || 'all'}"`
@@ -755,6 +757,18 @@ export class LiveToolHandlers {
 
     let results = filtered.map((a) => {
       const snap = snapMap.get(a.id);
+      if (role === 'worker') {
+        return {
+          activityId: a.id,
+          code: a.externalId,
+          name: a.name,
+          location: a.location || 'N/A',
+          status: snap?.status || 'not_started',
+          plannedStart: a.plannedStart,
+          plannedFinish: a.plannedFinish,
+          actualProgress: snap ? `${snap.actualProgress}%` : '0%'
+        };
+      }
       return {
         activityId: a.id,
         code: a.externalId,
@@ -843,6 +857,21 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     const args = call.args || {};
     const effectiveProjectId = args.projectId || sessionProjectId;
+    const role = context?.sessionRole;
+
+    // Enforce role checks: Worker accounts cannot access executive intelligence or project assistant
+    if (role === 'worker') {
+      if (call.name === 'get_project_intelligence' || call.name === 'query_project_assistant') {
+        logger.info(
+          `LiveToolHandlers: Intercepted role-restricted tool call "${call.name}" for worker session.`
+        );
+        return {
+          status: 'role_restricted',
+          tool: call.name,
+          message: 'This query requires project control room access.'
+        };
+      }
+    }
 
     switch (call.name) {
       case 'get_project_intelligence':
@@ -861,7 +890,8 @@ export class LiveToolHandlers {
           args.status,
           args.location,
           args.limit,
-          sessionProjectId
+          sessionProjectId,
+          role
         );
 
       case 'record_field_progress':

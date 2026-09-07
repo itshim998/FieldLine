@@ -29,6 +29,7 @@ export interface ActivityResolutionResult {
 
 export interface AssistantQueryOptions {
   asOfDate?: string;
+  role?: 'worker' | 'admin';
 }
 
 export type AssistantResponseStatus =
@@ -36,7 +37,8 @@ export type AssistantResponseStatus =
   | 'activity_not_found'
   | 'ambiguous_activity'
   | 'insufficient_data'
-  | 'unsupported';
+  | 'unsupported'
+  | 'scope_restricted';
 
 export interface AssistantQueryResponse {
   question: string;

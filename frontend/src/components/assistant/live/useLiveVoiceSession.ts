@@ -23,6 +23,8 @@ export type LiveConnectionState = 'idle' | 'connecting' | 'connected' | 'ready' 
 export interface UseLiveVoiceSessionOptions {
   projectId?: string | null;
   gatewayWsUrl?: string;
+  role?: 'worker' | 'admin';
+  token?: string | null;
   onVerifiedUpdate?: (update: VerifiedProgressUpdate) => void;
   onError?: (error: string) => void;
 }
@@ -108,10 +110,27 @@ export function resampleTo16k(input: Float32Array, inputSampleRate: number): Flo
 export const PRODUCTION_RENDER_BACKEND_HOST = 'fieldline-backend-pcs3.onrender.com';
 
 // Helper to determine the WebSocket gateway URL
-export function resolveGatewayWsUrl(projectId: string, customWsUrl?: string): string {
-  if (customWsUrl) {
-    const sep = customWsUrl.includes('?') ? '&' : '?';
-    return `${customWsUrl}${sep}projectId=${encodeURIComponent(projectId)}`;
+export function resolveGatewayWsUrl(
+  projectId: string,
+  explicitWsUrl?: string,
+  role?: 'worker' | 'admin',
+  token?: string | null
+): string {
+  const appendParams = (baseUrl: string): string => {
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    let res = `${baseUrl}${sep}projectId=${encodeURIComponent(projectId)}`;
+    if (role) {
+      res += `&role=${encodeURIComponent(role)}`;
+    }
+    if (token) {
+      res += `&token=${encodeURIComponent(token)}`;
+    }
+    return res;
+  };
+
+  if (explicitWsUrl && explicitWsUrl.trim().length > 0) {
+    const trimmed = explicitWsUrl.trim();
+    return appendParams(trimmed);
   }
 
   // 1. Check Vite environment variables safely
@@ -123,15 +142,14 @@ export function resolveGatewayWsUrl(projectId: string, customWsUrl?: string): st
   const envWsUrl = metaEnv?.VITE_WS_URL;
   if (envWsUrl && typeof envWsUrl === 'string' && envWsUrl.trim().length > 0) {
     const trimmed = envWsUrl.trim();
-    const sep = trimmed.includes('?') ? '&' : '?';
-    return `${trimmed}${sep}projectId=${encodeURIComponent(projectId)}`;
+    return appendParams(trimmed);
   }
 
   // 2. Check Vite environment variable for Backend HTTP URL
   const envBackendUrl = metaEnv?.VITE_BACKEND_URL;
   if (envBackendUrl && typeof envBackendUrl === 'string' && envBackendUrl.trim().length > 0) {
     const base = envBackendUrl.trim().replace(/^http/, 'ws').replace(/\/+$/, '');
-    return `${base}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+    return appendParams(`${base}/ws/live-session`);
   }
 
   // 3. Inspect browser runtime location
@@ -142,17 +160,17 @@ export function resolveGatewayWsUrl(projectId: string, customWsUrl?: string): st
     if (isLocal) {
       const protocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       const port = (loc.port === '3000' || loc.port === '5173') ? '3001' : (loc.port || '3001');
-      return `${protocol}//${loc.hostname}:${port}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+      return appendParams(`${protocol}//${loc.hostname}:${port}/ws/live-session`);
     }
 
     // When deployed on Vercel or any remote frontend domain, route WebSockets to the Render backend service
     const isRenderDirect = loc.hostname.endsWith('onrender.com');
     const targetHost = isRenderDirect ? loc.host : PRODUCTION_RENDER_BACKEND_HOST;
     const protocol = loc.protocol === 'http:' ? 'ws:' : 'wss:';
-    return `${protocol}//${targetHost}/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+    return appendParams(`${protocol}//${targetHost}/ws/live-session`);
   }
 
-  return `ws://localhost:3001/ws/live-session?projectId=${encodeURIComponent(projectId)}`;
+  return appendParams('ws://localhost:3001/ws/live-session');
 }
 
 // Inline AudioWorklet code as Blob URL
@@ -172,6 +190,8 @@ registerProcessor('pcm-recorder-processor', PCMRecorderProcessor);
 export function useLiveVoiceSession({
   projectId,
   gatewayWsUrl,
+  role,
+  token,
   onVerifiedUpdate,
   onError
 }: UseLiveVoiceSessionOptions = {}): UseLiveVoiceSessionReturn {
@@ -453,7 +473,7 @@ export function useLiveVoiceSession({
         outputAnalyserRef.current = outputAnalyser;
 
         // 3. Connect WebSocket to FieldLine Gateway
-        const wsUrl = resolveGatewayWsUrl(activePid, gatewayWsUrl);
+        const wsUrl = resolveGatewayWsUrl(activePid, gatewayWsUrl, role, token);
         const socket = new WebSocket(wsUrl);
         wsRef.current = socket;
 
