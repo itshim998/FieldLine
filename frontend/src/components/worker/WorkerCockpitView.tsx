@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { AssistantMarkdown } from '../assistant/AssistantMarkdown.js';
+import { TodayWorkView, OperationalTaskItem } from './TodayWorkView.js';
 import { WorkerTab } from '../../router.js';
 
 export interface WorkerActivity {
@@ -77,10 +78,8 @@ export function WorkerCockpitView({
   const { session, authFetch } = useAuth();
 
   // Activities & Schedules state
-  const [activities, setActivities] = useState<WorkerActivity[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
   const [loadingActivities, setLoadingActivities] = useState<boolean>(true);
-  const [searchFilter, setSearchFilter] = useState<string>('');
-  const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
 
   // Recent Progress Updates state
   const [recentUpdates, setRecentUpdates] = useState<WorkerProgressUpdate[]>([]);
@@ -114,6 +113,17 @@ export function WorkerCockpitView({
   const fetchActivities = useCallback(async () => {
     setLoadingActivities(true);
     try {
+      // 1. Prefer Worker Operational Tasks projection from Pass 31
+      const opRes = await authFetch(`/api/projects/${projectId}/worker/operational-tasks?asOfDate=${asOfDate}&scope=all`);
+      if (opRes.ok) {
+        const opData = await opRes.json();
+        if (opData.tasks && Array.isArray(opData.tasks) && opData.tasks.length > 0) {
+          setActivities(opData.tasks);
+          return;
+        }
+      }
+
+      // 2. Fallback to schedules if operational tasks endpoint returns empty
       const schedRes = await authFetch(`/api/projects/${projectId}/schedules`);
       if (!schedRes.ok) return;
       const schedData = await schedRes.json();
@@ -133,7 +143,7 @@ export function WorkerCockpitView({
     } finally {
       setLoadingActivities(false);
     }
-  }, [projectId, authFetch]);
+  }, [projectId, asOfDate, authFetch]);
 
   // Load recent progress updates
   const fetchRecentUpdates = useCallback(async () => {
@@ -225,10 +235,19 @@ export function WorkerCockpitView({
   };
 
   // Pre-fill quick report for a specific activity
-  const handleReportForActivity = (act: WorkerActivity) => {
+  const handleReportForActivity = (act: WorkerActivity | OperationalTaskItem) => {
     setSelectedActivityId(act.id);
     setRawText(
       `Activity ${act.externalId} — ${act.name} (${act.location || 'Site'}): `
+    );
+    onTabChange('report');
+  };
+
+  // Pre-fill quick report with operational blocker
+  const handleLogBlockerForTask = (task: OperationalTaskItem) => {
+    setSelectedActivityId(task.id);
+    setRawText(
+      `[OPERATIONAL BLOCKER on ${task.externalId} — ${task.name} (${task.location || 'Site'})]: `
     );
     onTabChange('report');
   };
@@ -275,21 +294,7 @@ export function WorkerCockpitView({
     }
   };
 
-  // Filter activities
-  const filteredActivities = activities.filter((act) => {
-    const matchesSearch =
-      !searchFilter ||
-      act.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      act.externalId.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      (act.location && act.location.toLowerCase().includes(searchFilter.toLowerCase()));
 
-    const matchesArea =
-      selectedAreaFilter === 'all' ||
-      (act.location && act.location.toLowerCase().includes(selectedAreaFilter.toLowerCase())) ||
-      (act.wbsCode && act.wbsCode.toLowerCase().includes(selectedAreaFilter.toLowerCase()));
-
-    return matchesSearch && matchesArea;
-  });
 
   return (
     <div className="worker-cockpit-shell">
@@ -388,130 +393,12 @@ export function WorkerCockpitView({
         {/* TAB 1: TODAY'S WORK                                                       */}
         {/* ========================================================================= */}
         {activeWorkerTab === 'work' && (
-          <section className="worker-tab-pane">
-            <div className="pane-banner">
-              <div>
-                <h2 className="pane-title">Shift Work Packages & Activities</h2>
-                <p className="pane-desc">
-                  Active field activities assigned to project work areas. Tap "Report Progress" to log updates immediately.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => onTabChange('report')}
-              >
-                <Flame size={15} />
-                <span>New Field Report</span>
-              </button>
-            </div>
-
-            {/* Filter Controls */}
-            <div className="worker-filter-bar">
-              <div className="search-input-wrapper" style={{ flex: '1 1 280px' }}>
-                <Search size={16} className="search-icon" />
-                <input
-                  type="text"
-                  className="search-input"
-                  placeholder="Search by ID, name, or work area..."
-                  value={searchFilter}
-                  onChange={(e) => setSearchFilter(e.target.value)}
-                />
-              </div>
-
-              <div className="area-chips-scroll">
-                {[
-                  { id: 'all', label: 'All Areas' },
-                  { id: 'civil', label: 'Area A — Civil' },
-                  { id: 'foundation', label: 'Area B — Foundation' },
-                  { id: 'structural', label: 'Area C — Structural' },
-                  { id: 'piping', label: 'Area D — Piping' },
-                  { id: 'electrical', label: 'Area E — Electrical' },
-                  { id: 'commissioning', label: 'Area F — Commissioning' }
-                ].map((area) => (
-                  <button
-                    key={area.id}
-                    type="button"
-                    className={`area-filter-chip ${selectedAreaFilter === area.id ? 'active' : ''}`}
-                    onClick={() => setSelectedAreaFilter(area.id)}
-                  >
-                    {area.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Activities List */}
-            {loadingActivities ? (
-              <div className="empty-state-card" style={{ padding: '3rem 1rem' }}>
-                <RefreshCw size={28} className="pulse-dot" />
-                <h3 className="empty-title">Loading Work Packages...</h3>
-              </div>
-            ) : filteredActivities.length === 0 ? (
-              <div className="empty-state-card" style={{ padding: '3rem 1rem' }}>
-                <ClipboardList size={32} />
-                <h3 className="empty-title">No matching activities found</h3>
-                <p className="empty-desc">Adjust your search query or area filters.</p>
-              </div>
-            ) : (
-              <div className="worker-activities-grid">
-                {filteredActivities.map((act) => (
-                  <div key={act.id} className="worker-activity-card">
-                    <div className="activity-card-top">
-                      <span className="activity-id-badge">{act.externalId}</span>
-                      {act.location && (
-                        <span className="activity-area-badge">{act.location}</span>
-                      )}
-                    </div>
-
-                    <h3 className="activity-card-name">{act.name}</h3>
-
-                    {act.description && (
-                      <p className="activity-card-desc">{act.description}</p>
-                    )}
-
-                    <div className="activity-dates-row">
-                      <div className="date-item">
-                        <Clock size={13} />
-                        <span>Finish: {act.plannedFinish || '—'}</span>
-                      </div>
-                      {act.wbsCode && (
-                        <div className="date-item mono">
-                          <span>WBS: {act.wbsCode}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="activity-progress-wrapper">
-                      <div className="progress-info-row">
-                        <span>Baseline Target</span>
-                        <strong>{Math.round(act.baselineProgress || 0)}%</strong>
-                      </div>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${Math.min(100, Math.max(0, act.baselineProgress || 0))}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="activity-card-actions">
-                      <button
-                        type="button"
-                        id={`report-activity-btn-${act.externalId}`}
-                        className="btn btn-primary btn-sm report-act-btn"
-                        onClick={() => handleReportForActivity(act)}
-                      >
-                        <Flame size={14} />
-                        <span>Report Progress</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
+          <TodayWorkView
+            projectId={projectId}
+            asOfDate={asOfDate}
+            onReportActivity={handleReportForActivity}
+            onLogBlocker={handleLogBlockerForTask}
+          />
         )}
 
         {/* ========================================================================= */}

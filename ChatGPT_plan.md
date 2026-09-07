@@ -64,7 +64,7 @@ A pass is **not complete merely because its code compiles or passes a basic test
 | ~~**Pass 28**~~ | ~~Identity~~ | ~~Project Account Credentials & Session Identity~~ | ~~Two shared accounts per project + human attribution~~ (COMPLETED) |
 | **Pass 29** | Security | Server-Side Authorization & Project Scoping | Route guards, role policies, data projection & privacy |
 | **Pass 30** | Shell | Dual-Shell Architecture & Admin Control Alignment | Split frontend into Worker Cockpit & Admin Control Room |
-| **Pass 31** | Execution | Worker Operational Projection ("Today's Work") | Bounded operational horizon, active tasks, location context |
+| ~~**Pass 31**~~ | ~~Execution~~ | ~~Worker Operational Projection ("Today's Work")~~ | ~~Bounded operational horizon, active tasks, location context~~ (COMPLETED) |
 | **Pass 32** | Capture | Frictionless Field Capture (Voice, Text, Photos) | Live voice dialogue, rapid quantity input, photo evidence |
 | **Pass 33** | Context | Structured Operational Blockers & Safety Context | Blocker logging linked to Risk Engine + hazard notices |
 | **Pass 34** | Intelligence | Role-Partitioned AI Assistant & Live Gateway | Partition Gemini Live tools into Worker vs Admin scopes |
@@ -241,7 +241,7 @@ The frontend currently operates as a single shared workspace with tabs (`overvie
 
 ---
 
-## Pass 31 — Worker Operational Projection ("Today's Execution Cockpit")
+## ~~Pass 31 — Worker Operational Projection ("Today's Execution Cockpit")~~ (COMPLETED)
 
 ### Context & Need
 Workers should not navigate master schedules or interpret Gantt charts. They need an operational projection answering: *"What are we building today?", "Where is it located?", "What is our target scope?", and "What is the current status?"*
@@ -257,20 +257,34 @@ Workers should not navigate master schedules or interpret Gantt charts. They nee
 
 ### 2. Implement
 * **Backend Endpoint (`GET /api/projects/:projectId/worker/operational-tasks`):**
-  * Thin controller with Zod query validation (`asOfDate`, `locationFilter`).
+  * Thin controller with Zod query validation (`asOfDate`, `locationFilter`, `statusFilter`, `horizonDays`, `scope`).
   * Service layer: queries `ActivityRepository` and canonical `ProgressSnapshotService`.
-  * Returns `OperationalTaskListResponse`: `{ tasks: [{ id, externalId, name, location, plannedQuantity, unit, actualProgress, status, isToday }] }`.
+  * Returns `OperationalTaskListResponse`: `{ projectId, asOfDate, tasks: [{ id, externalId, name, location, plannedQuantity, unit, actualProgress, status, isToday, ... }], summary }`.
 * **Frontend Component (`frontend/src/components/worker/TodayWorkView.tsx`):**
-  * Task card list with location chips, progress bar, target quantity chips.
-  * Filter by Work Area / Location (e.g., Area A, Area B, Area C).
-  * Direct action buttons on each task card: "Report Progress", "Log Blocker", "View Details".
+  * High-density task card list with location chips, dual progress bars, target quantity chips, and operational status indicators.
+  * Filter by Work Area / Location chips (All Areas, Area A through Area F).
+  * Scope filter tabs: Operational Horizon, Active Today, Needs Attention, Upcoming 3-Day, All Packages.
+  * Direct action buttons on each task card: "Report Progress", "Log Blocker", "Details".
+  * Integrated into `WorkerCockpitView.tsx` with smooth navigation into Quick Report.
 
 ### 3. Evaluate
-* Write automated backend tests (`backend/tests/worker_operational_tasks.test.ts`):
-  * Query tasks as of `2026-08-28` for `REFINERY-U4` $\rightarrow$ returns active tasks for that date.
-  * Verify completed activities are categorized properly.
-  * Verify project isolation (Project A worker cannot see Project B tasks).
-* Test frontend rendering across mobile (390px), tablet (768px), and desktop viewports.
+* Automated backend tests (`backend/tests/worker_operational_tasks.test.ts`):
+  * 9 integration tests passing (100% pass rate).
+  * Verified active tasks query as of `2026-08-28` for `REFINERY-U4`.
+  * Verified completed activities categorized as `COMPLETED` with 100% progress.
+  * Verified delayed activities categorized as `DELAYED` with overdue flags.
+  * Verified location filtering (`locationFilter=Area C`).
+  * Verified operational horizon scopes (`today`, `upcoming`, `delayed`, `all`).
+  * Verified strict project isolation (Project A worker cannot see Project B tasks $\rightarrow$ `HTTP 403 Forbidden`).
+  * Verified unauthenticated requests rejected with `HTTP 401 Unauthorized`.
+* Automated frontend tests (`frontend/tests/today_work_view.test.tsx`):
+  * 8 unit/integration tests passing (100% pass rate).
+  * Verified filtering by work area chips, real-time search, action button callbacks, and task detail modal open/close.
+  * Verified responsive rendering across mobile (390px), tablet (768px), and desktop (1200px).
+* Release verification:
+  * Full build succeeded (`tsc -p tsconfig.backend.json` + `vite build`).
+  * All 107 test files and 1,021 tests passing cleanly.
+  * Golden demo reset and all 59 machine-checkable invariants verified.
 
 ### 4. Exit Criteria
 * [x] Worker opens FieldLine and immediately sees active tasks for their operational horizon.

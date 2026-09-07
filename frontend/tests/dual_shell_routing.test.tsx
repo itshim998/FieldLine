@@ -424,6 +424,44 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
 
     beforeEach(() => {
       global.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('/worker/operational-tasks')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              projectId: 'proj-golden',
+              asOfDate: '2026-08-28',
+              tasks: mockActivities.map((act) => ({
+                id: act.id,
+                externalId: act.externalId,
+                name: act.name,
+                description: act.description,
+                location: act.location,
+                plannedStart: act.plannedStart,
+                plannedFinish: act.plannedFinish,
+                plannedQuantity: act.plannedQuantity,
+                unit: act.unit,
+                plannedProgress: act.baselineProgress,
+                actualProgress: act.baselineProgress,
+                status: 'ON_TRACK',
+                statusLabel: 'On Track',
+                isToday: true,
+                isUpcoming: false,
+                isOverdue: false,
+                isCompleted: false
+              })),
+              summary: {
+                total: mockActivities.length,
+                today: mockActivities.length,
+                upcoming: 0,
+                completed: 0,
+                delayed: 0,
+                atRisk: 0,
+                onTrack: mockActivities.length
+              }
+            })
+          });
+        }
         if (url.includes('/activities')) {
           return Promise.resolve({
             ok: true,

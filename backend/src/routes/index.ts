@@ -16,11 +16,13 @@ import { dashboardRouter } from './dashboard.router.js';
 import { activityDetailRouter } from './activity-detail.router.js';
 import { demoRouter } from './demo.router.js';
 import { authRouter } from './auth.router.js';
+import { workerOperationalRouter } from './worker-operational.router.js';
 
 export const apiRouter = Router();
 
 apiRouter.use(healthRouter);
 apiRouter.use(authRouter);
+apiRouter.use(workerOperationalRouter);
 apiRouter.use(projectRouter);
 apiRouter.use(scheduleRouter);
 apiRouter.use(progressUpdateRouter);
