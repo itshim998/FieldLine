@@ -7,6 +7,26 @@ import {
   activityRepository as defaultActivityRepo
 } from '../../repositories/activity.repository.js';
 import {
+  ProgressUpdateRepository,
+  progressUpdateRepository as defaultProgressUpdateRepo
+} from '../../repositories/progress-update.repository.js';
+import {
+  ActivityMatchRepository,
+  activityMatchRepository as defaultActivityMatchRepo
+} from '../../repositories/activity-match.repository.js';
+import {
+  ProgressService,
+  progressService as defaultProgressService
+} from '../progress/progress.service.js';
+import {
+  FieldProgressExtractionService,
+  fieldProgressExtractionService as defaultExtractionService
+} from '../../ai/services/field-progress-extraction.service.js';
+import {
+  ActivityMatchingService,
+  activityMatchingService as defaultMatchingService
+} from '../matching/activity-matching.service.js';
+import {
   ProgressSnapshotService,
   progressSnapshotService as defaultSnapshotService,
   validateSnapshotDate,
@@ -14,13 +34,15 @@ import {
 } from '../snapshot/progress-snapshot.service.js';
 import { classifyActivityRisk } from '../risk/risk-classification.calculator.js';
 import { diffInCalendarDays } from '../snapshot/progress-snapshot.calculator.js';
-import { NotFoundError } from '../../errors/AppError.js';
+import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { ActivityRiskClassification } from '../../models/domain.types.js';
 import {
   OperationalTaskItem,
   OperationalTaskListResponse,
   OperationalTaskSummary,
-  WorkerOperationalQueryDto
+  WorkerOperationalQueryDto,
+  WorkerQuickReportDto,
+  WorkerQuickReportResponseDto
 } from '../../validation/worker-operational.schema.js';
 import { logger } from '../../config/logger.js';
 
@@ -29,6 +51,10 @@ export interface WorkerOperationalService {
     projectId: string,
     query?: Partial<WorkerOperationalQueryDto>
   ): OperationalTaskListResponse;
+  recordQuickReport(
+    projectId: string,
+    input: WorkerQuickReportDto
+  ): Promise<WorkerQuickReportResponseDto>;
 }
 
 function mapStatusToLabel(status: ActivityRiskClassification): string {
@@ -52,15 +78,30 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   private projectRepo: ProjectRepository;
   private activityRepo: ActivityRepository;
   private snapshotService: ProgressSnapshotService;
+  private progressUpdateRepo: ProgressUpdateRepository;
+  private activityMatchRepo: ActivityMatchRepository;
+  private progressService: ProgressService;
+  private extractionService: FieldProgressExtractionService;
+  private matchingService: ActivityMatchingService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
     activityRepo?: ActivityRepository;
     snapshotService?: ProgressSnapshotService;
+    progressUpdateRepo?: ProgressUpdateRepository;
+    activityMatchRepo?: ActivityMatchRepository;
+    progressService?: ProgressService;
+    extractionService?: FieldProgressExtractionService;
+    matchingService?: ActivityMatchingService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
     this.snapshotService = dependencies?.snapshotService || defaultSnapshotService;
+    this.progressUpdateRepo = dependencies?.progressUpdateRepo || defaultProgressUpdateRepo;
+    this.activityMatchRepo = dependencies?.activityMatchRepo || defaultActivityMatchRepo;
+    this.progressService = dependencies?.progressService || defaultProgressService;
+    this.extractionService = dependencies?.extractionService || defaultExtractionService;
+    this.matchingService = dependencies?.matchingService || defaultMatchingService;
   }
 
   getOperationalTasks(
@@ -227,7 +268,181 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
       summary
     };
   }
+
+  async recordQuickReport(
+    projectId: string,
+    input: WorkerQuickReportDto
+  ): Promise<WorkerQuickReportResponseDto> {
+    const project = this.projectRepo.getById(projectId);
+    if (!project) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    if (!input.reporterName || input.reporterName.trim().length === 0) {
+      throw new ValidationError('Reporter name is required for field attribution');
+    }
+
+    const reporterName = input.reporterName.trim();
+    const reporterRole = input.reporterRole?.trim() || null;
+    const sourceType = input.sourceType || 'manual';
+    const reportDate = input.reportDate;
+
+    // Case 1: Specific activity is targeted directly from task card / picker
+    if (input.activityId) {
+      const activity = this.activityRepo.getById(input.activityId);
+      if (!activity || activity.projectId !== projectId) {
+        throw new NotFoundError(`Activity '${input.activityId}' not found in project '${projectId}'`);
+      }
+
+      // Build descriptive progress note
+      let descText = input.notes?.trim() || '';
+      if (!descText) {
+        if (input.actualQuantity != null) {
+          descText = `Completed ${input.actualQuantity} ${input.quantityUnit || activity.unit || 'units'} on ${activity.externalId} — ${activity.name}.`;
+        } else if (input.progressPercent != null) {
+          descText = `Progress updated to ${input.progressPercent}% on ${activity.externalId} — ${activity.name}.`;
+        } else {
+          descText = `Field progress logged on ${activity.externalId} — ${activity.name}.`;
+        }
+      }
+
+      // 1. Create progress record with attribution
+      const updateRecord = this.progressUpdateRepo.create({
+        projectId,
+        reportDate,
+        rawText: descText,
+        reporterName,
+        reporterRole,
+        sourceType,
+        status: 'received'
+      });
+
+      // 2. Create auto-confirmed match record
+      const match = this.activityMatchRepo.create({
+        projectId,
+        progressUpdateId: updateRecord.id,
+        activityId: activity.id,
+        confidenceScore: 1.0,
+        matchMethod: 'exact_id',
+        matchedText: activity.name,
+        rationale: 'Direct worker selection from operational cockpit',
+        status: 'confirmed',
+        confidenceTier: 'high',
+        reviewState: 'resolved',
+        reviewedBy: reporterName,
+        reviewedAt: new Date().toISOString()
+      });
+
+      // 3. Normalize and record progress deterministically
+      const recorded = this.progressService.normalizeAndRecordProgress({
+        projectId,
+        updateId: updateRecord.id,
+        matchId: match.id,
+        fact: {
+          reference: activity.externalId,
+          location: activity.location || null,
+          progress_percent: input.progressPercent ?? null,
+          status: (input.progressPercent != null && input.progressPercent >= 100) ? 'completed' : 'in_progress'
+        },
+        actualQuantity: input.actualQuantity ?? null,
+        quantityUnit: input.quantityUnit || activity.unit || null,
+        asOfDate: reportDate,
+        allowSuggested: false
+      });
+
+      logger.info(
+        `WorkerOperationalService: Quick report recorded for activity '${activity.externalId}' by '${reporterName}'. Actual percent: ${recorded.actualPercent}%.`
+      );
+
+      return {
+        status: 'confirmed',
+        message: `Progress verified: ${activity.name} saved at ${recorded.actualPercent}%.`,
+        progressUpdate: updateRecord,
+        match,
+        activityProgress: recorded,
+        derivedPercent: recorded.actualPercent
+      };
+    }
+
+    // Case 2: Freeform shift observation notes without specific activityId
+    const notesText = input.notes?.trim() || '';
+    if (!notesText) {
+      throw new ValidationError('Either activityId or progress notes must be provided');
+    }
+
+    // 1. Create progress record
+    const updateRecord = this.progressUpdateRepo.create({
+      projectId,
+      reportDate,
+      rawText: notesText,
+      reporterName,
+      reporterRole,
+      sourceType,
+      status: 'received'
+    });
+
+    // 2. Run AI extraction & matching pipeline
+    try {
+      const extraction = await this.extractionService.extractFromReport(notesText);
+      if (extraction && extraction.items && extraction.items.length > 0) {
+        await this.matchingService.matchProgressUpdate(
+          projectId,
+          updateRecord.id,
+          extraction,
+          { persist: true }
+        );
+
+        const persistedMatches = this.activityMatchRepo.listByProgressUpdateId(updateRecord.id, projectId);
+        let hasConfirmed = false;
+        let hasAwaitingReview = false;
+        let lastProgress: any = null;
+
+        for (const item of extraction.items) {
+          const matchCandidate = persistedMatches.find((m) => m.progressUpdateId === updateRecord.id);
+          if (matchCandidate) {
+            if (matchCandidate.status === 'confirmed') {
+              hasConfirmed = true;
+              lastProgress = this.progressService.normalizeAndRecordProgress({
+                projectId,
+                updateId: updateRecord.id,
+                matchId: matchCandidate.id,
+                fact: item,
+                allowSuggested: false
+              });
+            } else if (matchCandidate.reviewState === 'awaiting_review' || matchCandidate.status === 'suggested') {
+              hasAwaitingReview = true;
+            }
+          }
+        }
+
+        if (hasConfirmed && lastProgress) {
+          return {
+            status: 'confirmed',
+            message: `Progress verified and committed to project truth at ${lastProgress.actualPercent}%.`,
+            progressUpdate: updateRecord,
+            activityProgress: lastProgress,
+            derivedPercent: lastProgress.actualPercent
+          };
+        } else if (hasAwaitingReview) {
+          return {
+            status: 'awaiting_review',
+            message: 'Report logged. Ambiguous activity match routed to Admin review queue.',
+            progressUpdate: updateRecord
+          };
+        }
+      }
+    } catch (err: any) {
+      logger.warn(`WorkerOperationalService: AI matching error during quick-report: ${err.message}`);
+    }
+
+    return {
+      status: 'received',
+      message: 'Field report logged for project records.',
+      progressUpdate: updateRecord
+    };
+  }
 }
 
 export const workerOperationalService: WorkerOperationalService =
   new DefaultWorkerOperationalService();
+

@@ -25,6 +25,7 @@ import {
 import { useAuth } from '../../context/AuthContext.js';
 import { AssistantMarkdown } from '../assistant/AssistantMarkdown.js';
 import { TodayWorkView, OperationalTaskItem } from './TodayWorkView.js';
+import { WorkerReportModal } from './WorkerReportModal.js';
 import { WorkerTab } from '../../router.js';
 
 export interface WorkerActivity {
@@ -95,6 +96,14 @@ export function WorkerCockpitView({
   const [submittingReport, setSubmittingReport] = useState<boolean>(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSuccess, setReportSuccess] = useState<string | null>(null);
+  // Multi-Modal Field Capture Modal state (Pass 32)
+  const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
+  const [modalInitialTask, setModalInitialTask] = useState<OperationalTaskItem | null>(null);
+
+  const handleOpenCaptureModal = (task?: OperationalTaskItem | null) => {
+    setModalInitialTask(task || null);
+    setIsReportModalOpen(true);
+  };
 
   // Field Assistant state
   const [assistantQuery, setAssistantQuery] = useState<string>('');
@@ -240,6 +249,8 @@ export function WorkerCockpitView({
     setRawText(
       `Activity ${act.externalId} — ${act.name} (${act.location || 'Site'}): `
     );
+    setModalInitialTask(act as OperationalTaskItem);
+    setIsReportModalOpen(true);
     onTabChange('report');
   };
 
@@ -319,6 +330,26 @@ export function WorkerCockpitView({
         </div>
 
         <div className="worker-header-actions">
+          <button
+            type="button"
+            id="open-field-capture-btn"
+            className="btn btn-warning btn-sm"
+            onClick={() => handleOpenCaptureModal(null)}
+            title="Open Voice, Quantity & Photo Capture Sheet"
+            style={{
+              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+              borderColor: '#f59e0b',
+              color: '#0f172a',
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem'
+            }}
+          >
+            <Sparkles size={14} />
+            <span>Fast Capture</span>
+          </button>
+
           {onSwitchToAdmin && (
             <button
               type="button"
@@ -412,6 +443,16 @@ export function WorkerCockpitView({
                 <p className="pane-desc">
                   Log operational updates directly from the field. Updates are automatically routed to the schedule-matching engine.
                 </p>
+                <button
+                  type="button"
+                  id="launch-multimodal-sheet-btn"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleOpenCaptureModal(null)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.6rem' }}
+                >
+                  <Sparkles size={14} color="var(--accent-amber)" />
+                  <span>Launch Multimodal Capture (Voice, Steppers & Photo)</span>
+                </button>
               </div>
             </div>
 
@@ -791,6 +832,21 @@ export function WorkerCockpitView({
           </section>
         )}
       </main>
+
+      {/* Multi-Modal Field Capture Modal (Pass 32) */}
+      <WorkerReportModal
+        projectId={projectId}
+        projectCode={projectCode}
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        initialTask={modalInitialTask}
+        tasks={activities}
+        asOfDate={asOfDate}
+        onSuccess={() => {
+          fetchRecentUpdates();
+          fetchActivities();
+        }}
+      />
     </div>
   );
 }

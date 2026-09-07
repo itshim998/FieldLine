@@ -465,6 +465,7 @@ export class LiveToolHandlers {
     for (const item of extraction.items) {
       let matchedActivityId: string | null = null;
       let matchedRecordId: string | null = null;
+      let isConfirmed = false;
 
       // Find best match among persisted matches
       const matchCandidate = persistedMatches.find(
@@ -474,6 +475,7 @@ export class LiveToolHandlers {
       if (matchCandidate) {
         matchedActivityId = matchCandidate.activityId;
         matchedRecordId = matchCandidate.id;
+        isConfirmed = matchCandidate.status === 'confirmed';
       } else {
         // Fallback to DeterministicActivityResolver if matching threshold was missed
         let resolved = this.activityResolver.resolve(projectId, item.reference || rawStatement);
@@ -501,6 +503,7 @@ export class LiveToolHandlers {
           });
           matchedActivityId = fallbackMatch.activityId;
           matchedRecordId = fallbackMatch.id;
+          isConfirmed = true;
         }
       }
 
@@ -517,47 +520,36 @@ export class LiveToolHandlers {
         continue;
       }
 
-      logger.debug(
-        `LiveTool [processProgressStatementAsync]: Step 4 - Normalizing and recording progress for activity "${activity.name}" (${activity.externalId})...`
-      );
+      if (isConfirmed) {
+        logger.debug(
+          `LiveTool [processProgressStatementAsync]: Step 4 - Normalizing and recording progress for activity "${activity.name}" (${activity.externalId})...`
+        );
 
-      // 4. Normalizes and links the extracted item via progressService.normalizeAndRecordProgress
-      const recordedProgress = this.progressService.normalizeAndRecordProgress({
-        projectId,
-        updateId: updateRecord.id,
-        matchId: matchedRecordId,
-        fact: item,
-        allowSuggested: true
-      });
-
-      const percentage = recordedProgress.actualPercent;
-      const activityName = activity.name;
-      const activityCode = activity.externalId;
-
-      logger.info(
-        `LiveTool [processProgressStatementAsync]: Step 5 - DB update committed: "${activityName}" (${activityCode}) at ${percentage}%. Triggering verbal confirmation...`
-      );
-
-      // 5. Verbal Confirmation Trigger:
-      // Once the database transaction commits, dispatch high-priority system turn to Gemini Live
-      const systemEventText = `System Event: Progress update committed successfully. Activity: ${activityName} (${activityCode}), Progress: ${percentage}%. Verbally inform the worker: 'Update verified: ${activityName} is saved at ${percentage}%.'`;
-
-      // Dispatch to session if direct context is available
-      if (context?.session) {
-        context.session.dispatchVerbalConfirmation(systemEventText);
-        context.session.sendToClient({
-          type: 'progress_verified',
-          activityId: activity.id,
-          activityCode,
-          activityName,
-          progressPercent: percentage,
-          message: `Update verified: ${activityName} is saved at ${percentage}%.`
+        // 4. Normalizes and links the extracted item via progressService.normalizeAndRecordProgress
+        const recordedProgress = this.progressService.normalizeAndRecordProgress({
+          projectId,
+          updateId: updateRecord.id,
+          matchId: matchedRecordId,
+          fact: item,
+          allowSuggested: false
         });
-      } else if (context?.gateway) {
-        const projectSessions = context.gateway.getSessionsForProject(projectId);
-        for (const s of projectSessions) {
-          s.dispatchVerbalConfirmation(systemEventText);
-          s.sendToClient({
+
+        const percentage = recordedProgress.actualPercent;
+        const activityName = activity.name;
+        const activityCode = activity.externalId;
+
+        logger.info(
+          `LiveTool [processProgressStatementAsync]: Step 5 - DB update committed: "${activityName}" (${activityCode}) at ${percentage}%. Triggering verbal confirmation...`
+        );
+
+        // 5. Verbal Confirmation Trigger:
+        // Once the database transaction commits, dispatch high-priority system turn to Gemini Live
+        const systemEventText = `System Event: Progress update committed successfully. Activity: ${activityName} (${activityCode}), Progress: ${percentage}%. Verbally inform the worker: 'Update verified: ${activityName} is saved at ${percentage}%.'`;
+
+        // Dispatch to session if direct context is available
+        if (context?.session) {
+          context.session.dispatchVerbalConfirmation(systemEventText);
+          context.session.sendToClient({
             type: 'progress_verified',
             activityId: activity.id,
             activityCode,
@@ -565,6 +557,57 @@ export class LiveToolHandlers {
             progressPercent: percentage,
             message: `Update verified: ${activityName} is saved at ${percentage}%.`
           });
+        } else if (context?.gateway) {
+          const projectSessions = context.gateway.getSessionsForProject(projectId);
+          for (const s of projectSessions) {
+            s.dispatchVerbalConfirmation(systemEventText);
+            s.sendToClient({
+              type: 'progress_verified',
+              activityId: activity.id,
+              activityCode,
+              activityName,
+              progressPercent: percentage,
+              message: `Update verified: ${activityName} is saved at ${percentage}%.`
+            });
+          }
+        }
+      } else {
+        // Ambiguous match (e.g. reviewState: 'awaiting_review')
+        // Route to Admin Review Queue without blocking or mutating canonical progress!
+        const activityName = activity.name;
+        const activityCode = activity.externalId;
+
+        logger.info(
+          `LiveTool [processProgressStatementAsync]: Match for "${activityName}" (${activityCode}) is ambiguous (${matchCandidate?.reviewState || 'awaiting_review'}). Queued for Admin Human Review.`
+        );
+
+        const systemEventText = `System Event: Progress update recorded but requires admin review. Activity candidate: ${activityName} (${activityCode}). Verbally inform the worker: 'Update captured and submitted for review: ambiguous match routed to Admin review queue.'`;
+
+        if (context?.session) {
+          context.session.dispatchVerbalConfirmation(systemEventText);
+          context.session.sendToClient({
+            type: 'progress_review_needed',
+            activityId: activity.id,
+            activityCode,
+            activityName,
+            matchId: matchedRecordId,
+            reviewState: matchCandidate?.reviewState || 'awaiting_review',
+            message: `Update captured and queued for admin review for ${activityName}.`
+          });
+        } else if (context?.gateway) {
+          const projectSessions = context.gateway.getSessionsForProject(projectId);
+          for (const s of projectSessions) {
+            s.dispatchVerbalConfirmation(systemEventText);
+            s.sendToClient({
+              type: 'progress_review_needed',
+              activityId: activity.id,
+              activityCode,
+              activityName,
+              matchId: matchedRecordId,
+              reviewState: matchCandidate?.reviewState || 'awaiting_review',
+              message: `Update captured and queued for admin review for ${activityName}.`
+            });
+          }
         }
       }
     }

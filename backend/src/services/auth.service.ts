@@ -95,7 +95,7 @@ export class AuthService {
    * Generates a tamper-proof HMAC-SHA256 signed session token.
    */
   createSessionToken(
-    identity: Omit<SessionIdentity, 'issuedAt' | 'expiresAt'>,
+    identity: Omit<SessionIdentity, 'issuedAt' | 'expiresAt' | 'sessionId'> & { sessionId?: string },
     durationMs?: number
   ): string {
     const now = Date.now();

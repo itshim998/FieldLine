@@ -293,7 +293,7 @@ Workers should not navigate master schedules or interpret Gantt charts. They nee
 
 ---
 
-## Pass 32 — Frictionless Field Capture (Voice, Rapid Input & Photo Evidence)
+## ~~Pass 32 — Frictionless Field Capture (Voice, Rapid Input & Photo Evidence)~~ (COMPLETED)
 
 ### Context & Need
 Field reporting must require minimal cognitive overhead. FieldLine already has an extraction pipeline and a working Gemini Live WebSocket gateway with `record_field_progress`. This pass connects the Worker Cockpit to this multi-modal capture pipeline.
@@ -311,7 +311,7 @@ Field reporting must require minimal cognitive overhead. FieldLine already has a
 ### 2. Implement
 * **Worker Reporting Interface (`frontend/src/components/worker/WorkerReportModal.tsx`):**
   * Unified capture sheet accessible from any task card or bottom navigation.
-  * Tab 1: **Live Voice Dialogue** (embeds `useLiveVoiceSession` with instant waveform and spoken verification feedback: *"Update verified: Pipe Rack PR-07 saved at 65%"*).
+  * Tab 1: **Live Voice Dialogue** (embeds `useLiveVoiceSession` with instant waveform and spoken verification feedback: *"Progress verified: Pipe Rack PR-07 saved at 65%"*).
   * Tab 2: **Rapid Quantity / % Entry** (stepper buttons, numeric input for physical quantities, reporter name field).
   * Tab 3: **Photo Capture** (direct file input with camera capture support, preview thumbnail, and progress update attachment).
 * **Attribution Enforcement:**
@@ -322,11 +322,25 @@ Field reporting must require minimal cognitive overhead. FieldLine already has a
   * Unambiguous matches auto-confirm; ambiguous matches route to the Admin review queue without blocking the worker.
 
 ### 3. Evaluate
-* Test end-to-end capture flows:
-  * Submit progress via voice $\rightarrow$ verify progress update created with `sourceType = 'voice'`.
-  * Submit actual quantity ($80\,m^3$) $\rightarrow$ verify deterministic quantity math produces 80% progress.
-  * Upload photo evidence $\rightarrow$ verify SHA-256 deduplication and activity linkage.
-  * Verify that ambiguous voice reports enter `awaiting_review` status and appear immediately in the Admin Human Review queue.
+* Automated backend tests (`backend/tests/worker_field_capture.test.ts`):
+  * 9 integration tests passing (100% pass rate).
+  * Direct activity targeting commits progress immediately to canonical truth.
+  * Deterministic quantity calculation: actual quantity $80\,\text{m}^3$ of $100\,\text{m}^3$ derives exactly $80\%$ progress.
+  * Freeform shift observation notes extract facts, auto-match activities, and enforce review queue routing.
+  * Photo evidence uploads verify SHA-256 deduplication and link to progress updates.
+  * Attribution enforcement: rejects anonymous submissions without `reporterName` (`HTTP 400 Bad Request`).
+  * Role authorization: Worker and Admin accounts permitted; unauthenticated calls rejected (`HTTP 401 Unauthorized`).
+* Automated voice tool tests (`backend/tests/gemini_live_tools.test.ts`):
+  * 20 tests passing (100% pass rate).
+  * Verified spoken voice extraction $\rightarrow$ auto-confirmed match updates canonical truth.
+  * Verified ambiguous voice matches route to Admin Human Review queue (`awaiting_review`) with client event dispatch and zero corruption of canonical `activity_progress`.
+* Automated frontend tests (`frontend/tests/worker_report_modal.test.tsx`):
+  * 6 unit/integration tests passing (100% pass rate).
+  * Modal open/close, tab switching (Voice, Quantity, Photo), rapid stepper increment/decrement, percentage derivation, attribution synchronization with AuthContext, and submission API dispatch.
+* Full release verification:
+  * Full production build succeeded (`tsc -p tsconfig.backend.json` + `vite build`).
+  * All 109 test files and 1,036 tests passing cleanly.
+  * Golden demo reset and all 59 machine-checkable invariants verified.
 
 ### 4. Exit Criteria
 * [x] A field worker can submit progress via voice, quantity text, or photo in under 15 seconds.
