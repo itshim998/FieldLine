@@ -151,7 +151,7 @@ FieldLine currently relies on client-side project selection without account cred
 
 ---
 
-## Pass 29 — Server-Side Authorization, Route Guards & Privacy Sanitization
+## ~~Pass 29 — Server-Side Authorization, Route Guards & Privacy Sanitization~~ (COMPLETED)
 
 ### Context & Need
 Authentication without server-side enforcement is ineffective. Per `long_term_plan.md` Section 9, role restrictions and project isolation must be enforced on the server at API and domain boundaries.

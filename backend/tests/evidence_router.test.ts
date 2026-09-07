@@ -8,6 +8,7 @@ import {
   evidenceResponseSchema,
   evidenceListResponseSchema
 } from '../src/validation/evidence.schema.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Evidence Router Endpoints', () => {
   let app: ReturnType<typeof createApp>;
@@ -42,6 +43,7 @@ describe('Evidence Router Endpoints', () => {
     // Create progress update in Project 1
     const uRes = await request(app)
       .post(`/api/projects/${testProjectId}/progress-updates`)
+      .set(workerAuthHeader(testProjectId))
       .send({
         reportDate: '2026-08-24',
         reporterName: 'Amit Verma',
@@ -66,6 +68,7 @@ describe('Evidence Router Endpoints', () => {
     it('should upload an evidence file and return 201 with valid metadata', async () => {
       const res = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath)
         .field('progressUpdateId', testUpdateId);
 
@@ -84,6 +87,7 @@ describe('Evidence Router Endpoints', () => {
     it('should return 400 ValidationError when no file is uploaded', async () => {
       const res = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .field('progressUpdateId', testUpdateId);
 
       expect(res.status).toBe(400);
@@ -93,6 +97,7 @@ describe('Evidence Router Endpoints', () => {
     it('should return 404 when project does not exist', async () => {
       const res = await request(app)
         .post('/api/projects/non-existent-proj-id/evidence')
+        .set(workerAuthHeader('non-existent-proj-id'))
         .attach('file', dummyFilePath);
 
       expect(res.status).toBe(404);
@@ -104,6 +109,7 @@ describe('Evidence Router Endpoints', () => {
       // Upload two files
       await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath);
 
       const res = await request(app).get(`/api/projects/${testProjectId}/evidence`);
@@ -121,6 +127,7 @@ describe('Evidence Router Endpoints', () => {
     it('should retrieve single evidence record', async () => {
       const uploadRes = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath);
 
       const evidenceId = uploadRes.body.evidence.id;
@@ -147,13 +154,14 @@ describe('Evidence Router Endpoints', () => {
     it('should serve the physical file content with proper headers', async () => {
       const uploadRes = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath);
 
       const evidenceId = uploadRes.body.evidence.id;
 
-      const res = await request(app).get(
-        `/api/projects/${testProjectId}/evidence/${evidenceId}/content`
-      );
+      const res = await request(app)
+        .get(`/api/projects/${testProjectId}/evidence/${evidenceId}/content`)
+        .set(workerAuthHeader(testProjectId));
 
       expect(res.status).toBe(200);
       expect(res.headers['content-type']).toContain('pdf');
@@ -167,6 +175,7 @@ describe('Evidence Router Endpoints', () => {
     it('should retrieve evidence attached to progress report', async () => {
       await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath)
         .field('progressUpdateId', testUpdateId);
 
@@ -185,6 +194,7 @@ describe('Evidence Router Endpoints', () => {
       // 1. Upload evidence attached to progress report
       const uploadRes = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath)
         .field('progressUpdateId', testUpdateId);
 
@@ -193,6 +203,7 @@ describe('Evidence Router Endpoints', () => {
       // 2. Create schedule and activity in Project 1
       const schedRes = await request(app)
         .post(`/api/projects/${testProjectId}/schedules/import`)
+        .set(adminAuthHeader(testProjectId))
         .attach(
           'file',
           Buffer.from(
@@ -256,13 +267,14 @@ describe('Evidence Router Endpoints', () => {
     it('should delete evidence and return success', async () => {
       const uploadRes = await request(app)
         .post(`/api/projects/${testProjectId}/evidence`)
+        .set(workerAuthHeader(testProjectId))
         .attach('file', dummyFilePath);
 
       const evidenceId = uploadRes.body.evidence.id;
 
-      const delRes = await request(app).delete(
-        `/api/projects/${testProjectId}/evidence/${evidenceId}`
-      );
+      const delRes = await request(app)
+        .delete(`/api/projects/${testProjectId}/evidence/${evidenceId}`)
+        .set(adminAuthHeader(testProjectId));
 
       expect(delRes.status).toBe(200);
       expect(delRes.body.success).toBe(true);

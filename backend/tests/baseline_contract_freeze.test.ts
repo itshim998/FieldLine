@@ -4,6 +4,7 @@ import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase, getDatabase } from '../src/database/db.js';
 import { SqliteScheduleRepository } from '../src/repositories/schedule.repository.js';
 import { SqliteActivityRepository } from '../src/repositories/activity.repository.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Pass 27 — Baseline Route Contract Freeze & Regression Checkpoint', () => {
   let app: ReturnType<typeof createApp>;
@@ -95,13 +96,16 @@ describe('Pass 27 — Baseline Route Contract Freeze & Regression Checkpoint', (
     it('PATCH /api/projects/:projectId updates metadata correctly', async () => {
       const res = await request(app)
         .patch(`/api/projects/${projectId}`)
+        .set(adminAuthHeader(projectId))
         .send({ name: 'Updated Baseline Name' });
       expect(res.status).toBe(200);
       expect(res.body.project.name).toBe('Updated Baseline Name');
     });
 
     it('DELETE /api/projects/:projectId removes project cleanly', async () => {
-      const res = await request(app).delete(`/api/projects/${projectId}`);
+      const res = await request(app)
+        .delete(`/api/projects/${projectId}`)
+        .set(adminAuthHeader(projectId));
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('success', true);
 
@@ -143,6 +147,7 @@ describe('Pass 27 — Baseline Route Contract Freeze & Regression Checkpoint', (
     it('POST & GET /api/projects/:projectId/progress-updates enforce valid DTO shapes', async () => {
       const createRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({
           reportDate: '2026-08-10',
           rawText: 'Poured 50 m3 concrete on Pier 1. Everything according to plan.',

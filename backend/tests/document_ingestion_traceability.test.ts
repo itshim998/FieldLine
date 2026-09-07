@@ -6,6 +6,7 @@ import * as XLSX from 'xlsx';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { workerRunner } from '../src/jobs/worker-runner.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Document Ingestion End-to-End Traceability & Provenance', () => {
   let app: ReturnType<typeof createApp>;
@@ -43,6 +44,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     // 3. Import baseline schedule
     const sRes = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach(
         'file',
         Buffer.from(
@@ -75,6 +77,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     // -------------------------------------------------------------
     const evUploadRes = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', xlsxFile);
     expect(evUploadRes.status).toBe(201);
     const evidenceId = evUploadRes.body.evidence.id;
@@ -84,6 +87,7 @@ describe('Document Ingestion End-to-End Traceability & Provenance', () => {
     // -------------------------------------------------------------
     const processRes = await request(app)
       .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
+      .set(adminAuthHeader(projectId))
       .send();
     expect(processRes.status).toBe(202);
     expect(processRes.body.job).toBeDefined();

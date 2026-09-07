@@ -70,7 +70,7 @@ export const evidenceSchema = z.object({
   projectId: z.string(),
   progressUpdateId: z.string().nullable(),
   fileName: z.string(),
-  filePath: z.string(),
+  filePath: z.string().optional(),
   fileType: evidenceFileTypeEnum,
   fileSizeBytes: z.number().nullable(),
   mimeType: z.string().nullable(),

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
   let app: ReturnType<typeof createApp>;
@@ -41,6 +42,7 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
     // Create updates in each
     const uARes = await request(app)
       .post(`/api/projects/${projectAId}/progress-updates`)
+      .set(workerAuthHeader(projectAId))
       .send({
         reportDate: '2026-08-20',
         rawText: 'Alpha viaduct construction status report.'
@@ -49,6 +51,7 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
 
     const uBRes = await request(app)
       .post(`/api/projects/${projectBId}/progress-updates`)
+      .set(workerAuthHeader(projectBId))
       .send({
         reportDate: '2026-08-21',
         rawText: 'Beta inverter installation status report.'
@@ -58,6 +61,7 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
     // Upload evidence to Project A
     const evARes = await request(app)
       .post(`/api/projects/${projectAId}/evidence`)
+      .set(workerAuthHeader(projectAId))
       .attach('file', dummyFileA)
       .field('progressUpdateId', updateAId);
     evidenceAId = evARes.body.evidence.id;
@@ -83,9 +87,9 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
   });
 
   it('Invariant 2: Project A evidence content cannot be accessed through Project B route', async () => {
-    const res = await request(app).get(
-      `/api/projects/${projectBId}/evidence/${evidenceAId}/content`
-    );
+    const res = await request(app)
+      .get(`/api/projects/${projectBId}/evidence/${evidenceAId}/content`)
+      .set(workerAuthHeader(projectBId));
 
     expect(res.status).toBe(404);
   });
@@ -93,6 +97,7 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
   it('Invariant 3: Uploading Project B evidence with Project A progressUpdateId is rejected', async () => {
     const res = await request(app)
       .post(`/api/projects/${projectBId}/evidence`)
+      .set(workerAuthHeader(projectBId))
       .attach('file', dummyFileB)
       .field('progressUpdateId', updateAId); // updateAId belongs to Project A!
 
@@ -111,6 +116,7 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
     // 1. Create schedule and activity in Project B
     const schedRes = await request(app)
       .post(`/api/projects/${projectBId}/schedules/import`)
+      .set(adminAuthHeader(projectBId))
       .attach(
         'file',
         Buffer.from(
@@ -134,9 +140,9 @@ describe('Evidence Cross-Project Isolation & Security Enforcement', () => {
   });
 
   it('Invariant 6: Project A evidence cannot be deleted through Project B route', async () => {
-    const delRes = await request(app).delete(
-      `/api/projects/${projectBId}/evidence/${evidenceAId}`
-    );
+    const delRes = await request(app)
+      .delete(`/api/projects/${projectBId}/evidence/${evidenceAId}`)
+      .set(adminAuthHeader(projectBId));
 
     expect(delRes.status).toBe(404);
 

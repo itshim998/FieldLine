@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { scheduleImportService, ScheduleImportService } from '../services/schedule-import.service.js';
 import { validateParams } from '../middleware/validate.js';
+import { requireRole, optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   projectIdParamSchema,
   scheduleParamsSchema
@@ -63,51 +64,64 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
     });
   };
 
-  // POST /projects/:projectId/schedules/import - Import schedule file
+  const importHandler = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { projectId } = req.params;
+
+      if (!req.file) {
+        throw new ValidationError('No schedule file uploaded. Form field "file" is required.');
+      }
+
+      const summary = await service.importSchedule(projectId, {
+        path: req.file.path,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      });
+
+      res.status(201).json({
+        success: true,
+        schedule: summary.schedule,
+        activitiesImported: summary.activitiesImported,
+        rowCount: summary.rowCount,
+        sourceType: summary.sourceType,
+        originalFilename: summary.originalFilename
+      });
+    } catch (error) {
+      // If file exists and wasn't cleaned up by service (e.g. error before calling service), clean it up
+      if (req.file?.path && fs.existsSync(req.file.path)) {
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch {
+          // ignore
+        }
+      }
+      next(error);
+    }
+  };
+
+  // POST /projects/:projectId/schedules/import - Import schedule file (Admin Only)
   router.post(
     '/projects/:projectId/schedules/import',
-    validateParams(projectIdParamSchema),
     handleUpload,
-    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-      try {
-        const { projectId } = req.params;
+    requireRole(['admin']),
+    validateParams(projectIdParamSchema),
+    importHandler
+  );
 
-        if (!req.file) {
-          throw new ValidationError('No schedule file uploaded. Form field "file" is required.');
-        }
-
-        const summary = await service.importSchedule(projectId, {
-          path: req.file.path,
-          originalname: req.file.originalname,
-          mimetype: req.file.mimetype,
-          size: req.file.size
-        });
-
-        res.status(201).json({
-          success: true,
-          schedule: summary.schedule,
-          activitiesImported: summary.activitiesImported,
-          rowCount: summary.rowCount,
-          sourceType: summary.sourceType,
-          originalFilename: summary.originalFilename
-        });
-      } catch (error) {
-        // If file exists and wasn't cleaned up by service (e.g. error before calling service), clean it up
-        if (req.file?.path && fs.existsSync(req.file.path)) {
-          try {
-            fs.unlinkSync(req.file.path);
-          } catch {
-            // ignore
-          }
-        }
-        next(error);
-      }
-    }
+  // POST /projects/:projectId/schedules - Alias for import schedule file (Admin Only)
+  router.post(
+    '/projects/:projectId/schedules',
+    handleUpload,
+    requireRole(['admin']),
+    validateParams(projectIdParamSchema),
+    importHandler
   );
 
   // GET /projects/:projectId/schedules - List schedules for project
   router.get(
     '/projects/:projectId/schedules',
+    optionalAuthenticateSession,
     validateParams(projectIdParamSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -123,6 +137,7 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
   // GET /projects/:projectId/schedules/:scheduleId - Get single schedule
   router.get(
     '/projects/:projectId/schedules/:scheduleId',
+    optionalAuthenticateSession,
     validateParams(scheduleParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -138,6 +153,7 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
   // GET /projects/:projectId/schedules/:scheduleId/activities - List activities for schedule
   router.get(
     '/projects/:projectId/schedules/:scheduleId/activities',
+    optionalAuthenticateSession,
     validateParams(scheduleParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {

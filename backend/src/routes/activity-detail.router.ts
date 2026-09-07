@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { activityDetailService as defaultActivityDetailService } from '../services/activity-detail/activity-detail.service.js';
 import { ActivityDetailService } from '../services/activity-detail/activity-detail.types.js';
 import { validateRequest } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
+import { sanitizeMatchForRole } from './activity-matching.router.js';
 import {
   activityDetailParamsSchema,
   activityDetailQuerySchema,
@@ -14,9 +16,10 @@ export function createActivityDetailRouter(
   const router = Router();
 
   // GET /projects/:projectId/activities/:activityId
-  // Returns the complete read-only activity detail model
+  // Returns the complete read-only activity detail model (with worker data projection)
   router.get(
     '/projects/:projectId/activities/:activityId',
+    optionalAuthenticateSession,
     validateRequest({
       params: activityDetailParamsSchema,
       query: activityDetailQuerySchema
@@ -29,6 +32,10 @@ export function createActivityDetailRouter(
         const detail = service.getActivityDetail(projectId, activityId, {
           asOfDate: query.asOfDate
         });
+
+        if (req.session?.accountType === 'worker' && detail.matches) {
+          detail.matches = detail.matches.map((m) => sanitizeMatchForRole(m, 'worker'));
+        }
 
         res.status(200).json(detail);
       } catch (error) {

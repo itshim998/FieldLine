@@ -6,6 +6,7 @@ import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { jobRepository } from '../src/jobs/job.repository.js';
 import { workerRunner } from '../src/jobs/worker-runner.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Job Router — Async Job Enqueueing, Status API, & Project Isolation', () => {
   let app: ReturnType<typeof createApp>;
@@ -49,6 +50,7 @@ describe('Job Router — Async Job Enqueueing, Status API, & Project Isolation',
 
     const evRes = await request(app)
       .post(`/api/projects/${projectId1}/evidence`)
+      .set(workerAuthHeader(projectId1))
       .attach('file', validFile);
     evidenceId1 = evRes.body.evidence.id;
   });
@@ -60,6 +62,7 @@ describe('Job Router — Async Job Enqueueing, Status API, & Project Isolation',
   it('should return 202 Accepted when enqueueing a document ingestion job', async () => {
     const res = await request(app)
       .post(`/api/projects/${projectId1}/evidence/${evidenceId1}/process`)
+      .set(adminAuthHeader(projectId1))
       .send();
 
     expect(res.status).toBe(202);
@@ -75,6 +78,7 @@ describe('Job Router — Async Job Enqueueing, Status API, & Project Isolation',
     // First request creates the job
     const res1 = await request(app)
       .post(`/api/projects/${projectId1}/evidence/${evidenceId1}/process`)
+      .set(adminAuthHeader(projectId1))
       .send();
     expect(res1.status).toBe(202);
     const jobId1 = res1.body.job.id;
@@ -82,6 +86,7 @@ describe('Job Router — Async Job Enqueueing, Status API, & Project Isolation',
     // Second request returns the exact same active job without creating a duplicate
     const res2 = await request(app)
       .post(`/api/projects/${projectId1}/evidence/${evidenceId1}/process`)
+      .set(adminAuthHeader(projectId1))
       .send();
     expect(res2.status).toBe(202);
     expect(res2.body.job.id).toBe(jobId1);

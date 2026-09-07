@@ -6,6 +6,7 @@ import {
   progressUpdateResponseSchema,
   progressUpdateListResponseSchema
 } from '../src/validation/progress-update.schema.js';
+import { workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Progress Update Router Endpoints', () => {
   let app: ReturnType<typeof createApp>;
@@ -43,6 +44,7 @@ describe('Progress Update Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send(payload);
 
       expect(res.status).toBe(201);
@@ -72,6 +74,7 @@ describe('Progress Update Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send(payload);
 
       expect(res.status).toBe(201);
@@ -82,6 +85,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should reject request when rawText is missing or whitespace only', async () => {
       const res1 = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-26'
         });
@@ -89,6 +93,7 @@ describe('Progress Update Router Endpoints', () => {
 
       const res2 = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-26',
           rawText: '   \n  '
@@ -99,6 +104,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should reject request when reportDate is invalid or non-existent calendar date', async () => {
       const res1 = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-02-31', // Invalid leap day / Feb 31
           rawText: 'Valid text'
@@ -107,6 +113,7 @@ describe('Progress Update Router Endpoints', () => {
 
       const res2 = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: 'not-a-date',
           rawText: 'Valid text'
@@ -117,6 +124,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should return 404 Not Found when submitting to a non-existent project', async () => {
       const res = await request(app)
         .post('/api/projects/non-existent-proj-id/progress-updates')
+        .set(workerAuthHeader('non-existent-proj-id'))
         .send({
           reportDate: '2026-08-26',
           rawText: 'Orphan update'
@@ -141,6 +149,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should return all updates for a project ordered newest-first', async () => {
       await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-20',
           rawText: 'Early work report'
@@ -148,6 +157,7 @@ describe('Progress Update Router Endpoints', () => {
 
       await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-26',
           rawText: 'Recent work report'
@@ -156,6 +166,7 @@ describe('Progress Update Router Endpoints', () => {
       // Update for second project (should not appear in project 1)
       await request(app)
         .post(`/api/projects/${testProject2Id}/progress-updates`)
+        .set(workerAuthHeader(testProject2Id))
         .send({
           reportDate: '2026-08-26',
           rawText: 'Project 2 report'
@@ -187,6 +198,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should retrieve a specific progress update by ID', async () => {
       const createRes = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-26',
           reporterName: 'Anil Mehta',
@@ -213,6 +225,7 @@ describe('Progress Update Router Endpoints', () => {
     it('should reject cross-project access with 404 Not Found (strict isolation)', async () => {
       const createRes = await request(app)
         .post(`/api/projects/${testProjectId}/progress-updates`)
+        .set(workerAuthHeader(testProjectId))
         .send({
           reportDate: '2026-08-26',
           rawText: 'Secret project update'

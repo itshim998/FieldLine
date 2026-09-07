@@ -10,6 +10,7 @@ import { MockAIProvider } from '../src/ai/providers/mock-ai.provider.js';
 import { SqliteActivityRepository } from '../src/repositories/activity.repository.js';
 import { SqliteActivityProgressRepository } from '../src/repositories/activity-progress.repository.js';
 import { SqliteEvidenceRepository } from '../src/repositories/evidence.repository.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 import {
   GOLDEN_AS_OF_DATE,
   goldenProject,
@@ -71,6 +72,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // -------------------------------------------------------------
       const scheduleRes = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', Buffer.from(goldenScheduleCsv), 'baseline_schedule.csv');
       expect(scheduleRes.status).toBe(201);
       expect(scheduleRes.body.schedule).toBeDefined();
@@ -102,11 +104,12 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
 
       const evidenceUploadRes = await request(app)
         .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
         .attach('file', reportFilePath);
       expect(evidenceUploadRes.status).toBe(201);
       expect(evidenceUploadRes.body.evidence.id).toBeDefined();
       expect(evidenceUploadRes.body.evidence.fileName).toBe('daily_field_report_2026-08-20.txt');
-      expect(evidenceUploadRes.body.evidence.filePath).not.toContain(process.cwd()); // No filesystem leakage
+      expect(evidenceUploadRes.body.evidence.filePath).toBeUndefined(); // Stripped per privacy invariant
       const evidenceId = evidenceUploadRes.body.evidence.id;
 
       // -------------------------------------------------------------
@@ -114,6 +117,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // -------------------------------------------------------------
       const jobEnqueueRes = await request(app)
         .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
+        .set(adminAuthHeader(projectId))
         .send();
       expect(jobEnqueueRes.status).toBe(202);
       expect(jobEnqueueRes.body.job).toBeDefined();
@@ -164,6 +168,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
         if (m.status === 'suggested') {
           const confirmRes = await request(app)
             .post(`/api/projects/${projectId}/activity-matches/${m.id}/confirm`)
+            .set(adminAuthHeader(projectId))
             .send({ reviewer: 'Resident Engineer Bob' });
           expect(confirmRes.status).toBe(200);
           expect(confirmRes.body.match.status).toBe('confirmed');
@@ -406,6 +411,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
 
       const sRes = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach(
           'file',
           Buffer.from(
@@ -425,6 +431,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const badCsv = 'NotAHeader,Garbage\n1,2,3';
       const importRes = await request(app)
         .post(`/api/projects/${badProjectId}/schedules/import`)
+        .set(adminAuthHeader(badProjectId))
         .attach('file', Buffer.from(badCsv), 'corrupt.csv');
 
       expect(importRes.status).toBe(400);
@@ -441,12 +448,14 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
 
       const evRes = await request(app)
         .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
         .attach('file', emptyFilePath);
       expect(evRes.status).toBe(201);
       const evidenceId = evRes.body.evidence.id;
 
       const jobRes = await request(app)
         .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
+        .set(adminAuthHeader(projectId))
         .send();
       const jobId = jobRes.body.job.id;
 
@@ -467,11 +476,13 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
 
       const evRes = await request(app)
         .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
         .attach('file', reportFilePath);
       const evidenceId = evRes.body.evidence.id;
 
       const jobRes = await request(app)
         .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
+        .set(adminAuthHeader(projectId))
         .send();
       const jobId = jobRes.body.job.id;
 
@@ -491,6 +502,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
     it('4. Missing activity: field report referencing unknown activity creates no canonical progress', async () => {
       const updateRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({
           reportDate: '2026-08-20',
           reporterName: 'Foreman',
@@ -523,6 +535,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
     it('5. Ambiguous activity: close candidates remain suggested/unresolved without auto-confirmation', async () => {
       const updateRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({
           reportDate: '2026-08-20',
           reporterName: 'Foreman',
@@ -558,6 +571,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
     it('6. Rejected match: rejected match cannot create canonical ActivityProgress', async () => {
       const updateRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({
           reportDate: '2026-08-20',
           reporterName: 'Inspector',
@@ -589,6 +603,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // Reject match
       const rejectRes = await request(app)
         .post(`/api/projects/${projectId}/activity-matches/${matchId}/reject`)
+        .set(adminAuthHeader(projectId))
         .send({ reviewer: 'Lead Auditor', reason: 'Incorrect scope' });
       expect(rejectRes.status).toBe(200);
       expect(rejectRes.body.match.status).toBe('rejected');
@@ -614,6 +629,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
 
       const ev1Res = await request(app)
         .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
         .attach('file', reportFilePath);
       expect(ev1Res.status).toBe(201);
       expect(ev1Res.body.deduplicated).toBe(false);
@@ -622,6 +638,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // Upload identical file again
       const ev2Res = await request(app)
         .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
         .attach('file', reportFilePath);
       expect(ev2Res.status).toBe(200);
       expect(ev2Res.body.deduplicated).toBe(true);
@@ -639,6 +656,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // First update on 2026-08-15: 40%
       const u1Res = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({ reportDate: '2026-08-15', reporterName: 'Alice', sourceType: 'manual', rawText: 'Update 1' });
       const u1Id = u1Res.body.progressUpdate.id;
 
@@ -652,7 +670,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const m1List = (await request(app).get(`/api/projects/${projectId}/progress-updates/${u1Id}/matches`)).body.matches;
       const m1Id = m1List[0].id;
       if (m1List[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${projectId}/activity-matches/${m1Id}/confirm`).send();
+        await request(app).post(`/api/projects/${projectId}/activity-matches/${m1Id}/confirm`).set(adminAuthHeader(projectId)).send();
       }
 
       const p1Res = await request(app)
@@ -667,6 +685,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // Second contradictory update on 2026-08-20: 30% (claims reduced progress)
       const u2Res = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({ reportDate: '2026-08-20', reporterName: 'Bob', sourceType: 'manual', rawText: 'Update 2' });
       const u2Id = u2Res.body.progressUpdate.id;
 
@@ -680,7 +699,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const m2List = (await request(app).get(`/api/projects/${projectId}/progress-updates/${u2Id}/matches`)).body.matches;
       const m2Id = m2List[0].id;
       if (m2List[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${projectId}/activity-matches/${m2Id}/confirm`).send();
+        await request(app).post(`/api/projects/${projectId}/activity-matches/${m2Id}/confirm`).set(adminAuthHeader(projectId)).send();
       }
 
       const p2Res = await request(app)
@@ -728,6 +747,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
     it('10. Missing quantity / percentage: does not fabricate numbers for incomplete facts', async () => {
       const uRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({ reportDate: '2026-08-20', reporterName: 'Alice', sourceType: 'manual', rawText: 'Work ongoing.' });
       const uId = uRes.body.progressUpdate.id;
 
@@ -741,7 +761,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const mList = (await request(app).get(`/api/projects/${projectId}/progress-updates/${uId}/matches`)).body.matches;
       const matchId = mList[0].id;
       if (mList[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${projectId}/activity-matches/${matchId}/confirm`).send();
+        await request(app).post(`/api/projects/${projectId}/activity-matches/${matchId}/confirm`).set(adminAuthHeader(projectId)).send();
       }
 
       // Progress request without percentage and without quantity fails
@@ -763,6 +783,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // Set up confirmed progress 40% on ACT-101
       const uRes = await request(app)
         .post(`/api/projects/${projectId}/progress-updates`)
+        .set(workerAuthHeader(projectId))
         .send({ reportDate: '2026-08-20', reporterName: 'Alice', sourceType: 'manual', rawText: '40% done' });
       const uId = uRes.body.progressUpdate.id;
 
@@ -776,7 +797,7 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const mList = (await request(app).get(`/api/projects/${projectId}/progress-updates/${uId}/matches`)).body.matches;
       const matchId = mList[0].id;
       if (mList[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${projectId}/activity-matches/${matchId}/confirm`).send();
+        await request(app).post(`/api/projects/${projectId}/activity-matches/${matchId}/confirm`).set(adminAuthHeader(projectId)).send();
       }
 
       await request(app)
@@ -830,9 +851,11 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // 2. Import Schedules
       await request(app)
         .post(`/api/projects/${pA}/schedules/import`)
+        .set(adminAuthHeader(pA))
         .attach('file', Buffer.from('Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit\nACT-A1,Alpha Excavation,WBS-1,Loc A,2026-08-01,2026-08-10,100,m3'), 'a.csv');
       await request(app)
         .post(`/api/projects/${pB}/schedules/import`)
+        .set(adminAuthHeader(pB))
         .attach('file', Buffer.from('Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit\nACT-B1,Beta Foundation,WBS-1,Loc B,2026-08-01,2026-08-10,100,m3'), 'b.csv');
 
       // 3. Upload Evidence
@@ -841,16 +864,16 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       fs.writeFileSync(evAPath, 'Alpha report content', 'utf-8');
       fs.writeFileSync(evBPath, 'Beta report content', 'utf-8');
 
-      const evARes = await request(app).post(`/api/projects/${pA}/evidence`).attach('file', evAPath);
-      await request(app).post(`/api/projects/${pB}/evidence`).attach('file', evBPath);
+      const evARes = await request(app).post(`/api/projects/${pA}/evidence`).set(workerAuthHeader(pA)).attach('file', evAPath);
+      await request(app).post(`/api/projects/${pB}/evidence`).set(workerAuthHeader(pB)).attach('file', evBPath);
 
       // Verify Project A evidence cannot be accessed via Project B
       const crossEvRes = await request(app).get(`/api/projects/${pB}/evidence/${evARes.body.evidence.id}`);
       expect(crossEvRes.status).toBe(404);
 
       // 4. Record Distinct Progress
-      const uARes = await request(app).post(`/api/projects/${pA}/progress-updates`).send({ reportDate: '2026-08-20', reporterName: 'Alice', sourceType: 'manual', rawText: 'A' });
-      const uBRes = await request(app).post(`/api/projects/${pB}/progress-updates`).send({ reportDate: '2026-08-20', reporterName: 'Bob', sourceType: 'manual', rawText: 'B' });
+      const uARes = await request(app).post(`/api/projects/${pA}/progress-updates`).set(workerAuthHeader(pA)).send({ reportDate: '2026-08-20', reporterName: 'Alice', sourceType: 'manual', rawText: 'A' });
+      const uBRes = await request(app).post(`/api/projects/${pB}/progress-updates`).set(workerAuthHeader(pB)).send({ reportDate: '2026-08-20', reporterName: 'Bob', sourceType: 'manual', rawText: 'B' });
 
       await request(app).post(`/api/projects/${pA}/progress-updates/${uARes.body.progressUpdate.id}/matches`).send({
         extraction: { items: [{ reference: 'Alpha Excavation', location: 'Loc A', progress_percent: 45, status: 'in_progress' }] }
@@ -865,10 +888,10 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const mB = mBList[0].id;
 
       if (mAList[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${pA}/activity-matches/${mA}/confirm`).send();
+        await request(app).post(`/api/projects/${pA}/activity-matches/${mA}/confirm`).set(adminAuthHeader(pA)).send();
       }
       if (mBList[0].status === 'suggested') {
-        await request(app).post(`/api/projects/${pB}/activity-matches/${mB}/confirm`).send();
+        await request(app).post(`/api/projects/${pB}/activity-matches/${mB}/confirm`).set(adminAuthHeader(pB)).send();
       }
 
       const pARecordRes = await request(app).post(`/api/projects/${pA}/progress-updates/${uARes.body.progressUpdate.id}/progress`).send({
@@ -927,15 +950,22 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       // Import Schedule
       const sRes = await request(localApp)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', Buffer.from(goldenScheduleCsv), 'schedule.csv');
 
       // Upload Evidence
       const reportPath = path.join(testArtifactsDir, `det_${Date.now()}_${Math.random()}.txt`);
       fs.writeFileSync(reportPath, goldenFieldReportText, 'utf-8');
-      const evRes = await request(localApp).post(`/api/projects/${projectId}/evidence`).attach('file', reportPath);
+      const evRes = await request(localApp)
+        .post(`/api/projects/${projectId}/evidence`)
+        .set(workerAuthHeader(projectId))
+        .attach('file', reportPath);
 
       // Process Job
-      await request(localApp).post(`/api/projects/${projectId}/evidence/${evRes.body.evidence.id}/process`).send();
+      await request(localApp)
+        .post(`/api/projects/${projectId}/evidence/${evRes.body.evidence.id}/process`)
+        .set(adminAuthHeader(projectId))
+        .send();
       await workerRunner.processNextJob();
 
       const actsRes = await request(localApp).get(`/api/projects/${projectId}/schedules/${sRes.body.schedule.id}/activities`);
@@ -947,7 +977,10 @@ describe('Pass 23 — Critical Regression & Evaluation Suite', () => {
       const mRes = await request(localApp).get(`/api/projects/${projectId}/progress-updates/${updateId}/matches`);
       for (const m of mRes.body.matches) {
         if (m.status === 'suggested') {
-          await request(localApp).post(`/api/projects/${projectId}/activity-matches/${m.id}/confirm`).send();
+          await request(localApp)
+            .post(`/api/projects/${projectId}/activity-matches/${m.id}/confirm`)
+            .set(adminAuthHeader(projectId))
+            .send();
         }
       }
 

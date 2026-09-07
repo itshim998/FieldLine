@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { evidenceService as defaultEvidenceService, EvidenceService } from '../services/evidence/evidence.service.js';
 import { JobService, jobService as defaultJobService } from '../jobs/job.service.js';
 import { validateParams } from '../middleware/validate.js';
+import { requireRole, optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   evidenceProjectIdParamSchema,
   evidenceParamsSchema,
@@ -14,6 +15,15 @@ import {
 } from '../validation/evidence.schema.js';
 import { ValidationError } from '../errors/AppError.js';
 import { env } from '../config/env.js';
+
+/**
+ * Sanitizes an evidence record or DTO by stripping internal server filesystem paths (filePath).
+ * Guarantees the Filesystem Privacy Invariant across all API responses.
+ */
+export function sanitizeEvidenceDto<T extends { filePath?: unknown }>(item: T): Omit<T, 'filePath'> {
+  const { filePath: _rawPath, ...rest } = item;
+  return rest;
+}
 
 export function createEvidenceRouter(
   service: EvidenceService = defaultEvidenceService,
@@ -66,8 +76,9 @@ export function createEvidenceRouter(
   // POST /projects/:projectId/evidence - Upload and persist field evidence file
   router.post(
     '/projects/:projectId/evidence',
-    validateParams(evidenceProjectIdParamSchema),
     handleUpload,
+    requireRole(['worker', 'admin']),
+    validateParams(evidenceProjectIdParamSchema),
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
@@ -98,7 +109,7 @@ export function createEvidenceRouter(
         );
 
         res.status(uploadResult.deduplicated ? 200 : 201).json({
-          evidence: uploadResult,
+          evidence: sanitizeEvidenceDto(uploadResult),
           deduplicated: uploadResult.deduplicated
         });
       } catch (error) {
@@ -118,12 +129,13 @@ export function createEvidenceRouter(
   // GET /projects/:projectId/evidence - List all evidence records for a project
   router.get(
     '/projects/:projectId/evidence',
+    optionalAuthenticateSession,
     validateParams(evidenceProjectIdParamSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
         const { projectId } = req.params;
         const evidence = service.listProjectEvidence(projectId);
-        res.status(200).json({ evidence });
+        res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
       }
@@ -133,12 +145,13 @@ export function createEvidenceRouter(
   // GET /projects/:projectId/evidence/:evidenceId - Retrieve metadata for a single evidence record
   router.get(
     '/projects/:projectId/evidence/:evidenceId',
+    optionalAuthenticateSession,
     validateParams(evidenceParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
         const { projectId, evidenceId } = req.params;
         const evidence = service.getEvidence(projectId, evidenceId);
-        res.status(200).json({ evidence });
+        res.status(200).json({ evidence: sanitizeEvidenceDto(evidence) });
       } catch (error) {
         next(error);
       }
@@ -148,6 +161,7 @@ export function createEvidenceRouter(
   // GET /projects/:projectId/evidence/:evidenceId/content - Stream the physical evidence file content safely
   router.get(
     '/projects/:projectId/evidence/:evidenceId/content',
+    requireRole(['worker', 'admin']),
     validateParams(evidenceParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -173,12 +187,13 @@ export function createEvidenceRouter(
   // GET /projects/:projectId/progress-updates/:updateId/evidence - List evidence attached to a progress update
   router.get(
     '/projects/:projectId/progress-updates/:updateId/evidence',
+    optionalAuthenticateSession,
     validateParams(progressUpdateEvidenceParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
         const { projectId, updateId } = req.params;
         const evidence = service.listProgressUpdateEvidence(projectId, updateId);
-        res.status(200).json({ evidence });
+        res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
       }
@@ -188,21 +203,23 @@ export function createEvidenceRouter(
   // GET /projects/:projectId/activities/:activityId/evidence - Trace all evidence originating for an activity
   router.get(
     '/projects/:projectId/activities/:activityId/evidence',
+    optionalAuthenticateSession,
     validateParams(activityEvidenceParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
         const { projectId, activityId } = req.params;
         const evidence = service.listActivityEvidence(projectId, activityId);
-        res.status(200).json({ evidence });
+        res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
       }
     }
   );
 
-  // DELETE /projects/:projectId/evidence/:evidenceId - Safely delete evidence file and record
+  // DELETE /projects/:projectId/evidence/:evidenceId - Safely delete evidence file and record (Admin Only)
   router.delete(
     '/projects/:projectId/evidence/:evidenceId',
+    requireRole(['admin']),
     validateParams(evidenceParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -215,9 +232,10 @@ export function createEvidenceRouter(
     }
   );
 
-  // POST /projects/:projectId/evidence/:evidenceId/process - Enqueue document ingestion job asynchronously
+  // POST /projects/:projectId/evidence/:evidenceId/process - Enqueue document ingestion job asynchronously (Admin Only)
   router.post(
     '/projects/:projectId/evidence/:evidenceId/process',
+    requireRole(['admin']),
     validateParams(evidenceParamsSchema),
     async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {

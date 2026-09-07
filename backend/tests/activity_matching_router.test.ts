@@ -8,6 +8,7 @@ import {
   matchReportResponseSchema,
   activityMatchListResponseSchema
 } from '../src/validation/activity-matching.schema.js';
+import { workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Activity Matching Router Endpoints', () => {
   let app: ReturnType<typeof createApp>;
@@ -69,6 +70,7 @@ describe('Activity Matching Router Endpoints', () => {
     // 4. Create progress update for project 1
     const u1Res = await request(app)
       .post(`/api/projects/${testProjectId}/progress-updates`)
+      .set(workerAuthHeader(testProjectId))
       .send({
         reportDate: '2026-08-26',
         reporterName: 'Sanjay Deshmukh',

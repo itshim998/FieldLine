@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { projectService, ProjectService } from '../services/project.service.js';
 import { validateRequest, validateBody, validateParams } from '../middleware/validate.js';
+import { requireRole, optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   createProjectSchema,
   updateProjectSchema,
@@ -52,6 +53,7 @@ export function createProjectRouter(service: ProjectService = projectService): R
   // GET /projects/:projectId - Get single project by ID
   router.get(
     '/projects/:projectId',
+    optionalAuthenticateSession,
     validateParams(projectIdParamSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -64,9 +66,10 @@ export function createProjectRouter(service: ProjectService = projectService): R
     }
   );
 
-  // PATCH /projects/:projectId - Update project metadata
+  // PATCH /projects/:projectId - Update project metadata (Admin Only)
   router.patch(
     '/projects/:projectId',
+    requireRole(['admin']),
     validateRequest({ params: projectIdParamSchema, body: updateProjectSchema }),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -79,9 +82,10 @@ export function createProjectRouter(service: ProjectService = projectService): R
     }
   );
 
-  // DELETE /projects/:projectId - Delete project by ID
+  // DELETE /projects/:projectId - Delete project by ID (Admin Only)
   router.delete(
     '/projects/:projectId',
+    requireRole(['admin']),
     validateParams(projectIdParamSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {

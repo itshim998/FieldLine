@@ -3,6 +3,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { projectResponseSchema, projectListResponseSchema } from '../src/validation/project.schema.js';
+import { adminAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Project Router Endpoints', () => {
   let app: ReturnType<typeof createApp>;
@@ -151,6 +152,7 @@ describe('Project Router Endpoints', () => {
 
       const res = await request(app)
         .patch(`/api/projects/${projectId}`)
+        .set(adminAuthHeader(projectId))
         .send({
           name: 'Renamed Project',
           status: 'active',
@@ -167,6 +169,7 @@ describe('Project Router Endpoints', () => {
     it('should return 404 Not Found when updating non-existent project', async () => {
       const res = await request(app)
         .patch('/api/projects/unknown-uuid')
+        .set(adminAuthHeader('unknown-uuid'))
         .send({ name: 'New Name' });
 
       expect(res.status).toBe(404);
@@ -184,6 +187,7 @@ describe('Project Router Endpoints', () => {
 
       const res = await request(app)
         .patch(`/api/projects/${p2.body.project.id}`)
+        .set(adminAuthHeader(p2.body.project.id))
         .send({ code: 'EXISTING-01' });
 
       expect(res.status).toBe(409);
@@ -197,6 +201,7 @@ describe('Project Router Endpoints', () => {
 
       const res = await request(app)
         .patch(`/api/projects/${p.body.project.id}`)
+        .set(adminAuthHeader(p.body.project.id))
         .send({ status: 'not_a_valid_status' });
 
       expect(res.status).toBe(400);
@@ -212,7 +217,9 @@ describe('Project Router Endpoints', () => {
 
       const projectId = createRes.body.project.id;
 
-      const deleteRes = await request(app).delete(`/api/projects/${projectId}`);
+      const deleteRes = await request(app)
+        .delete(`/api/projects/${projectId}`)
+        .set(adminAuthHeader(projectId));
       expect(deleteRes.status).toBe(200);
       expect(deleteRes.body.success).toBe(true);
       expect(deleteRes.body.message).toContain('deleted');
@@ -223,7 +230,9 @@ describe('Project Router Endpoints', () => {
     });
 
     it('should return 404 Not Found when deleting non-existent project', async () => {
-      const res = await request(app).delete('/api/projects/unknown-uuid');
+      const res = await request(app)
+        .delete('/api/projects/unknown-uuid')
+        .set(adminAuthHeader('unknown-uuid'));
       expect(res.status).toBe(404);
       expect(res.body.code).toBe('NOT_FOUND');
     });

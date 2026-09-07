@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Evidence End-to-End Provenance & Traceability Chain', () => {
   let app: ReturnType<typeof createApp>;
@@ -38,6 +39,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // 2. Import baseline schedule with Activity
     const sRes = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach(
         'file',
         Buffer.from(
@@ -71,6 +73,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // Step A: Progress report 1 received
     const u1Res = await request(app)
       .post(`/api/projects/${projectId}/progress-updates`)
+      .set(workerAuthHeader(projectId))
       .send({
         reportDate: '2026-08-10',
         reporterName: 'Suresh Patil',
@@ -82,12 +85,14 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // Step B: Attach 2 evidence files to update 1 (drawing + concrete ticket)
     const ev1Res = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', file1)
       .field('progressUpdateId', update1Id);
     const ev1Id = ev1Res.body.evidence.id;
 
     const ev2Res = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', file2)
       .field('progressUpdateId', update1Id);
     const ev2Id = ev2Res.body.evidence.id;
@@ -134,6 +139,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // Step E: Progress report 2 received
     const u2Res = await request(app)
       .post(`/api/projects/${projectId}/progress-updates`)
+      .set(workerAuthHeader(projectId))
       .send({
         reportDate: '2026-08-25',
         reporterName: 'Suresh Patil',
@@ -145,6 +151,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // Step F: Attach inspection memo evidence to update 2
     const ev3Res = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', file3)
       .field('progressUpdateId', update2Id);
     const ev3Id = ev3Res.body.evidence.id;
@@ -218,23 +225,23 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     );
 
     // 4. Content of each evidence file can be fetched and matches the original ground-truth bytes
-    const content1 = await request(app).get(
-      `/api/projects/${projectId}/evidence/${ev1Id}/content`
-    );
+    const content1 = await request(app)
+      .get(`/api/projects/${projectId}/evidence/${ev1Id}/content`)
+      .set(workerAuthHeader(projectId));
     expect(content1.status).toBe(200);
     const text1 = content1.text || (Buffer.isBuffer(content1.body) ? content1.body.toString('utf-8') : '');
     expect(text1).toBe('BLUEPRINT FOR PIER 1');
 
-    const content2 = await request(app).get(
-      `/api/projects/${projectId}/evidence/${ev2Id}/content`
-    );
+    const content2 = await request(app)
+      .get(`/api/projects/${projectId}/evidence/${ev2Id}/content`)
+      .set(workerAuthHeader(projectId));
     expect(content2.status).toBe(200);
     const text2 = content2.text || (Buffer.isBuffer(content2.body) ? content2.body.toString('utf-8') : '');
     expect(text2).toBe('READY-MIX CONCRETE BATCH 4519 TICKET');
 
-    const content3 = await request(app).get(
-      `/api/projects/${projectId}/evidence/${ev3Id}/content`
-    );
+    const content3 = await request(app)
+      .get(`/api/projects/${projectId}/evidence/${ev3Id}/content`)
+      .set(workerAuthHeader(projectId));
     expect(content3.status).toBe(200);
     const text3 = content3.text || (Buffer.isBuffer(content3.body) ? content3.body.toString('utf-8') : '');
     expect(text3).toBe('QA INSPECTION SIGN-OFF BY CHIEF ENGINEER');
@@ -244,6 +251,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // 1. Create a distinct test activity
     const sRes = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach(
         'file',
         Buffer.from(
@@ -260,6 +268,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
     // 2. Create progress update with attached evidence
     const uRes = await request(app)
       .post(`/api/projects/${projectId}/progress-updates`)
+      .set(workerAuthHeader(projectId))
       .send({
         reportDate: '2026-08-05',
         rawText: 'Excavation completed for some trench work in Zone B.'
@@ -268,6 +277,7 @@ describe('Evidence End-to-End Provenance & Traceability Chain', () => {
 
     const evRes = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', file1)
       .field('progressUpdateId', updateId);
     const evidenceId = evRes.body.evidence.id;

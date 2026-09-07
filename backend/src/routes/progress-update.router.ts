@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { progressUpdateService, ProgressUpdateService } from '../services/progress-update.service.js';
 import { validateRequest, validateParams } from '../middleware/validate.js';
+import { requireRole, optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   createProgressUpdateSchema,
   progressUpdateProjectIdParamSchema,
@@ -10,9 +11,10 @@ import {
 export function createProgressUpdateRouter(service: ProgressUpdateService = progressUpdateService): Router {
   const router = Router();
 
-  // POST /projects/:projectId/progress-updates - Record a new manual field progress update
+  // POST /projects/:projectId/progress-updates - Record a new manual field progress update (Worker & Admin)
   router.post(
     '/projects/:projectId/progress-updates',
+    requireRole(['worker', 'admin']),
     validateRequest({
       params: progressUpdateProjectIdParamSchema,
       body: createProgressUpdateSchema
@@ -40,6 +42,7 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
   // GET /projects/:projectId/progress-updates - List all progress updates for a project (newest-first)
   router.get(
     '/projects/:projectId/progress-updates',
+    optionalAuthenticateSession,
     validateParams(progressUpdateProjectIdParamSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -55,6 +58,7 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
   // GET /projects/:projectId/progress-updates/:updateId - Retrieve a single progress update by ID (project-scoped)
   router.get(
     '/projects/:projectId/progress-updates/:updateId',
+    optionalAuthenticateSession,
     validateParams(progressUpdateParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {

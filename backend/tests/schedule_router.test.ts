@@ -3,6 +3,7 @@ import request from 'supertest';
 import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
+import { adminAuthHeader } from './helpers/auth-test-helper.js';
 
 const fixturesDir = path.resolve(process.cwd(), 'backend', 'tests', 'fixtures');
 
@@ -34,6 +35,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', csvPath);
 
       expect(res.status).toBe(201);
@@ -50,6 +52,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', xlsxPath);
 
       expect(res.status).toBe(201);
@@ -61,7 +64,8 @@ describe('Schedule Router Endpoints', () => {
 
     it('should reject when no file is uploaded', async () => {
       const res = await request(app)
-        .post(`/api/projects/${projectId}/schedules/import`);
+        .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId));
 
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/No schedule file uploaded/);
@@ -72,6 +76,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', badFilePath);
 
       expect(res.status).toBe(400);
@@ -83,6 +88,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', badCsvPath);
 
       expect(res.status).toBe(400);
@@ -94,6 +100,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', dupCsvPath);
 
       expect(res.status).toBe(422);
@@ -121,6 +128,7 @@ describe('Schedule Router Endpoints', () => {
       try {
         const res = await request(app)
           .post(`/api/projects/${projectId}/schedules/import`)
+          .set(adminAuthHeader(projectId))
           .attach('file', tempCsv);
 
         expect(res.status).toBe(422);
@@ -148,6 +156,7 @@ describe('Schedule Router Endpoints', () => {
 
       const res = await request(app)
         .post('/api/projects/non-existent-project-id/schedules/import')
+        .set(adminAuthHeader('non-existent-project-id'))
         .attach('file', csvPath);
 
       expect(res.status).toBe(404);
@@ -167,6 +176,7 @@ describe('Schedule Router Endpoints', () => {
       const csvPath = path.join(fixturesDir, 'valid_schedule.csv');
       await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', csvPath);
 
       const res = await request(app).get(`/api/projects/${projectId}/schedules`);
@@ -182,6 +192,7 @@ describe('Schedule Router Endpoints', () => {
       const csvPath = path.join(fixturesDir, 'valid_schedule.csv');
       const importRes = await request(app)
         .post(`/api/projects/${projectId}/schedules/import`)
+        .set(adminAuthHeader(projectId))
         .attach('file', csvPath);
 
       const scheduleId = importRes.body.schedule.id;

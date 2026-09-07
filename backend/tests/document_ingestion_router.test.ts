@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { workerRunner } from '../src/jobs/worker-runner.js';
+import { adminAuthHeader, workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evidenceId/process (Pass 15 Async)', () => {
   let app: ReturnType<typeof createApp>;
@@ -47,6 +48,7 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
 
     const evRes = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', validCsvFile);
     evidenceId = evRes.body.evidence.id;
   });
@@ -58,6 +60,7 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
   it('should enqueue document ingestion job and return 202 Accepted with queued job', async () => {
     const res = await request(app)
       .post(`/api/projects/${projectId}/evidence/${evidenceId}/process`)
+      .set(adminAuthHeader(projectId))
       .send();
 
     expect(res.status).toBe(202);
@@ -83,6 +86,7 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
   it('should return 404 for non-existent project', async () => {
     const res = await request(app)
       .post(`/api/projects/non-existent-proj/evidence/${evidenceId}/process`)
+      .set(adminAuthHeader('non-existent-proj'))
       .send();
 
     expect(res.status).toBe(404);
@@ -91,6 +95,7 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
   it('should return 404 for non-existent evidence', async () => {
     const res = await request(app)
       .post(`/api/projects/${projectId}/evidence/non-existent-ev/process`)
+      .set(adminAuthHeader(projectId))
       .send();
 
     expect(res.status).toBe(404);
@@ -99,11 +104,13 @@ describe('Document Ingestion Router — POST /projects/:projectId/evidence/:evid
   it('should enqueue unprocessable / empty evidence file and worker marks it failed', async () => {
     const emptyEvRes = await request(app)
       .post(`/api/projects/${projectId}/evidence`)
+      .set(workerAuthHeader(projectId))
       .attach('file', emptyFile);
     const emptyEvId = emptyEvRes.body.evidence.id;
 
     const res = await request(app)
       .post(`/api/projects/${projectId}/evidence/${emptyEvId}/process`)
+      .set(adminAuthHeader(projectId))
       .send();
 
     expect(res.status).toBe(202);

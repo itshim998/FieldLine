@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase, getDatabase } from '../src/database/db.js';
+import { adminAuthHeader } from './helpers/auth-test-helper.js';
 
 const fixturesDir = path.resolve(process.cwd(), 'backend', 'tests', 'fixtures');
 
@@ -42,6 +43,7 @@ describe('E2E Schedule Validation and Persistence Safety', () => {
     // 1. Attempt to import invalid schedule
     const res = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach('file', invalidCsvPath);
 
     // 2. Expect 422 Unprocessable Entity
@@ -98,6 +100,7 @@ describe('E2E Schedule Validation and Persistence Safety', () => {
     const validCsvPath = path.join(fixturesDir, 'valid_schedule.csv');
     const csvRes = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach('file', validCsvPath);
 
     expect(csvRes.status).toBe(201);
@@ -108,6 +111,7 @@ describe('E2E Schedule Validation and Persistence Safety', () => {
     const validXlsxPath = path.join(fixturesDir, 'valid_schedule.xlsx');
     const xlsxRes = await request(app)
       .post(`/api/projects/${projectId}/schedules/import`)
+      .set(adminAuthHeader(projectId))
       .attach('file', validXlsxPath);
 
     expect(xlsxRes.status).toBe(201);

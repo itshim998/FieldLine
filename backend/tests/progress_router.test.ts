@@ -6,6 +6,7 @@ import { SqliteScheduleRepository } from '../src/repositories/schedule.repositor
 import { SqliteActivityRepository } from '../src/repositories/activity.repository.js';
 import { SqliteActivityMatchRepository } from '../src/repositories/activity-match.repository.js';
 import { activityProgressResponseSchema } from '../src/validation/progress-normalization.schema.js';
+import { workerAuthHeader } from './helpers/auth-test-helper.js';
 
 describe('Pass 10 — Progress Router Endpoints', () => {
   let app: ReturnType<typeof createApp>;
@@ -64,6 +65,7 @@ describe('Pass 10 — Progress Router Endpoints', () => {
     // 4. Create progress update for project 1
     const u1Res = await request(app)
       .post(`/api/projects/${testProjectId}/progress-updates`)
+      .set(workerAuthHeader(testProjectId))
       .send({
         reportDate: '2026-08-26',
         reporterName: 'Sanjay Deshmukh',
