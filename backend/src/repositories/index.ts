@@ -67,3 +67,9 @@ export {
 } from './project-account.repository.js';
 export type { ProjectAccountRepository } from './project-account.repository.js';
 
+export {
+  SqliteOperationalBlockerRepository,
+  operationalBlockerRepository
+} from './operational-blocker.repository.js';
+export type { OperationalBlockerRepository } from './operational-blocker.repository.js';
+

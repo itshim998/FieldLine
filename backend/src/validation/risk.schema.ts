@@ -18,7 +18,8 @@ export const riskReasonCodeEnum = z.enum([
   'near_finish_and_behind',
   'delayed_status',
   'positive_variance',
-  'within_plan'
+  'within_plan',
+  'active_blocker'
 ]);
 
 export const riskReasonSchema = z.object({

@@ -26,6 +26,8 @@ import { useAuth } from '../../context/AuthContext.js';
 import { AssistantMarkdown } from '../assistant/AssistantMarkdown.js';
 import { TodayWorkView, OperationalTaskItem } from './TodayWorkView.js';
 import { WorkerReportModal } from './WorkerReportModal.js';
+import { BlockerModal } from './BlockerModal.js';
+import { ReportHazardModal } from './ReportHazardModal.js';
 import { WorkerTab } from '../../router.js';
 
 export interface WorkerActivity {
@@ -99,6 +101,11 @@ export function WorkerCockpitView({
   // Multi-Modal Field Capture Modal state (Pass 32)
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
   const [modalInitialTask, setModalInitialTask] = useState<OperationalTaskItem | null>(null);
+
+  // Blocker & Safety Modals state (Pass 33)
+  const [isBlockerModalOpen, setIsBlockerModalOpen] = useState<boolean>(false);
+  const [blockerModalTask, setBlockerModalTask] = useState<OperationalTaskItem | null>(null);
+  const [isHazardModalOpen, setIsHazardModalOpen] = useState<boolean>(false);
 
   const handleOpenCaptureModal = (task?: OperationalTaskItem | null) => {
     setModalInitialTask(task || null);
@@ -254,13 +261,14 @@ export function WorkerCockpitView({
     onTabChange('report');
   };
 
-  // Pre-fill quick report with operational blocker
+  // Open first-class operational blocker modal
   const handleLogBlockerForTask = (task: OperationalTaskItem) => {
-    setSelectedActivityId(task.id);
-    setRawText(
-      `[OPERATIONAL BLOCKER on ${task.externalId} — ${task.name} (${task.location || 'Site'})]: `
-    );
-    onTabChange('report');
+    setBlockerModalTask(task);
+    setIsBlockerModalOpen(true);
+  };
+
+  const handleOpenHazardModal = () => {
+    setIsHazardModalOpen(true);
   };
 
   // Add quick snippet to notes
@@ -429,6 +437,7 @@ export function WorkerCockpitView({
             asOfDate={asOfDate}
             onReportActivity={handleReportForActivity}
             onLogBlocker={handleLogBlockerForTask}
+            onOpenReportHazard={handleOpenHazardModal}
           />
         )}
 
@@ -846,6 +855,25 @@ export function WorkerCockpitView({
           fetchRecentUpdates();
           fetchActivities();
         }}
+      />
+
+      {/* Operational Blocker Modal (Pass 33) */}
+      <BlockerModal
+        projectId={projectId}
+        isOpen={isBlockerModalOpen}
+        onClose={() => setIsBlockerModalOpen(false)}
+        initialTask={blockerModalTask}
+        onBlockerLogged={() => {
+          fetchActivities();
+        }}
+      />
+
+      {/* Safety Hazard Observation Modal (Pass 33) */}
+      <ReportHazardModal
+        projectId={projectId}
+        isOpen={isHazardModalOpen}
+        onClose={() => setIsHazardModalOpen(false)}
+        selectedArea={blockerModalTask?.location || undefined}
       />
     </div>
   );

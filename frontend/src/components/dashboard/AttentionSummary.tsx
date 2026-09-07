@@ -54,6 +54,17 @@ export interface UnresolvedMatchFact {
   rationale: string | null;
 }
 
+export interface BlockerFact {
+  id: string;
+  activityId: string | null;
+  activityExternalId: string | null;
+  activityName: string;
+  category: string;
+  description: string;
+  reporterName: string;
+  createdAt: string;
+}
+
 export interface AttentionSummaryProps {
   delayedCount: number;
   delayed: DelayedFact[];
@@ -63,6 +74,10 @@ export interface AttentionSummaryProps {
   stale: StaleFact[];
   unresolvedMatchesCount: number;
   unresolvedMatches: UnresolvedMatchFact[];
+  activeBlockersCount?: number;
+  activeBlockers?: BlockerFact[];
+  blockersByRootCause?: Record<string, number>;
+  onResolveBlocker?: (blockerId: string) => void;
   onNavigateToIntelligence?: () => void;
   onNavigateToProgressReview?: (updateId?: string) => void;
   onNavigateToActivities?: (activityId?: string) => void;
@@ -77,11 +92,17 @@ export function AttentionSummary({
   stale,
   unresolvedMatchesCount,
   unresolvedMatches,
+  activeBlockersCount,
+  activeBlockers,
+  blockersByRootCause,
+  onResolveBlocker,
   onNavigateToIntelligence,
   onNavigateToProgressReview,
   onNavigateToActivities
 }: AttentionSummaryProps): React.JSX.Element {
-  const totalAttentionItems = delayedCount + atRiskCount + staleCount + unresolvedMatchesCount;
+  const blockersCount = activeBlockersCount ?? (activeBlockers?.length ?? 0);
+  const totalAttentionItems =
+    delayedCount + atRiskCount + staleCount + unresolvedMatchesCount + blockersCount;
 
   return (
     <div className="attention-summary-card">
@@ -111,6 +132,66 @@ export function AttentionSummary({
         </div>
       ) : (
         <div className="attention-sections-list">
+          {/* 0. Active Operational Blockers (Pass 33) */}
+          {blockersCount > 0 && (
+            <div className="attention-block blockers" data-testid="attention-blockers-section">
+              <div className="attention-block-header">
+                <div className="attention-block-title-group">
+                  <AlertTriangle size={15} color="#f59e0b" />
+                  <span className="attention-block-title">
+                    Active Operational Blockers ({blockersCount})
+                  </span>
+                </div>
+                {blockersByRootCause && (
+                  <div className="blocker-root-cause-tags">
+                    {Object.entries(blockersByRootCause)
+                      .filter(([_, count]) => count > 0)
+                      .map(([cat, count]) => (
+                        <span key={cat} className="root-cause-pill" data-testid={`root-cause-${cat}`}>
+                          {cat}: <strong>{count}</strong>
+                        </span>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="attention-items-sublist">
+                {(activeBlockers || []).slice(0, 4).map((b) => (
+                  <div key={b.id} className="attention-row-card blocker-row" data-testid={`blocker-item-${b.id}`}>
+                    <div className="attention-row-main">
+                      <div className="attention-pill-group">
+                        <span className="code-pill amber">{b.category.toUpperCase()}</span>
+                        {b.activityExternalId && (
+                          <span className="code-pill blue">{b.activityExternalId}</span>
+                        )}
+                        <span className="attention-reporter-sub">By {b.reporterName}</span>
+                      </div>
+                      <div className="attention-row-name">{b.description}</div>
+                      {b.activityName && b.activityName !== 'General Site' && (
+                        <div className="attention-row-subtext">Target: {b.activityName}</div>
+                      )}
+                    </div>
+                    {onResolveBlocker && (
+                      <button
+                        type="button"
+                        data-testid={`resolve-blocker-btn-${b.id}`}
+                        className="btn btn-outline btn-xs resolve-blocker-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onResolveBlocker(b.id);
+                        }}
+                        title="Mark blocker as resolved"
+                      >
+                        <CheckCircle2 size={12} color="var(--accent-emerald)" />
+                        <span>Resolve</span>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 1. Unresolved AI Matches (Section 15 Review Uncertainty) */}
           {unresolvedMatchesCount > 0 && (
             <div className="attention-block unresolved">

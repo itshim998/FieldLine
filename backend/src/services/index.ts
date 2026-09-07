@@ -222,4 +222,10 @@ export {
 } from './auth.service.js';
 export type { AuthServiceOptions } from './auth.service.js';
 
+export {
+  BlockerService,
+  blockerService
+} from './blocker/blocker.service.js';
+export type { BlockerServiceDependencies } from './blocker/blocker.service.js';
+
 

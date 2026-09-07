@@ -17,6 +17,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
+import { WorkAreaSafetyBanner } from './WorkAreaSafetyBanner.js';
 
 export interface OperationalTaskItem {
   id: string;
@@ -54,6 +55,7 @@ export interface TodayWorkViewProps {
   onReportActivity: (task: OperationalTaskItem) => void;
   onLogBlocker?: (task: OperationalTaskItem) => void;
   onOpenDetails?: (task: OperationalTaskItem) => void;
+  onOpenReportHazard?: () => void;
 }
 
 export const WORK_AREAS = [
@@ -71,12 +73,14 @@ export function TodayWorkView({
   asOfDate = new Date().toISOString().slice(0, 10),
   onReportActivity,
   onLogBlocker,
-  onOpenDetails
+  onOpenDetails,
+  onOpenReportHazard
 }: TodayWorkViewProps): React.JSX.Element {
   const { authFetch } = useAuth();
 
   const [tasks, setTasks] = useState<OperationalTaskItem[]>([]);
   const [summary, setSummary] = useState<OperationalTaskSummary | null>(null);
+  const [activeBlockers, setActiveBlockers] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -103,14 +107,25 @@ export function TodayWorkView({
         `/api/projects/${projectId}/worker/operational-tasks?${params.toString()}`
       );
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || errData.message || `Failed to fetch tasks (HTTP ${res.status})`);
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(data.tasks || []);
+        setSummary(data.summary || null);
+      } else {
+        const errData = await res.json();
+        setError(errData.error?.message || errData.message || 'Failed to load operational tasks');
       }
 
-      const data = await res.json();
-      setTasks(data.tasks || []);
-      setSummary(data.summary || null);
+      // Fetch active operational blockers for project
+      try {
+        const blockersRes = await authFetch(`/api/projects/${projectId}/blockers?status=active`);
+        if (blockersRes.ok) {
+          const bData = await blockersRes.json();
+          setActiveBlockers(bData.blockers || []);
+        }
+      } catch {
+        // non-blocking
+      }
     } catch (err: any) {
       setError(err.message || 'Error loading operational tasks');
     } finally {
@@ -342,6 +357,14 @@ export function TodayWorkView({
         </div>
       </div>
 
+      {/* Contextual Work Area Safety Banner */}
+      <WorkAreaSafetyBanner
+        selectedArea={selectedArea}
+        onOpenReportHazard={() => {
+          if (onOpenReportHazard) onOpenReportHazard();
+        }}
+      />
+
       {/* Error Alert */}
       {error && (
         <div className="operational-error-alert" role="alert">
@@ -413,6 +436,12 @@ export function TodayWorkView({
                 </div>
 
                 <div className="header-meta-right">
+                  {activeBlockers.some((b) => b.activityId === task.id) && (
+                    <span className="task-blocker-badge" title="Active operational blocker reported on this task">
+                      <AlertTriangle size={11} color="#f59e0b" />
+                      <span>Blocker</span>
+                    </span>
+                  )}
                   <span
                     className={`operational-status-pill ${getStatusBadgeClass(task.status)}`}
                     data-testid={`status-badge-${task.externalId}`}

@@ -13,6 +13,7 @@ import { ActivityStatusSummary } from './ActivityStatusSummary.js';
 import { AttentionSummary } from './AttentionSummary.js';
 import { MilestoneSummary } from './MilestoneSummary.js';
 import { RecentUpdates, DashboardUpdateItem } from './RecentUpdates.js';
+import { useAuth } from '../../context/AuthContext.js';
 
 export interface ProjectDashboardData {
   project: {
@@ -127,6 +128,18 @@ export interface ProjectDashboardData {
       reviewState: string | null;
       rationale: string | null;
     }>;
+    activeBlockersCount?: number;
+    activeBlockers?: Array<{
+      id: string;
+      activityId: string | null;
+      activityExternalId: string | null;
+      activityName: string;
+      category: string;
+      description: string;
+      reporterName: string;
+      createdAt: string;
+    }>;
+    blockersByRootCause?: Record<string, number>;
   };
 }
 
@@ -146,6 +159,7 @@ export function ProjectDashboardView({
   onTraceEvidence,
   onSelectActivity
 }: ProjectDashboardViewProps): React.JSX.Element {
+  const { authFetch } = useAuth();
   const [dashboardData, setDashboardData] = useState<ProjectDashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -279,6 +293,21 @@ export function ProjectDashboardView({
           stale={dashboardData.attention.stale}
           unresolvedMatchesCount={dashboardData.attention.unresolvedMatchesCount}
           unresolvedMatches={dashboardData.attention.unresolvedMatches}
+          activeBlockersCount={dashboardData.attention.activeBlockersCount}
+          activeBlockers={dashboardData.attention.activeBlockers}
+          blockersByRootCause={dashboardData.attention.blockersByRootCause}
+          onResolveBlocker={async (blockerId) => {
+            try {
+              await authFetch(`/api/projects/${projectId}/blockers/${blockerId}/resolve`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+              });
+              fetchDashboard(asOfDate);
+            } catch {
+              // ignore
+            }
+          }}
           onNavigateToIntelligence={() => onNavigateTab('intelligence')}
           onNavigateToProgressReview={(updateId) => onNavigateTab('progress', { updateId })}
           onNavigateToActivities={(activityId) => {

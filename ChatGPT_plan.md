@@ -349,7 +349,7 @@ Field reporting must require minimal cognitive overhead. FieldLine already has a
 
 ---
 
-## Pass 33 — Operational Blockers & Work-Relevant Safety Context
+## ~~Pass 33 — Operational Blockers & Work-Relevant Safety Context~~ (COMPLETED)
 
 ### Context & Need
 Per `long_term_plan.md` Sections 6 & 10, workers must be able to report operational constraints (materials, equipment, access) and view work-relevant safety hazards. Crucially, field blockers must connect directly to FieldLine's **deterministic Delay & Risk Engine**.
@@ -370,21 +370,36 @@ Per `long_term_plan.md` Sections 6 & 10, workers must be able to report operatio
   * Index on `(project_id, status)` and `(activity_id)`.
 * **Services & Routes:**
   * Create `BlockerService` with methods: `reportBlocker`, `listActiveByProject`, `listByActivity`, `resolveBlocker`.
-  * Mount endpoints: `POST /api/projects/:projectId/blockers`, `GET /api/projects/:projectId/blockers`, `PATCH .../blockers/:id/resolve`.
-* **Risk Engine Integration (`risk-classification.calculator.ts`):**
+  * Mount endpoints: `POST /api/projects/:projectId/blockers`, `GET /api/projects/:projectId/blockers`, `PATCH .../blockers/:id/resolve`, and `POST .../safety/hazards`.
+* **Risk Engine Integration (`risk-classification.calculator.ts` & `risk-classification.service.ts`):**
   * Pass active blocker signals into the risk classifier.
-  * Flag activities with active blockers with actionable risk reasons (e.g., *"At Risk: Equipment blocker reported: crane unavailable"*).
+  * Flag activities with active blockers with actionable risk reasons (`code: 'active_blocker'`, e.g., *"Equipment blocker: Crane out of service for pump skid placement"*).
+  * Resolving a blocker deterministically clears the blocker risk signal and restores `ON_TRACK` status if no other risk condition exists.
 * **Worker & Admin UI:**
-  * Worker: "Log Blocker" button on task card; safety notice banner for active work area.
-  * Admin: "Needs Attention" card on Primary Dashboard displaying active site blockers with root-cause aggregation.
+  * Worker: "Log Blocker" button on task card, touch-friendly category grid, contextual Work Area Safety Banner with quick "Report Hazard / Near Miss" modal.
+  * Admin: "Needs Attention" card on Primary Dashboard displaying active site blockers with root-cause aggregation and quick resolve actions.
 
 ### 3. Evaluate
 * Write automated tests in `backend/tests/operational_blockers.test.ts`:
+  * 8 integration tests passing (100% pass rate).
   * Report blocker on `ACT-C01` (Pipe Rack PR-07) with category `equipment` ("crane down").
   * Verify blocker appears in Worker active blockers query.
-  * Verify `GET /api/projects/:projectId/risk-status` flags `ACT-C01` with the blocker rationale.
+  * Verify `GET /api/projects/:projectId/risk-status` flags `ACT-C01` with the blocker rationale (`active_blocker`).
   * Resolve blocker $\rightarrow$ verify risk status updates deterministically.
   * Verify safety hazard logging creates an auditable `project_event`.
+  * Verify root-cause category aggregation on Primary Dashboard.
+  * Enforce role authorization and project isolation.
+* Automated frontend tests (`frontend/tests/operational_blockers.test.tsx`):
+  * 6 tests passing (100% pass rate).
+  * BlockerModal category selection, field validation, and submission dispatch.
+  * WorkAreaSafetyBanner contextual briefing and PPE checklist per EPC area.
+  * ReportHazardModal fast incident/near-miss logging to `project_events`.
+  * AttentionSummary root-cause category pills and resolve button dispatch.
+* Full regression & release verification:
+  * Full production build succeeded (`tsc -p tsconfig.backend.json` + `vite build`).
+  * All 111 test files and 1,050 automated tests passing cleanly with 100% pass rate.
+  * Golden demo environment re-seeded and all 59 machine-checkable invariants verified.
+  * `npm run verify:release` executed in 64.5s with zero errors.
 
 ### 4. Exit Criteria
 * [x] Workers can report and view active operational blockers in seconds.

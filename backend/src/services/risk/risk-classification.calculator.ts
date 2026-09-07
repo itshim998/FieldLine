@@ -9,6 +9,7 @@ import {
   DependencyRiskSignal
 } from './risk-classification.types.js';
 import { diffInCalendarDays } from '../snapshot/progress-snapshot.calculator.js';
+import { OperationalBlocker } from '../../models/domain.types.js';
 
 export const STRONG_NEGATIVE_VARIANCE_THRESHOLD = -10.0;
 export const NEAR_FINISH_WINDOW_DAYS = 3;
@@ -35,7 +36,8 @@ export const NEAR_FINISH_WINDOW_DAYS = 3;
 export function classifyActivityRisk(
   item: ActivityProgressSnapshotItem,
   asOfDate: string,
-  _dependencies?: DependencyRiskSignal[]
+  _dependencies?: DependencyRiskSignal[],
+  activeBlockers?: OperationalBlocker[]
 ): ActivityRiskStatusItem {
   // 1. COMPLETED (Precedence #1)
   const isCompleted = item.status === 'completed' || item.actualProgress >= 100;
@@ -80,6 +82,15 @@ export function classifyActivityRisk(
       }
     ];
 
+    if (activeBlockers && activeBlockers.length > 0) {
+      for (const blocker of activeBlockers) {
+        reasons.push({
+          code: 'active_blocker',
+          message: `Operational blocker reported (${blocker.category}): ${blocker.description}`
+        });
+      }
+    }
+
     return {
       activityId: item.activityId,
       externalId: item.externalId,
@@ -108,11 +119,22 @@ export function classifyActivityRisk(
   const strongNegativeVariance = item.progressVariance <= STRONG_NEGATIVE_VARIANCE_THRESHOLD;
   const nearFinishAndBehind = nearFinish && behindPlan;
   const delayedExecutionStatus = item.status === 'delayed';
+  const hasActiveBlockers = Boolean(activeBlockers && activeBlockers.length > 0);
 
-  const isAtRisk = strongNegativeVariance || nearFinishAndBehind || delayedExecutionStatus;
+  const isAtRisk =
+    strongNegativeVariance || nearFinishAndBehind || delayedExecutionStatus || hasActiveBlockers;
 
   if (isAtRisk) {
     const reasons: RiskReason[] = [];
+
+    if (hasActiveBlockers && activeBlockers) {
+      for (const blocker of activeBlockers) {
+        reasons.push({
+          code: 'active_blocker',
+          message: `Operational blocker reported (${blocker.category}): ${blocker.description}`
+        });
+      }
+    }
 
     if (strongNegativeVariance) {
       reasons.push({
@@ -258,11 +280,15 @@ export function calculateProjectRiskSummary(
  */
 export function calculateProjectRiskStatus(
   snapshot: ProjectProgressSnapshot,
-  dependencies?: DependencyRiskSignal[]
+  dependencies?: DependencyRiskSignal[],
+  activeBlockersMap?: Map<string, OperationalBlocker[]>
 ): ProjectRiskStatus {
-  const activities = snapshot.activities.map(act =>
-    classifyActivityRisk(act, snapshot.asOfDate, dependencies)
-  );
+  const activities = snapshot.activities.map((act) => {
+    const blockers = activeBlockersMap
+      ? activeBlockersMap.get(act.activityId) || activeBlockersMap.get(act.externalId) || []
+      : undefined;
+    return classifyActivityRisk(act, snapshot.asOfDate, dependencies, blockers);
+  });
 
   const summary = calculateProjectRiskSummary(activities);
 

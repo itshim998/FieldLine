@@ -85,6 +85,18 @@ export interface DashboardUnresolvedMatchItem {
   rationale: string | null;
 }
 
+export interface DashboardActiveBlockerItem {
+  id: string;
+  activityId: string | null;
+  activityExternalId: string | null;
+  activityName: string;
+  category: string;
+  description: string;
+  reporterName: string;
+  reporterRole: string | null;
+  createdAt: string;
+}
+
 export interface DashboardAttentionSummary {
   delayedCount: number;
   delayed: DelayedActivityFact[];
@@ -94,6 +106,9 @@ export interface DashboardAttentionSummary {
   stale: StaleActivityFact[];
   unresolvedMatchesCount: number;
   unresolvedMatches: DashboardUnresolvedMatchItem[];
+  activeBlockersCount: number;
+  activeBlockers: DashboardActiveBlockerItem[];
+  blockersByRootCause: Record<string, number>;
 }
 
 export interface DashboardMatchItem {

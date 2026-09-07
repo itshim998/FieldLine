@@ -23,6 +23,10 @@ import {
   evidenceRepository as defaultEvidenceRepo
 } from '../../repositories/evidence.repository.js';
 import {
+  OperationalBlockerRepository,
+  operationalBlockerRepository as defaultBlockerRepo
+} from '../../repositories/operational-blocker.repository.js';
+import {
   ProgressSnapshotService,
   progressSnapshotService as defaultProgressSnapshotService,
   validateSnapshotDate,
@@ -50,7 +54,8 @@ import {
   DashboardRecentUpdateItem,
   DashboardMatchItem,
   DashboardProgressObservationItem,
-  DashboardEvidenceItem
+  DashboardEvidenceItem,
+  DashboardActiveBlockerItem
 } from './dashboard.types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
@@ -69,6 +74,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
   private progressSnapshotService: ProgressSnapshotService;
   private riskClassificationService: RiskClassificationService;
   private projectIntelligenceService: ProjectIntelligenceService;
+  private blockerRepo: OperationalBlockerRepository;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -80,6 +86,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
     progressSnapshotService?: ProgressSnapshotService;
     riskClassificationService?: RiskClassificationService;
     projectIntelligenceService?: ProjectIntelligenceService;
+    blockerRepo?: OperationalBlockerRepository;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
@@ -93,6 +100,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       dependencies?.riskClassificationService || defaultRiskClassificationService;
     this.projectIntelligenceService =
       dependencies?.projectIntelligenceService || defaultProjectIntelligenceService;
+    this.blockerRepo = dependencies?.blockerRepo || defaultBlockerRepo;
   }
 
   getDashboard(
@@ -309,6 +317,25 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       })
       .sort((a, b) => a.confidenceScore - b.confidenceScore || b.reportDate.localeCompare(a.reportDate));
 
+    // Query active blockers and root-cause aggregation
+    const activeBlockers = this.blockerRepo.listActiveByProject(projectId);
+    const rootCauseSummary = this.blockerRepo.countByRootCause(projectId);
+
+    const dashboardActiveBlockers: DashboardActiveBlockerItem[] = activeBlockers.map((b) => {
+      const act = b.activityId ? activityMap.get(b.activityId) : undefined;
+      return {
+        id: b.id,
+        activityId: b.activityId,
+        activityExternalId: act?.externalId || null,
+        activityName: act?.name || 'General Site',
+        category: b.category,
+        description: b.description,
+        reporterName: b.reporterName,
+        reporterRole: b.reporterRole,
+        createdAt: b.createdAt
+      };
+    });
+
     const attention: DashboardAttentionSummary = {
       delayedCount: intelligence.delayed.length,
       delayed: intelligence.delayed,
@@ -317,7 +344,10 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       staleCount: intelligence.staleActivities.length,
       stale: intelligence.staleActivities,
       unresolvedMatchesCount: unresolvedMatches.length,
-      unresolvedMatches
+      unresolvedMatches,
+      activeBlockersCount: activeBlockers.length,
+      activeBlockers: dashboardActiveBlockers,
+      blockersByRootCause: rootCauseSummary
     };
 
     // 10. Build Recent Updates (bounded, deterministic newest first with batch repository queries)

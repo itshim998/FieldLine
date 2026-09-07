@@ -310,7 +310,10 @@ export type ProjectEventType =
   | 'processing_job_queued'
   | 'processing_job_started'
   | 'processing_job_completed'
-  | 'processing_job_failed';
+  | 'processing_job_failed'
+  | 'blocker_reported'
+  | 'blocker_resolved'
+  | 'safety_hazard_reported';
 
 export interface ProjectEvent {
   id: string;
@@ -408,7 +411,8 @@ export type RiskReasonCode =
   | 'near_finish_and_behind'
   | 'delayed_status'
   | 'positive_variance'
-  | 'within_plan';
+  | 'within_plan'
+  | 'active_blocker';
 
 export interface RiskReason {
   code: RiskReasonCode;
@@ -556,6 +560,59 @@ export interface AuthResult {
     code: string;
     name: string;
   };
+}
+
+// ==========================================
+// 13. Operational Blockers & Constraints (Pass 33)
+// ==========================================
+export type BlockerCategory =
+  | 'equipment'
+  | 'material'
+  | 'access'
+  | 'inspection'
+  | 'weather'
+  | 'safety'
+  | 'coordination';
+
+export type BlockerStatus = 'active' | 'resolved';
+
+export interface OperationalBlocker {
+  id: string;
+  projectId: string;
+  activityId: string | null;
+  category: BlockerCategory;
+  description: string;
+  status: BlockerStatus;
+  reporterName: string;
+  reporterRole: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export interface CreateBlockerInput {
+  id?: string;
+  projectId: string;
+  activityId?: string | null;
+  category: BlockerCategory;
+  description: string;
+  status?: BlockerStatus;
+  reporterName: string;
+  reporterRole?: string | null;
+}
+
+export interface ResolveBlockerInput {
+  id: string;
+  projectId: string;
+  resolvedAt?: string;
+}
+
+export interface ReportSafetyHazardInput {
+  workArea?: string;
+  hazardType: string;
+  description: string;
+  reporterName: string;
+  reporterRole?: string | null;
+  immediateActionTaken?: string | null;
 }
 
 
