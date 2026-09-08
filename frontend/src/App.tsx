@@ -329,7 +329,7 @@ interface HealthData {
 const STORAGE_KEY_SELECTED_PROJECT = 'fieldline_selected_project_id';
 
 function MainAppContent(): React.JSX.Element {
-  const { session, token, project: authProject, isAuthenticated, logout, authFetch } = useAuth();
+  const { session, token, project: authProject, isAuthenticated, logout, authFetch, isLoading: isAuthLoading } = useAuth();
 
   // Dual-Shell & Login State (PASS 30)
   const [isLoginView, setIsLoginView] = useState<boolean>(false);
@@ -1681,36 +1681,21 @@ function MainAppContent(): React.JSX.Element {
                 <LogOut size={13} />
               </button>
             </div>
-          ) : (
+          ) : null}
+
+          {session && (
             <button
-              id="header-login-btn"
+              id="header-golden-demo-btn"
               className="btn btn-secondary btn-sm"
-              onClick={() => {
-                setIsLoginView(true);
-                pushRoute({
-                  projectId: selectedProject?.id || null,
-                  tab: 'overview',
-                  isLogin: true
-                });
-              }}
+              onClick={() => handleSeedGoldenDemo()}
+              disabled={isSeedingDemo}
+              title="Seed or restore the presentation-ready Golden Demo repository (Refinery Expansion — Unit 4)"
               style={{ fontSize: '0.75rem', gap: '0.35rem' }}
             >
-              <User size={13} color="var(--accent-blue)" />
-              <span>Sign In</span>
+              {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <Sparkles size={13} color="var(--accent-indigo)" />}
+              <span>{isSeedingDemo ? 'Seeding Demo...' : 'Golden Demo'}</span>
             </button>
           )}
-
-          <button
-            id="header-golden-demo-btn"
-            className="btn btn-secondary btn-sm"
-            onClick={() => handleSeedGoldenDemo()}
-            disabled={isSeedingDemo}
-            title="Seed or restore the presentation-ready Golden Demo repository (Refinery Expansion — Unit 4)"
-            style={{ fontSize: '0.75rem', gap: '0.35rem' }}
-          >
-            {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <Sparkles size={13} color="var(--accent-indigo)" />}
-            <span>{isSeedingDemo ? 'Seeding Demo...' : 'Golden Demo'}</span>
-          </button>
 
           <button
             className="system-status-trigger"
@@ -1744,7 +1729,7 @@ function MainAppContent(): React.JSX.Element {
       )}
 
       {/* Main Content Area */}
-      {loadingProjects ? (
+      {loadingProjects || isAuthLoading ? (
         <div className="empty-state-card">
           <div className="empty-icon-wrapper">
             <RefreshCw size={28} className="pulse-dot" />
@@ -1752,10 +1737,11 @@ function MainAppContent(): React.JSX.Element {
           <h2 className="empty-title">Loading FieldLine Projects...</h2>
           <p className="empty-desc">Connecting to local SQLite database service</p>
         </div>
-      ) : isLoginView ? (
+      ) : isLoginView || (!session && !token) ? (
         <ProjectLoginView
           projects={projects}
           selectedProjectId={selectedProject?.id || null}
+          defaultAccountType={currentRouteRole || 'admin'}
           onSelectProject={(projId) => {
             const p = projects.find((x) => x.id === projId);
             if (p) setSelectedProject(p);
@@ -1767,7 +1753,7 @@ function MainAppContent(): React.JSX.Element {
               handleOpenProject(p, 'overview', null, role);
             }
           }}
-          onCancel={() => {
+          onCancel={session ? () => {
             setIsLoginView(false);
             if (selectedProject) {
               pushRoute({
@@ -1779,7 +1765,7 @@ function MainAppContent(): React.JSX.Element {
             } else {
               pushRoute({ projectId: null, tab: 'overview' });
             }
-          }}
+          } : undefined}
           onSeedGoldenDemo={handleSeedGoldenDemo}
           isSeedingDemo={isSeedingDemo}
         />

@@ -8,8 +8,9 @@ import {
   RefreshCw,
   FolderGit2,
   AlertCircle,
-  CheckCircle2,
-  KeyRound
+  KeyRound,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { useAuth, AccountType } from '../../context/AuthContext.js';
 
@@ -24,16 +25,18 @@ export interface ProjectSummary {
 export interface ProjectLoginViewProps {
   projects: ProjectSummary[];
   selectedProjectId?: string | null;
+  defaultAccountType?: AccountType;
   onSelectProject?: (projectId: string) => void;
   onLoginSuccess: (role: AccountType, projectId: string) => void;
   onCancel?: () => void;
-  onSeedGoldenDemo?: () => void;
+  onSeedGoldenDemo?: () => Promise<void> | void;
   isSeedingDemo?: boolean;
 }
 
 export function ProjectLoginView({
   projects,
   selectedProjectId,
+  defaultAccountType = 'worker',
   onSelectProject,
   onLoginSuccess,
   onCancel,
@@ -49,12 +52,14 @@ export function ProjectLoginView({
     return golden ? golden.id : projects[0]?.id || '';
   });
 
-  const [accountType, setAccountType] = useState<AccountType>('worker');
+  const [accountType, setAccountType] = useState<AccountType>(defaultAccountType);
   const [passcode, setPasscode] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   const projectSelectId = useId();
+  const operationalShellSelectId = useId();
   const passcodeFieldId = useId();
 
   useEffect(() => {
@@ -111,10 +116,20 @@ export function ProjectLoginView({
 
     if (!targetProject) {
       if (onSeedGoldenDemo) {
-        onSeedGoldenDemo();
+        setIsSubmitting(true);
+        setError(null);
+        try {
+          await onSeedGoldenDemo();
+        } catch {
+          // ignore
+        }
       }
-      setError('Golden Demo project not found. Please click "Seed Demo" first.');
-      return;
+      targetProject = projects.find((p) => p.code === 'REFINERY-U4');
+      if (!targetProject) {
+        setError('Golden Demo project not found. Please click "Seed Demo" first.');
+        setIsSubmitting(false);
+        return;
+      }
     }
 
     const demoPin = targetRole === 'worker' ? '4444' : 'RefineryAdmin2026!';
@@ -150,55 +165,15 @@ export function ProjectLoginView({
         <div className="login-card-header">
           <div className="login-badge-pill">
             <ShieldCheck size={14} className="login-badge-icon" />
-            <span>FieldLine Secure Authentication</span>
+            <span>FieldLine Secure Gateway</span>
           </div>
           <h1 className="login-title">Project Control Room & Execution Access</h1>
           <p className="login-subtitle">
-            Select your operational role and sign in to access project telemetry, schedule baselines, or field reporting.
+            Select project and operational shell to authenticate and enter workspace.
           </p>
         </div>
 
-        {/* 1-Click Golden Demo Quick Access Banner */}
-        <div className="demo-access-banner">
-          <div className="demo-access-title">
-            <Sparkles size={16} color="var(--accent-indigo)" />
-            <span>Golden Demo Instant Access (REFINERY-U4)</span>
-          </div>
-          <p className="demo-access-desc">
-            One-click sign-in to the SIH 2026 presentation dataset with pre-configured accounts:
-          </p>
-          <div className="demo-chips-grid">
-            <button
-              type="button"
-              id="quick-demo-worker-btn"
-              className="demo-chip-btn worker"
-              onClick={() => handleQuickDemoLogin('worker')}
-              disabled={isSubmitting || isSeedingDemo}
-            >
-              <User size={15} />
-              <div className="demo-chip-text">
-                <strong>Field Worker</strong>
-                <span>PIN: 4444</span>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              id="quick-demo-admin-btn"
-              className="demo-chip-btn admin"
-              onClick={() => handleQuickDemoLogin('admin')}
-              disabled={isSubmitting || isSeedingDemo}
-            >
-              <ShieldCheck size={15} />
-              <div className="demo-chip-text">
-                <strong>Admin / Superintendent</strong>
-                <span>RefineryAdmin2026!</span>
-              </div>
-            </button>
-          </div>
-        </div>
-
-        {/* Login Form */}
+        {/* Streamlined Login Form */}
         <form onSubmit={handleSubmit} className="login-form">
           {error && (
             <div className="login-error-alert" role="alert">
@@ -207,7 +182,7 @@ export function ProjectLoginView({
             </div>
           )}
 
-          {/* Project Selection */}
+          {/* 1. Target Infrastructure Project Dropdown */}
           <div className="login-field-group">
             <label htmlFor={projectSelectId} className="login-label">
               <FolderGit2 size={15} />
@@ -256,68 +231,37 @@ export function ProjectLoginView({
             )}
           </div>
 
-          {/* Operational Shell / Role Selector Cards */}
+          {/* 2. Access Type / Operational Shell Dropdown Menu */}
           <div className="login-field-group">
-            <label className="login-label">
-              <User size={15} />
-              <span>Select Operational Shell</span>
+            <label htmlFor={operationalShellSelectId} className="login-label">
+              {accountType === 'worker' ? <User size={15} /> : <ShieldCheck size={15} />}
+              <span>Access Type / Operational Shell</span>
             </label>
-            <div className="role-cards-grid">
-              <button
-                type="button"
-                id="role-select-worker-btn"
-                className={`role-select-card ${accountType === 'worker' ? 'selected' : ''}`}
-                onClick={() => {
-                  setAccountType('worker');
+            <div className="select-wrapper">
+              <select
+                id={operationalShellSelectId}
+                className="login-select"
+                value={accountType}
+                onChange={(e) => {
+                  const newRole = e.target.value as AccountType;
+                  setAccountType(newRole);
                   setPasscode('');
                   setError(null);
                 }}
+                disabled={isSubmitting}
               >
-                <div className="role-card-header">
-                  <div className="role-icon-box worker">
-                    <User size={20} />
-                  </div>
-                  <span className="role-shell-badge worker">Execution Cockpit</span>
-                </div>
-                <h3 className="role-card-title">Field Worker</h3>
-                <p className="role-card-desc">
-                  Optimized for mobile crews. Immediate shift tasks, one-touch progress reporting, and voice assistant.
-                </p>
-                <div className="role-card-indicator">
-                  {accountType === 'worker' ? <CheckCircle2 size={16} /> : <div className="indicator-circle" />}
-                  <span>Uses 4-Digit Passcode</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                id="role-select-admin-btn"
-                className={`role-select-card ${accountType === 'admin' ? 'selected' : ''}`}
-                onClick={() => {
-                  setAccountType('admin');
-                  setPasscode('');
-                  setError(null);
-                }}
-              >
-                <div className="role-card-header">
-                  <div className="role-icon-box admin">
-                    <ShieldCheck size={20} />
-                  </div>
-                  <span className="role-shell-badge admin">Control Room</span>
-                </div>
-                <h3 className="role-card-title">Admin / Project Engineer</h3>
-                <p className="role-card-desc">
-                  Full command dashboard. Ingest schedule baselines, review activity matches, inspect variance intelligence.
-                </p>
-                <div className="role-card-indicator">
-                  {accountType === 'admin' ? <CheckCircle2 size={16} /> : <div className="indicator-circle" />}
-                  <span>Uses Admin Password</span>
-                </div>
-              </button>
+                <option value="admin">Admin / Project Engineer (Control Room)</option>
+                <option value="worker">Field Worker (Execution Cockpit)</option>
+              </select>
             </div>
+            <span className="login-helper-text">
+              {accountType === 'worker'
+                ? 'Field Worker: Mobile crew shift tasks, 1-touch progress reporting, and voice assistant.'
+                : 'Admin / Project Engineer: Full command dashboard, schedule baselines, and variance intelligence.'}
+            </span>
           </div>
 
-          {/* Passcode / Password Input */}
+          {/* 3. Password Placeholder Input */}
           <div className="login-field-group">
             <label htmlFor={passcodeFieldId} className="login-label">
               {accountType === 'worker' ? <KeyRound size={15} /> : <Lock size={15} />}
@@ -325,10 +269,16 @@ export function ProjectLoginView({
                 {accountType === 'worker' ? 'Worker Passcode / PIN' : 'Administrator Password'}
               </span>
             </label>
-            <div className="passcode-input-wrapper">
+            <div className="passcode-input-wrapper" style={{ position: 'relative' }}>
               <input
                 id={passcodeFieldId}
-                type={accountType === 'worker' ? 'text' : 'password'}
+                type={
+                  accountType === 'worker'
+                    ? 'text'
+                    : showPassword
+                    ? 'text'
+                    : 'password'
+                }
                 inputMode={accountType === 'worker' ? 'numeric' : 'text'}
                 autoComplete="current-password"
                 className="login-input"
@@ -340,8 +290,32 @@ export function ProjectLoginView({
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 disabled={isSubmitting || isLoading}
+                style={{ paddingRight: accountType === 'admin' ? '2.5rem' : '0.9rem' }}
                 autoFocus
               />
+              {accountType === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    padding: '0.2rem',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              )}
             </div>
             <span className="login-helper-text">
               {accountType === 'worker'
@@ -350,7 +324,7 @@ export function ProjectLoginView({
             </span>
           </div>
 
-          {/* Action Buttons */}
+          {/* 4. Login Button */}
           <div className="login-actions">
             {onCancel && (
               <button
@@ -386,6 +360,46 @@ export function ProjectLoginView({
             </button>
           </div>
         </form>
+
+        {/* 5. Golden Demo Instant Access (REFINERY-U4) positioned below */}
+        <div className="demo-access-banner" style={{ marginTop: '1.75rem', marginBottom: 0 }}>
+          <div className="demo-access-title">
+            <Sparkles size={16} color="var(--accent-indigo)" />
+            <span>Golden Demo Instant Access (REFINERY-U4)</span>
+          </div>
+          <p className="demo-access-desc">
+            One-click sign-in to the SIH 2026 presentation dataset with pre-configured accounts:
+          </p>
+          <div className="demo-chips-grid">
+            <button
+              type="button"
+              id="quick-demo-worker-btn"
+              className="demo-chip-btn worker"
+              onClick={() => handleQuickDemoLogin('worker')}
+              disabled={isSubmitting || isSeedingDemo}
+            >
+              <User size={15} />
+              <div className="demo-chip-text">
+                <strong>Field Worker</strong>
+                <span>PIN: 4444</span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              id="quick-demo-admin-btn"
+              className="demo-chip-btn admin"
+              onClick={() => handleQuickDemoLogin('admin')}
+              disabled={isSubmitting || isSeedingDemo}
+            >
+              <ShieldCheck size={15} />
+              <div className="demo-chip-text">
+                <strong>Admin / Superintendent</strong>
+                <span>RefineryAdmin2026!</span>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

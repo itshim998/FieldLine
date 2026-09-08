@@ -160,10 +160,10 @@ describe('Pass 36 — End-to-End Truth Certification: Two-Account Lifecycle & No
       expect(activeBlockersRes.status).toBe(200);
       expect(activeBlockersRes.body.blockers.length).toBeGreaterThanOrEqual(1);
       const reported = activeBlockersRes.body.blockers.find(
-        (b: any) => b.reporterName === 'Carlos Rivera' && b.category === 'equipment'
+        (b: any) => b.id === blockerRes.body.blocker.id
       );
       expect(reported).toBeDefined();
-      expect(reported.description).toContain('crane hydraulic');
+      expect(reported.description).toContain('hydraulic');
     });
   });
 

@@ -6709,20 +6709,30 @@ body {
 .login-select,
 .login-input {
   width: 100%;
-  padding: 0.7rem 0.9rem;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 0.75rem 0.95rem;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   color: #f8fafc;
   font-size: 0.875rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.login-select {
+  cursor: pointer;
+}
+
+.login-select option {
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0.5rem;
+}
+
 .login-select:focus,
 .login-input:focus {
   outline: none;
   border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
 }
 
 .login-helper-text {
