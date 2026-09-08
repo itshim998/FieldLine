@@ -11,6 +11,8 @@ import { projectIntelligenceService } from '../backend/src/services/intelligence
 import { projectDashboardService } from '../backend/src/services/dashboard/project-dashboard.service.js';
 import { assistantService } from '../backend/src/services/assistant/assistant.service.js';
 import { projectAccountRepository } from '../backend/src/repositories/project-account.repository.js';
+import { operationalBlockerRepository } from '../backend/src/repositories/operational-blocker.repository.js';
+import { workerOperationalService } from '../backend/src/services/worker/worker-operational.service.js';
 import { authService } from '../backend/src/services/auth.service.js';
 import {
   GOLDEN_AS_OF_DATE,
@@ -171,12 +173,14 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
 
   // Verify Worker Authentication
   let workerAuthSuccess = false;
+  let workerToken = '';
   try {
     const workerResult = await authService.authenticate({
       projectCode: goldenManifestInvariants.projectCode,
       accountType: 'worker',
       passcode: goldenWorkerCredentials.pin
     });
+    workerToken = workerResult.token;
     workerAuthSuccess = workerResult.session.accountType === 'worker' && !!workerResult.token;
   } catch (err) {
     workerAuthSuccess = false;
@@ -185,12 +189,14 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
 
   // Verify Admin Authentication
   let adminAuthSuccess = false;
+  let adminToken = '';
   try {
     const adminResult = await authService.authenticate({
       projectCode: goldenManifestInvariants.projectCode,
       accountType: 'admin',
       passcode: goldenAdminCredentials.password
     });
+    adminToken = adminResult.token;
     adminAuthSuccess = adminResult.session.accountType === 'admin' && !!adminResult.token;
   } catch (err) {
     adminAuthSuccess = false;
@@ -209,6 +215,62 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
     invalidPasscodeRejected = true;
   }
   assert(invalidPasscodeRejected, 'Invalid worker passcode is rejected cleanly');
+
+  // 11. Operational Blockers Invariants (Pass 33 & 36)
+  const activeBlockers = operationalBlockerRepository.listActiveByProject(projectId);
+  assert(
+    activeBlockers.length === goldenManifestInvariants.expectedActiveBlockersCount,
+    `Active operational blockers count equals ${goldenManifestInvariants.expectedActiveBlockersCount} (found ${activeBlockers.length})`
+  );
+
+  const craneBlocker = activeBlockers.find((b) => b.category === 'equipment');
+  assert(
+    !!craneBlocker && craneBlocker.reporterName === 'Carlos Rivera',
+    'Equipment blocker on ACT-C01 exists with Carlos Rivera attribution'
+  );
+
+  const weatherBlocker = activeBlockers.find((b) => b.category === 'weather');
+  assert(
+    !!weatherBlocker && weatherBlocker.reporterName === 'David Chen',
+    'Weather blocker on ACT-B02 exists with David Chen attribution'
+  );
+
+  assert(
+    dashboard.attention.activeBlockersCount === goldenManifestInvariants.expectedActiveBlockersCount,
+    `Dashboard needs-attention active blockers count matches ${goldenManifestInvariants.expectedActiveBlockersCount}`
+  );
+
+  assert(
+    dashboard.attention.blockersByRootCause.equipment === 1 &&
+      dashboard.attention.blockersByRootCause.weather === 1,
+    'Dashboard needs-attention aggregates root cause categories (equipment: 1, weather: 1)'
+  );
+
+  // 12. Dual-Role & Operational Projection Invariants (Pass 31 & 36)
+  const workerTasks = workerOperationalService.getOperationalTasks(projectId, {
+    asOfDate: GOLDEN_AS_OF_DATE,
+    scope: 'all'
+  });
+  assert(
+    workerTasks.tasks.length === goldenManifestInvariants.activityCount,
+    `Worker operational tasks projection returns ${goldenManifestInvariants.activityCount} tasks`
+  );
+  assert(
+    typeof workerTasks.summary.today === 'number' && workerTasks.summary.today > 0,
+    'Worker operational projection calculates today execution tasks'
+  );
+
+  const verifiedWorker = authService.verifySessionToken(workerToken);
+  assert(
+    verifiedWorker?.accountType === 'worker' && verifiedWorker?.projectId === projectId,
+    'Worker session token verifies cryptographically with worker role and project isolation'
+  );
+
+  const verifiedAdmin = authService.verifySessionToken(adminToken);
+  assert(
+    verifiedAdmin?.accountType === 'admin' && verifiedAdmin?.projectId === projectId,
+    'Admin session token verifies cryptographically with admin role and project isolation'
+  );
 
   console.log('====================================================');
   if (failures.length === 0) {

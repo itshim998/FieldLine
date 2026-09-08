@@ -15,24 +15,24 @@ const steps: Step[] = [
   {
     name: '2. Complete Vitest Suite',
     command: 'npm test',
-    description: 'Execute full 93-file regression & evaluation test suite'
+    description: 'Execute full 115-file regression & evaluation test suite'
   },
   {
     name: '3. Golden Demo Environment Reset',
     command: 'npm run demo:reset',
-    description: 'Clean database & uploads, run migrations, and seed golden dataset'
+    description: 'Clean database & uploads, run migrations, and seed golden dataset with operational blockers'
   },
   {
     name: '4. Golden Demo Invariant Verification',
     command: 'npm run demo:verify',
-    description: 'Verify 53 machine-checkable demo invariants across all subsystems'
+    description: 'Verify 68 machine-checkable demo invariants across all subsystems'
   }
 ];
 
 async function runReleaseVerification(): Promise<void> {
   const startTime = Date.now();
   console.log('================================================================');
-  console.log('🚀 FieldLine Release Verification Suite (Pass 26)');
+  console.log('🚀 FieldLine Master Release Verification Suite (Pass 36)');
   console.log('Orchestrating Build + Test + Demo Reset + Demo Verification');
   console.log('================================================================\n');
 

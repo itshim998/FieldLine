@@ -11,12 +11,14 @@ import { progressUpdateRepository } from '../backend/src/repositories/progress-u
 import { activityMatchRepository } from '../backend/src/repositories/activity-match.repository.js';
 import { progressService } from '../backend/src/services/progress/progress.service.js';
 import { projectEventRepository } from '../backend/src/repositories/project-event.repository.js';
+import { operationalBlockerRepository } from '../backend/src/repositories/operational-blocker.repository.js';
 import { authService } from '../backend/src/services/auth.service.js';
 import {
   goldenProjectManifest,
   goldenManifestInvariants,
   goldenWorkerCredentials,
-  goldenAdminCredentials
+  goldenAdminCredentials,
+  goldenOperationalBlockers
 } from './golden-demo-manifest.js';
 import { logger } from '../backend/src/config/logger.js';
 import { env } from '../backend/src/config/env.js';
@@ -31,6 +33,7 @@ export interface SeedGoldenDemoResult {
   progressReportsCount: number;
   canonicalObservationsCount: number;
   accountsCount: number;
+  operationalBlockersCount?: number;
   asOfDate: string;
 }
 
@@ -538,7 +541,36 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     payloadJson: JSON.stringify({ observationsCount: totalObservations, asOfDate: '2026-08-28' })
   });
 
-  logger.info(`✨ Golden demo seeding complete! Total canonical progress observations: ${totalObservations}`);
+  // 6. Seed Golden Operational Blockers (Pass 36 Enhancement)
+  // Ensure idempotency by clearing existing blockers for this project
+  const existingBlockers = operationalBlockerRepository.listByProjectId(projectId);
+  for (const eb of existingBlockers) {
+    operationalBlockerRepository.delete(eb.id, projectId);
+  }
+
+  let seededBlockersCount = 0;
+  for (const gb of goldenOperationalBlockers) {
+    const act = gb.activityExternalId ? actMap.get(gb.activityExternalId) : undefined;
+    operationalBlockerRepository.create({
+      projectId,
+      activityId: act ? act.id : null,
+      category: gb.category,
+      description: gb.description,
+      status: gb.status,
+      reporterName: gb.reporterName,
+      reporterRole: gb.reporterRole
+    });
+    seededBlockersCount++;
+  }
+
+  projectEventRepository.create({
+    projectId,
+    eventType: 'blocker_reported',
+    summary: `Golden operational blockers seeded: ${seededBlockersCount} active constraints`,
+    payloadJson: JSON.stringify({ count: seededBlockersCount })
+  });
+
+  logger.info(`✨ Golden demo seeding complete! Total progress observations: ${totalObservations}, Operational blockers: ${seededBlockersCount}`);
 
   return {
     projectId,
@@ -550,6 +582,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     progressReportsCount: 6,
     canonicalObservationsCount: totalObservations,
     accountsCount: 2,
+    operationalBlockersCount: seededBlockersCount,
     asOfDate: '2026-08-28'
   };
 }

@@ -33,6 +33,34 @@ export const goldenAdminCredentials = {
   displayName: 'Refinery Project Superintendent'
 };
 
+export interface GoldenBlockerManifest {
+  activityExternalId: string | null;
+  category: 'equipment' | 'material' | 'access' | 'inspection' | 'weather' | 'safety' | 'coordination';
+  description: string;
+  reporterName: string;
+  reporterRole: string;
+  status: 'active' | 'resolved';
+}
+
+export const goldenOperationalBlockers: GoldenBlockerManifest[] = [
+  {
+    activityExternalId: 'ACT-C01',
+    category: 'equipment',
+    description: '50T mobile crane down for hydraulic line repair; pipe rack structural steel lifts halted',
+    reporterName: 'Carlos Rivera',
+    reporterRole: 'Rigging Superintendent',
+    status: 'active'
+  },
+  {
+    activityExternalId: 'ACT-B02',
+    category: 'weather',
+    description: 'Heavy flash rains flooded piling trenches in Area B; de-watering pumps deployed',
+    reporterName: 'David Chen',
+    reporterRole: 'Civil Works Supervisor',
+    status: 'active'
+  }
+];
+
 export interface GoldenExpectedInvariants {
   projectCode: string;
   projectName: string;
@@ -45,6 +73,8 @@ export interface GoldenExpectedInvariants {
   expectedBehindScheduleIds: string[];
   expectedApproachingMilestoneIds: string[];
   expectedRichHistoryIds: string[];
+  expectedActiveBlockersCount: number;
+  expectedBlockerCategories: string[];
   expectedRiskCounts: {
     delayed: number;
     atRisk: number;
@@ -76,6 +106,8 @@ export const goldenManifestInvariants: GoldenExpectedInvariants = {
   ],
   expectedApproachingMilestoneIds: ['ACT-A05', 'ACT-B05', 'ACT-C05', 'ACT-F05'],
   expectedRichHistoryIds: ['ACT-B02', 'ACT-C01', 'ACT-E02', 'ACT-B01', 'ACT-A02'],
+  expectedActiveBlockersCount: 2,
+  expectedBlockerCategories: ['equipment', 'weather'],
   expectedRiskCounts: {
     delayed: 4,
     atRisk: 4,
