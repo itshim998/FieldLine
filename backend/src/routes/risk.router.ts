@@ -4,6 +4,7 @@ import {
   riskClassificationService as defaultRiskService
 } from '../services/risk/risk-classification.service.js';
 import { validateRequest } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   riskStatusParamsSchema,
   riskStatusQuerySchema
@@ -18,6 +19,7 @@ export function createRiskRouter(
   // Returns deterministic read-only delay and risk classification for project activities
   router.get(
     '/projects/:projectId/risk-status',
+    optionalAuthenticateSession,
     validateRequest({
       params: riskStatusParamsSchema,
       query: riskStatusQuerySchema

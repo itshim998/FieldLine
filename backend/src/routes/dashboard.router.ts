@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { projectDashboardService as defaultDashboardService } from '../services/dashboard/project-dashboard.service.js';
 import { ProjectDashboardService } from '../services/dashboard/dashboard.types.js';
 import { validateRequest } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   dashboardParamsSchema,
   dashboardQuerySchema,
@@ -17,6 +18,7 @@ export function createDashboardRouter(
   // Returns deterministic read-only composed project overview dashboard
   router.get(
     '/projects/:projectId/dashboard',
+    optionalAuthenticateSession,
     validateRequest({
       params: dashboardParamsSchema,
       query: dashboardQuerySchema

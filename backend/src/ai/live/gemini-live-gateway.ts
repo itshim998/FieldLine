@@ -620,16 +620,32 @@ export class GeminiLiveGateway {
     if (tokenParam && tokenParam.trim().length > 0) {
       try {
         const verified = authService.verifySessionToken(tokenParam.trim());
-        if (verified.projectId === project.id) {
-          sessionRole = verified.accountType;
-        } else {
+        if (verified.projectId !== project.id) {
           logger.warn(`GeminiLiveGateway: Token project mismatch. Token: ${verified.projectId}, URL: ${project.id}`);
+          clientWs.send(
+            JSON.stringify({
+              type: 'error',
+              message: 'Connection rejected: Session token does not match requested project scope.'
+            })
+          );
+          clientWs.close(4403, 'Project scope mismatch');
+          return;
         }
+        sessionRole = verified.accountType;
       } catch (err: any) {
         logger.warn(`GeminiLiveGateway: Invalid token in WebSocket connection: ${err.message}`);
+        clientWs.send(
+          JSON.stringify({
+            type: 'error',
+            message: `Connection rejected: Invalid session token (${err.message}).`
+          })
+        );
+        clientWs.close(4403, 'Invalid token');
+        return;
       }
-    } else if (roleParam === 'admin' || roleParam === 'worker') {
-      sessionRole = roleParam;
+    } else {
+      // Unauthenticated session: strictly enforce 'worker' role (never grant 'admin' without valid token)
+      sessionRole = 'worker';
     }
 
     const session = new LiveGatewaySession(sessionId, clientWs, project, this.keyRouter, {

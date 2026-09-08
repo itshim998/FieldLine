@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { projectIntelligenceService as defaultIntelligenceService } from '../services/intelligence/project-intelligence.service.js';
 import { ProjectIntelligenceService } from '../services/intelligence/project-intelligence.types.js';
 import { validateRequest } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   intelligenceParamsSchema,
   intelligenceQuerySchema,
@@ -17,6 +18,7 @@ export function createIntelligenceRouter(
   // Returns deterministic read-only structured project intelligence facts
   router.get(
     '/projects/:projectId/intelligence',
+    optionalAuthenticateSession,
     validateRequest({
       params: intelligenceParamsSchema,
       query: intelligenceQuerySchema

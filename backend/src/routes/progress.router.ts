@@ -4,6 +4,7 @@ import {
   progressService as defaultProgressService
 } from '../services/progress/progress.service.js';
 import { validateRequest, validateParams } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   normalizeProgressParamsSchema,
   normalizeProgressRequestSchema,
@@ -19,6 +20,7 @@ export function createProgressRouter(
   // Deterministically normalizes structured field fact into canonical ActivityProgress
   router.post(
     '/projects/:projectId/progress-updates/:updateId/progress',
+    optionalAuthenticateSession,
     validateRequest({
       params: normalizeProgressParamsSchema,
       body: normalizeProgressRequestSchema
@@ -50,6 +52,7 @@ export function createProgressRouter(
   // Retrieves chronological observation history for an activity
   router.get(
     '/projects/:projectId/activities/:activityId/progress',
+    optionalAuthenticateSession,
     validateParams(activityProgressParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {
@@ -67,6 +70,7 @@ export function createProgressRouter(
   // Retrieves latest canonical observation for an activity
   router.get(
     '/projects/:projectId/activities/:activityId/progress/latest',
+    optionalAuthenticateSession,
     validateParams(activityProgressParamsSchema),
     (req: Request, res: Response, next: NextFunction): void => {
       try {

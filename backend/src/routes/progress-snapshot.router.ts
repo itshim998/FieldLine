@@ -4,6 +4,7 @@ import {
   progressSnapshotService as defaultSnapshotService
 } from '../services/snapshot/progress-snapshot.service.js';
 import { validateRequest } from '../middleware/validate.js';
+import { optionalAuthenticateSession } from '../middleware/auth.middleware.js';
 import {
   progressSnapshotParamsSchema,
   progressSnapshotQuerySchema
@@ -18,6 +19,7 @@ export function createProgressSnapshotRouter(
   // Returns deterministic read-only planned vs actual progress snapshot as of snapshot date
   router.get(
     '/projects/:projectId/progress-snapshot',
+    optionalAuthenticateSession,
     validateRequest({
       params: progressSnapshotParamsSchema,
       query: progressSnapshotQuerySchema

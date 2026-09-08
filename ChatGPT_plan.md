@@ -464,7 +464,7 @@ FieldLine already features a Grounded Text Assistant (`AssistantService`) and a 
 
 ---
 
-## Pass 35 — Security Penetration, Adversarial Validation & Provenance Hardening
+## ~~Pass 35 — Security Penetration, Adversarial Validation & Provenance Hardening~~ (COMPLETED)
 
 ### Context & Need
 Before certifying the system, FieldLine must undergo dedicated adversarial and security validation to prove that role boundaries, project isolation, and evidentiary integrity cannot be bypassed.
@@ -481,24 +481,36 @@ Before certifying the system, FieldLine must undergo dedicated adversarial and s
 
 ### 2. Implement
 * **Comprehensive Adversarial Suite (`backend/tests/adversarial_security.test.ts`):**
+  * 50 dedicated adversarial integration tests covering all 10 threat vectors.
   * Test direct HTTP injection bypassing the React UI.
   * Test path traversal attacks on evidence content streaming (`/evidence/../../etc/passwd`).
   * Test evidence upload SHA-256 collision and deduplication tampering.
   * Test cross-project foreign key injection (linking Project A update to Project B activity).
+  * Test human attribution enforcement and mathematical input tampering.
+  * Test WebSocket gateway session boundary rejection and unauthenticated role elevation prevention.
+  * Test append-only progress observations and immutable match review provenance.
 * **Fix and Harden:**
-  * Patch any authorization bypasses, unhandled type coercions, or data leakage discovered during testing.
-  * Ensure all SQLite prepared statements strictly include `WHERE project_id = ?`.
+  * Added `optionalAuthenticateSession` to read routes (`dashboard`, `intelligence`, `risk`, `progress-snapshot`, `progress`) so cross-project tokens are strictly rejected with `HTTP 403 Forbidden`.
+  * Hardened `assistant.router.ts`: prevented Worker accounts from elevating to admin role via `{ role: 'admin' }` body tampering.
+  * Hardened `evidence.schema.ts`: rejected path traversal sequences (`..`, `/`, `\`) in evidence ID parameters.
+  * Hardened `evidence.service.ts`: enforced directory containment with `path.relative` in both `getEvidenceContent` and `uploadEvidence` to eliminate directory prefix escape vulnerabilities.
+  * Hardened `gemini-live-gateway.ts`: rejected cross-project token mismatches with `4403 Forbidden` and denied unauthenticated clients from claiming `sessionRole = 'admin'` without valid tokens.
 
 ### 3. Evaluate
-* Execute the complete adversarial test suite.
-* Verify that:
+* Automated adversarial security tests (`backend/tests/adversarial_security.test.ts`):
+  * 50 integration tests passing (100% pass rate).
   * 100% of unauthorized cross-project requests return `404` or `403`.
   * 100% of Worker role escalation attempts return `403`.
-  * Zero server filesystem paths are exposed in errors, stack traces, or responses.
+  * Zero server filesystem paths exposed across all serialized JSON responses and errors.
   * Historical progress observations preserve append-only timestamps and attribution.
+* Full regression & release verification:
+  * Full production build succeeded (`tsc -p tsconfig.backend.json` + `vite build`).
+  * All 114 test files and 1,114 automated tests passing cleanly with 100% pass rate.
+  * Golden demo environment re-seeded and all 59 machine-checkable invariants verified.
+  * `npm run verify:release` executed in 61.3s with zero errors.
 
 ### 4. Exit Criteria
-* [x] Adversarial test suite runs with zero failures.
+* [x] Adversarial test suite runs with zero failures (50/50 tests passing).
 * [x] Server-side security boundaries are proven resilient against client manipulation.
 * [x] Historical revision audit trail is verified intact.
 

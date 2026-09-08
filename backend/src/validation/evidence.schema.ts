@@ -14,39 +14,60 @@ export const evidenceProjectIdParamSchema = z.object({
     .string({ required_error: 'Project ID is required' })
     .trim()
     .min(1, 'Project ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Project ID contains invalid path characters'
+    })
 });
 
 export const evidenceParamsSchema = z.object({
   projectId: z
     .string({ required_error: 'Project ID is required' })
     .trim()
-    .min(1, 'Project ID cannot be empty'),
+    .min(1, 'Project ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Project ID contains invalid path characters'
+    }),
   evidenceId: z
     .string({ required_error: 'Evidence ID is required' })
     .trim()
     .min(1, 'Evidence ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Evidence ID contains invalid path characters'
+    })
 });
 
 export const progressUpdateEvidenceParamsSchema = z.object({
   projectId: z
     .string({ required_error: 'Project ID is required' })
     .trim()
-    .min(1, 'Project ID cannot be empty'),
+    .min(1, 'Project ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Project ID contains invalid path characters'
+    }),
   updateId: z
     .string({ required_error: 'Update ID is required' })
     .trim()
     .min(1, 'Update ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Update ID contains invalid path characters'
+    })
 });
 
 export const activityEvidenceParamsSchema = z.object({
   projectId: z
     .string({ required_error: 'Project ID is required' })
     .trim()
-    .min(1, 'Project ID cannot be empty'),
+    .min(1, 'Project ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Project ID contains invalid path characters'
+    }),
   activityId: z
     .string({ required_error: 'Activity ID is required' })
     .trim()
     .min(1, 'Activity ID cannot be empty')
+    .refine((val) => !val.includes('..') && !val.includes('/') && !val.includes('\\'), {
+      message: 'Activity ID contains invalid path characters'
+    })
 });
 
 export const uploadEvidenceBodySchema = z.object({

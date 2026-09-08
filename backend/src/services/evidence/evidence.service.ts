@@ -200,7 +200,8 @@ export class DefaultEvidenceService implements EvidenceService {
     const targetFilePath = path.resolve(projectDir, generatedFilename);
 
     // Ensure path cannot traverse outside the project directory
-    if (!targetFilePath.startsWith(projectDir)) {
+    const relativeUpload = path.relative(projectDir, targetFilePath);
+    if (relativeUpload.startsWith('..') || path.isAbsolute(relativeUpload)) {
       throw new ValidationError('Invalid target storage path detected');
     }
 
@@ -307,7 +308,8 @@ export class DefaultEvidenceService implements EvidenceService {
     const resolvedPath = path.resolve(process.cwd(), this.uploadDir, evidence.filePath);
 
     // Verify resolved path is strictly within the project upload directory
-    if (!resolvedPath.startsWith(projectRoot)) {
+    const relativePath = path.relative(projectRoot, resolvedPath);
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath) || relativePath === '') {
       throw new ValidationError('Evidence file path traversal detected');
     }
 
