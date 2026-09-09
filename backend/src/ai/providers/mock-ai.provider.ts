@@ -398,6 +398,7 @@ export class MockAIProvider implements AIProvider {
           // Clean reference
           let ref = content
             .replace(/\s+at\s+(Area\s+[A-Z]|Sector\s+\d+|Zone\s+[A-Z]|Block\s+[A-Z0-9]+|Pier\s+\d+)/gi, '')
+            .replace(/\s+(?:advanced|jumped|completed|finished|increased|progressed|moved|rose)\s+to\s+\d+%.*$/i, '')
             .replace(/\s+is\s+\d+%.*$/i, '')
             .replace(/:\s*\d+%.*$/i, '')
             .replace(/\s+has reached\s+\d+%.*$/i, '')

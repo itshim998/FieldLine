@@ -18,6 +18,7 @@ import { demoRouter } from './demo.router.js';
 import { authRouter } from './auth.router.js';
 import { workerOperationalRouter } from './worker-operational.router.js';
 import { blockerRouter } from './blocker.router.js';
+import { mlRouter } from './ml.router.js';
 
 export const apiRouter = Router();
 
@@ -25,6 +26,7 @@ apiRouter.use(healthRouter);
 apiRouter.use(authRouter);
 apiRouter.use(workerOperationalRouter);
 apiRouter.use(blockerRouter);
+apiRouter.use(mlRouter);
 apiRouter.use(projectRouter);
 apiRouter.use(scheduleRouter);
 apiRouter.use(progressUpdateRouter);

@@ -43,6 +43,14 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Python Artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
 # Editor & OS Artifacts
 .vscode/*
 !.vscode/extensions.json

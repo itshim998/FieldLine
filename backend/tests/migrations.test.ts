@@ -79,7 +79,7 @@ describe('Database Migration Engine', () => {
     // 2. Run the migration engine
     const result = runMigrations(db);
 
-    // 3. Verify that 0003 through 0009 were applied
+    // 3. Verify that 0003 through 0010 were applied
     expect(result.applied).toEqual([
       '0003_upgrade_metadata_for_pass2',
       '0004_upgrade_cross_project_integrity',
@@ -87,7 +87,8 @@ describe('Database Migration Engine', () => {
       '0006_evidence_content_hash',
       '0007_match_review_tiers',
       '0008_project_accounts',
-      '0009_operational_blockers'
+      '0009_operational_blockers',
+      '0010_ml_advisory_fields'
     ]);
     expect(result.alreadyApplied).toContain('0001_baseline_system_metadata');
     expect(result.alreadyApplied).toContain('0002_core_domain_schema');
@@ -262,14 +263,15 @@ describe('Database Migration Engine', () => {
     // 3. Run migration engine to apply 0004
     const result = runMigrations(db);
 
-    // 4. Verify 0004 through 0009 were applied
+    // 4. Verify 0004 through 0010 were applied
     expect(result.applied).toEqual([
       '0004_upgrade_cross_project_integrity',
       '0005_processing_jobs',
       '0006_evidence_content_hash',
       '0007_match_review_tiers',
       '0008_project_accounts',
-      '0009_operational_blockers'
+      '0009_operational_blockers',
+      '0010_ml_advisory_fields'
     ]);
 
     // 5. Verify all existing valid data is preserved

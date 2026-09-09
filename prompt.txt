@@ -1,195 +1,1263 @@
-# MISSION BRIEF: GEMINI LIVE SPEECH-TO-SPEECH INTERACTION CAPABILITY FOR FIELDLINE
+You are performing the **final closure and certification sequence for the FieldLine ML subsystem**.
 
-## OVERVIEW & OBJECTIVE
-FieldLine is an intelligent infrastructure project management platform. Non-technical workers on construction sites need a seamless, hands-free voice interface to:
-1. **Report Progress**: Workers verbally describe task completions (e.g., "We finished casting the concrete slab on Pier 12"). Gemini Live acknowledges receipt conversationally, sends the isolated statement to Groq (`openai/gpt-oss-20b`) for deterministic structured extraction and schedule linking, and—once the database update commits—verbally announces confirmation: *"Update verified: Pier 12 excavation is saved at 100%"*.
-2. **Ask Context-Aware Project Questions**: Workers confused about the next best step can ask questions (e.g., "What are we scheduled to work on next at Block B?"). Gemini Live answers conversationally using injected project context and real-time SQLite database queries (tools).
-3. **Handle Accents & Site Noise ("Pardon Me" Protocol)**: When speech is muffled, noisy, or accented, Gemini Live MUST ask for polite clarification instead of guessing or hallucinating.
-4. **20-Key Gemini Rotation & Seamless Session Handover**: Utilizes 20 Gemini API keys (`GEMINI_API_KEY_01` to `GEMINI_API_KEY_20`) created from distinct Google AI Studio accounts in a sticky round-robin order. When a session approaches the 65,000 TPM limit or encounters a rate limit, the system smoothly switches to the next key without dropping the audio stream or losing conversational context.
-5. **UI Integration**: The Live Voice button is embedded directly inside the existing floating AI assistant panel (`FloatingAIAssistant.tsx`).
+# FIELDLINE ML — PHASES 31–35
 
----
+## AUTHORITATIVE PLAN
 
-## CRITICAL ARCHITECTURAL CONSTRAINTS & VERIFIED SPECS
-- **Model**: Strictly use Gemini 3 Flash Live (`gemini-3.1-flash-live-preview` via `GEMINI_LIVE_MODEL` in `.env`).
-- **Connection Architecture**: Browser connects to a **FieldLine Backend WebSocket Gateway** (`ws://localhost:3001/ws/live-session`). The backend proxies the connection to Google's Multimodal Live API (`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=...`). **DO NOT** connect the browser directly to Google (protects API keys and enables invisible key handovers).
-- **Session Handover Strategy**: Google's native `session_resumption.handle` is cryptographically locked to the initiating Google Cloud project and yields `PERMISSION_DENIED` across different keys. Therefore, the backend gateway maintains an **application-level rolling conversation buffer**. When rotating keys, the gateway boots a new upstream WebSocket on Key $N+1$, hydrates it with the recent conversation summary + active context, transfers the browser's audio stream, and terminates Key $N$.
-- **Audio Specifications**:
-  - Client Input: 16-bit Linear PCM, Little-Endian, 16,000 Hz (16 kHz), mono, Base64-encoded (`audio/pcm;rate=16000`).
-  - Server Output: 16-bit Linear PCM, Little-Endian, 24,000 Hz (24 kHz), mono, Base64-encoded (`audio/pcm;rate=24000`).
-- **Transcription**: Native `inputAudioTranscription: {}` and `outputAudioTranscription: {}` must be enabled in the session `setup` message.
-- **Two-Stage Verbal Verification**:
-  - Stage 1 (Immediate Voice Acknowledgment): Gemini Live acknowledges receipt verbally (e.g. *"Understood, recording that Pier 12 excavation is finished. Logging that now."*).
-  - Stage 2 (Post-Groq & DB Confirmation): When Groq + SQLite commit the record, the backend prompts Gemini Live to verbally confirm: *"Update verified: [Activity Name] is saved at [Progress]%."*
+The authoritative ML implementation blueprint is:
 
----
+```text
+ChatGPT_plan.md
+```
 
-## CODING AGENT WORKFLOW INSTRUCTIONS
-You must implement this feature across sequential, self-contained passes.
-For **EACH PASS**, you must strictly follow this execution cycle:
-1. **Read**: Read only the requirements for the specific Pass you are about to execute.
-2. **Plan & Implement**: Write the code, configure dependencies, and verify types for that specific Pass only.
-3. **Evaluate**: Run all relevant unit/integration tests and verify that the pass passes 100%.
-4. **Mark as Done**: Strike off the pass title inside this file (`prompt.txt`) using markdown strikethrough (e.g., `~~### Pass 1: Core Configuration...~~`), **WITHOUT REMOVING OR DELETING** any text.
-5. **Proceed**: Move to the next Pass only after the previous Pass is fully verified and marked as done.
+Phases **1–30 are already implemented and verified**.
 
----
+The remaining phases are:
 
-~~### Pass 1: Environment Configuration, 20-Key Gemini Router & Quota Resilience~~
-**Objective**: Build the multi-key router and environment infrastructure for 20 Gemini API keys with sticky failover, health tracking, and proactive token estimation.
+```text
+Phase 31 → Canonical Truth Boundary Certification
+Phase 32 → Semantic Versioning
+Phase 33 → Retraining Workflow
+Phase 34 → Prohibited Technologies Audit
+Phase 35 → Final Definition of Done
+```
 
-**Requirements**:
-1. **Update `backend/src/config/env.ts` and `.env.example`**:
-   - Add `extractGeminiApiKeys(source)` mirroring `extractGroqApiKeys` to extract `GEMINI_API_KEY_01` through `GEMINI_API_KEY_20` (and fallback `GEMINI_API_KEY`).
-   - Add `GEMINI_LIVE_MODEL` (default: `'gemini-3.1-flash-live-preview'`).
-   - Add `GEMINI_LIVE_TOKEN_LIMIT_PER_KEY` (default: `55000` tokens, triggering proactive rotation before the 65K ceiling).
-   - Export typed configuration fields in `EnvConfig`.
-2. **Implement `backend/src/ai/providers/gemini-key-router.ts`**:
-   - Create `GeminiKeyRouter` modeled after `backend/src/ai/providers/groq-key-router.ts`.
-   - Maintain a 20-slot `KeyHealthState` array: `index`, `slot`, `apiKey`, `healthEpoch`, `failureCount`, `successCount`, `cooldownUntil`, `isPermanentlyInvalid`, and `estimatedSessionTokens`.
-   - Implement `acquireLiveSessionKey()`: Returns the current active sticky key. Advances to the next healthy key in round-robin order if the current key is in cooldown or permanently invalid (401/403).
-   - Implement `recordTokenUsage(keyIndex, tokens)`: Tracks cumulative session tokens against the 55K safety threshold.
-   - Implement `recordSuccess` and `recordFailure(keyIndex, error)`: Classifies errors (`429 RESOURCE_EXHAUSTED`, network timeouts, 5xx) and applies exponential backoff cooldowns.
-   - Implement `rotateToNextKey(currentKeyIndex, reason)`: Atomically transitions the active cursor to the next key slot and logs the epoch change.
-3. **Tests**:
-   - Write comprehensive unit tests in `backend/tests/gemini_key_router.test.ts` covering:
-     - Extraction of sparse and 20-slot keys.
-     - Sticky key acquisition and round-robin progression.
-     - Cooldown on 429 errors and permanent invalidation on 401/403.
-     - Proactive key rotation when token budget reaches safety threshold.
-     - Concurrency and stale epoch protection.
+These phases represent the **closure of the current ML implementation**.
+
+Do not invent Phase 36+ ML functionality.
+
+Do not add a new model.
+
+Do not redesign the existing models.
+
+Do not “improve” model performance merely because optimization is possible.
+
+The objective is to **prove, document, and freeze the existing architecture**.
 
 ---
 
-~~### Pass 2: Backend Live WebSocket Gateway & Upstream Gemini Live Engine~~
-**Objective**: Create the backend WebSocket server and upstream Gemini Live WebSocket bridge with application-level session handover.
+# MANDATORY EXECUTION RULE
 
-**Requirements**:
-1. **Dependencies & Server Setup**:
-   - Install `ws` and `@types/ws` if not present (`npm install ws`, `npm install --save-dev @types/ws`).
-   - In `backend/src/index.ts` and `backend/src/app.ts`, integrate the `ws` WebSocketServer attached to the main HTTP server on the path `/ws/live-session`.
-2. **Implement `backend/src/ai/live/upstream-gemini-socket.ts`**:
-   - Manages a persistent WebSocket connection to:
-     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${apiKey}`
-   - Sends the initial `setup` frame:
-     - `model`: `models/${env.GEMINI_LIVE_MODEL}`
-     - `generationConfig.responseModalities`: `["AUDIO"]`
-     - `generationConfig.inputAudioTranscription`: `{}`
-     - `generationConfig.outputAudioTranscription`: `{}`
-     - `systemInstruction`: Site worker persona + "Pardon Me" accent/clarification rules + Project Context summary.
-     - `tools`: Function declarations for `get_next_recommended_activities`, `lookup_activity_status`, and `record_field_progress`.
-   - Parses upstream server messages:
-     - Extracts `audio/pcm;rate=24000` from `serverContent.modelTurn.parts` and emits to client.
-     - Extracts `serverContent.inputTranscription` (worker speech) and `serverContent.outputTranscription` (Gemini speech).
-     - Extracts `toolCall` and `usageMetadata`.
-     - Handles `turnComplete` and `interrupted` events.
-3. **Implement `backend/src/ai/live/gemini-live-gateway.ts`**:
-   - Manages client browser WebSocket connections: accepts `projectId` as query parameter.
-   - Allocates an active key from `GeminiKeyRouter`.
-   - Bridges client audio chunks (16kHz PCM Base64) to the upstream Gemini socket via `realtimeInput.mediaChunks`.
-   - Maintains an in-memory **Rolling Conversation Buffer**:
-     - Keeps the last $N$ turns of user input and model output text.
-     - Keeps active project summary and progress reports in flight.
-   - **Seamless Handover Engine**:
-     - When Key $N$ reaches the token limit or triggers 429:
-       1. Requests Key $N+1$ from `GeminiKeyRouter`.
-       2. Opens a new upstream Gemini connection with Key $N+1$.
-       3. Injects a context summary of the ongoing conversation into the new setup / `clientContent`.
-       4. Redirects the incoming browser audio stream to the new connection.
-       5. Gracefully closes the old connection. The browser connection is NEVER interrupted.
-4. **Tests**:
-   - Write integration tests in `backend/tests/gemini_live_gateway.test.ts`:
-     - Gateway client connection and query parameter validation.
-     - Protocol message routing (audio chunks, transcriptions, interruptions).
-     - Key handover simulation on mock rate limit / token limit event.
+Even though this prompt contains Phases 31–35, execute them strictly in order:
+
+```text
+PLAN
+  ↓
+IMPLEMENT
+  ↓
+EVALUATE
+  ↓
+VERIFY
+  ↓
+PHASE EXIT
+  ↓
+NEXT PHASE
+```
+
+Do not proceed to the next phase until the current phase has been verified.
+
+Do not combine unrelated changes.
 
 ---
 
-~~### Pass 3: Real-Time Context Grounding, Live Tool Execution & Groq Verbal Confirmation Loop~~
-**Objective**: Connect Gemini Live's tools to FieldLine's SQLite database and wire the two-stage progress update loop to Groq (`openai/gpt-oss-20b`) with verbal confirmation.
+# CURRENT CERTIFIED ML ARCHITECTURE
 
-**Requirements**:
-1. **Implement `backend/src/ai/live/live-tool-handlers.ts`**:
-   - `get_next_recommended_activities(projectId, location)`:
-     - Queries `activityRepository` for activities with status `not_started` or `in_progress` in the project (optionally filtered by location).
-     - Returns top 5 prioritized tasks with code, name, location, and planned dates.
-   - `lookup_activity_status(projectId, query)`:
-     - Uses `DeterministicActivityResolver` to resolve the activity by code or name.
-     - Returns verified planned/actual progress, variance state, and delays.
-   - `record_field_progress(projectId, rawStatement)`:
-     - Immediately returns a tool execution result to Gemini Live confirming intake:
-       `{ status: "queued", message: "Progress statement captured. Verifying and committing to project schedule." }`
-     - Asynchronously passes `rawStatement` to `FieldProgressExtractionService` (`extractFromReport` using Groq `openai/gpt-oss-20b`).
-     - Calls `progressUpdateService.createManualUpdate` with `sourceType = 'voice'`.
-     - Normalizes and links the extracted item via `progressService.normalizeAndRecordProgress`.
-     - **Verbal Confirmation Trigger**:
-       - Once the database transaction commits, the gateway dispatches a high-priority system turn or `clientContent` to Gemini Live:
-         *"System Event: Progress update committed successfully. Activity: [name] ([code]), Progress: [percentage]%. Verbally inform the worker: 'Update verified: [name] is saved at [percentage]%.'"*
-       - Gemini Live generates audio speaking this confirmation directly to the worker.
-2. **Context Snapshot Builder for `systemInstruction`**:
-   - In `backend/src/ai/live/live-context-builder.ts`:
-     - Builds concise static snapshot for the project: Project code, active milestones, today's date, and high-level progress.
-     - Formats strict "Pardon Me" prompt instructions:
-       *"If any activity code, location, or quantity is phonetically unclear, muffled, or ambiguous, ask back for pardon: 'Pardon me, did you mean Section B or D?' Never guess or hallucinate unconfirmed progress."*
-3. **Tests**:
-   - Write tests in `backend/tests/gemini_live_tools.test.ts`:
-     - Verifying tool declarations format matching Gemini Bidi Live schema.
-     - Database queries returning accurate SQLite records for `get_next_recommended_activities` and `lookup_activity_status`.
-     - End-to-end simulation of `record_field_progress` -> Groq extraction -> SQLite write -> verbal confirmation generation.
+FieldLine uses a strict dual-layer architecture.
 
----
+## Probabilistic layer
 
-~~### Pass 4: Frontend Live Voice Client & Floating AI Panel Integration~~
-**Objective**: Build the browser Web Audio pipeline (16kHz capture, 24kHz playback) and embed the Live Voice UI inside the existing `FloatingAIAssistant.tsx` panel.
+```text
+Gemini / Groq / MockAI
+        ↓
+structured field facts
 
-**Requirements**:
-1. **Implement `frontend/src/components/assistant/live/useLiveVoiceSession.ts`**:
-   - Manages WebSocket connection to `ws://localhost:3001/ws/live-session?projectId=${projectId}`.
-   - **Audio Recording**:
-     - Requests microphone with `navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true } })`.
-     - Uses an `AudioWorklet` (or `ScriptProcessorNode` fallback) to extract 16kHz 16-bit PCM Linear chunks.
-     - Encodes chunks into Base64 and sends `{ type: "audio_chunk", data: base64Data }` over the WebSocket.
-   - **Audio Playback**:
-     - Receives 24kHz PCM chunks from server.
-     - Decodes Base64 to `Int16Array`, converts to `Float32Array`, and buffers into a Web Audio `AudioContext` scheduled queue.
-     - Handles interruption (`interrupted` event): Immediately flushes scheduled audio buffers so the assistant stops talking when the worker interrupts (barge-in).
-   - **Transcripts & Status State**:
-     - Exposes `isLiveConnected`, `isSpeaking`, `isListening`, `liveTranscript` (rolling worker & assistant speech), and `verifiedUpdates` (list of confirmed progress updates).
-2. **Embed Live Voice Controls into `FloatingAIAssistant.tsx`**:
-   - Locate the input footer area in `FloatingAIAssistant.tsx` (`<div className="floating-ai-footer">`).
-   - Add a sleek, modern Live Voice toggle button (Mic icon with animated pulse ring when active) next to the input field or send button.
-   - When Live Voice is active:
-     - Render an animated Voice HUD banner/overlay inside the panel with an audio frequency/wave visualizer.
-     - Show real-time streaming speech captions ("Listening..." / "Gemini speaking...").
-     - Display a clean confirmation card when an *"Update verified: ..."* event occurs, with a direct link to the updated activity.
-   - Seamlessly sync the selected project from `FloatingAIAssistant` to the live voice session.
-3. **Styling & Polish**:
-   - Add responsive styles in `frontend/src/index.css` for the Live Voice HUD, audio visualizer bars, and status badge.
-   - Ensure dark theme compatibility and match FieldLine's sleek industrial design aesthetic.
-4. **Tests**:
-   - Write component and hook tests in `frontend/tests/live_voice_assistant.test.tsx`:
-     - Verifying toggle state on mic button click.
-     - AudioWorklet initialization and cleanup.
-     - Interruption buffer flush.
+Match Model
+        ↓
+candidate reranking / confidence
+
+Anomaly Model
+        ↓
+review-prioritization advisory
+```
+
+## Deterministic authoritative layer
+
+```text
+human-confirmed result
+        ↓
+ProgressService.normalizeAndRecordProgress()
+        ↓
+activity_progress
+        ↓
+deterministic snapshots / variance / risk
+```
 
 ---
 
-~~### Pass 5: End-to-End Evaluation, Multi-Key Failover Smoke Test & Verification~~
-**Objective**: Validate the entire end-to-end speech-to-speech loop, multi-key failover robustness, and system recovery.
+# NON-NEGOTIABLE INVARIANTS
 
-**Requirements**:
-1. **Implement `scripts/gemini-live-smoke.ts`**:
-   - Automates a mock live audio session over WebSocket:
-     - Connects with mock PCM audio stream.
-     - Simulates worker voice input reporting progress.
-     - Verifies upstream Gemini Live connection and tool invocation.
-     - Verifies Groq extraction and database update in `activity_progress`.
-     - Verifies receipt of the verbal confirmation audio frame.
-2. **Multi-Key Failover Stress Test**:
-   - Simulates reaching the token limit on Key 01.
-   - Verifies that the gateway seamlessly transitions to Key 02 without dropping the client socket.
-   - Verifies that conversation history is preserved across the handoff.
-3. **Sanity Check Full Test Suite**:
-   - Run `npm test` across the entire workspace to ensure zero regressions across existing tests.
-4. **Final Documentation**:
-   - Add instructions to `README.md` explaining how to configure the 20 Gemini keys in `.env` and run the Live Voice Assistant.
+These must remain true throughout Phases 31–35.
+
+## Canonical Truth
+
+```text
+ML prediction != canonical truth
+```
+
+Neither ML model may directly mutate:
+
+```text
+activity_progress
+```
+
+Only the existing verified canonical progress pathway may write to `activity_progress`.
+
+The Match Model, Anomaly Model, artifact verifier, documentation, and retraining workflow must never bypass this boundary.
+
+---
+
+## Match Model
+
+The Match Model remains a **second-stage reranker**.
+
+The existing deterministic matcher:
+
+```text
+backend/src/services/matching/activity-match-scoring.ts
+```
+
+must remain intact.
+
+Do not replace deterministic candidate generation with ML.
+
+For non-exact matches, preserve:
+
+```text
+deterministic score >= 0.90
+AND
+ML confidence >= 0.85
+AND
+candidate separation >= 0.15
+```
+
+ML confidence alone can never auto-confirm.
+
+Exact external-ID matches retain their deterministic path.
+
+---
+
+## Anomaly Model
+
+The Anomaly Model remains:
+
+```text
+unsupervised statistical anomaly detector
++
+advisory review prioritization
+```
+
+It is NOT a:
+
+```text
+fraud detector
+lie detector
+worker honesty detector
+authenticity classifier
+```
+
+---
+
+## Production Runtime
+
+Production remains:
+
+```text
+Node.js 22
+TypeScript
+Express
+Better-SQLite3
+native TypeScript ML inference
+small JSON artifacts
+```
+
+Offline training remains:
+
+```text
+Python 3
+NumPy
+```
+
+Do not introduce:
+
+```text
+PyTorch
+TensorFlow
+Keras
+CUDA
+GPU runtime
+vector database
+embedding infrastructure
+Python server
+remote ML inference service
+LLM fine-tuning
+```
+
+---
+
+# INITIAL RECONNAISSANCE
+
+Before making any changes:
+
+```bash
+git status
+git diff
+git log --oneline -20
+```
+
+Inspect:
+
+```text
+ChatGPT_plan.md
+backend/src/ml/
+backend/src/ml/artifacts/
+backend/src/ml/match/
+backend/src/ml/anomaly/
+scripts/ml/
+scripts/verify-release.ts
+package.json
+backend/src/services/ProgressService* or equivalent
+activity_progress repository/write paths
+migration 0010
+docs/ML-ARCHITECTURE.md
+docs/ML-TRAINING.md
+```
+
+Determine the actual current state.
+
+Do not delete/reset/revert user changes.
+
+Do not assume the repository exactly matches an earlier walkthrough.
+
+---
+
+# PHASE 31 — CANONICAL TRUTH BOUNDARY CERTIFICATION
+
+## OBJECTIVE
+
+Machine-prove that the ML subsystem cannot silently become a second source of canonical project truth.
+
+The required architectural claims are:
+
+```text
+activity_progress is append-only
+```
+
+and:
+
+```text
+only ProgressService.normalizeAndRecordProgress()
+can write to activity_progress
+```
+
+and:
+
+```text
+ML predictions are advisory signals only
+```
+
+---
+
+## Phase 31 — PLAN
+
+Identify every code path that can potentially mutate:
+
+```text
+activity_progress
+```
+
+Search the entire backend codebase.
+
+Do not rely only on filenames.
+
+Search for:
+
+```text
+INSERT INTO activity_progress
+UPDATE activity_progress
+DELETE FROM activity_progress
+activityProgressRepository
+normalizeAndRecordProgress
+progress writes
+```
+
+Build a concise write-path inventory.
+
+The goal is to establish:
+
+```text
+ALL activity_progress write paths
+```
+
+and verify that they converge on the intended canonical service.
+
+---
+
+## Phase 31 — IMPLEMENT
+
+Only make changes if necessary to close a genuine architectural hole.
+
+Prefer certification tests and static checks over refactoring existing working code.
+
+Create or strengthen a dedicated test suite if useful, e.g.:
+
+```text
+backend/tests/ml_canonical_truth_boundary.test.ts
+```
+
+Test at minimum:
+
+### Test A — ML inference alone
+
+Run Match Model / Anomaly Model inference.
+
+Assert:
+
+```text
+activity_progress
+```
+
+is unchanged.
+
+### Test B — ambiguous/review state
+
+Run the ML pipeline for an ambiguous candidate.
+
+Assert:
+
+```text
+reviewState === 'awaiting_review'
+```
+
+and canonical progress remains unchanged.
+
+### Test C — anomaly warning
+
+Run an anomalous update through the pre-review pathway.
+
+Assert:
+
+```text
+anomalyScore / severity / reasons
+```
+
+are advisory and do not mutate canonical progress.
+
+### Test D — supervisor confirmation
+
+Perform the existing human confirmation flow.
+
+Assert canonical progress changes only through the existing canonical service.
+
+Do not create a second canonical write mechanism.
+
+### Test E — rejection
+
+Reject a proposed match.
+
+Assert that no unauthorized canonical progress mutation occurs.
+
+---
+
+## Phase 31 — Stronger Static Boundary Audit
+
+Where practical, implement a lightweight machine-checkable assertion that canonical `activity_progress` writes are limited to the approved service/repository path.
+
+Do NOT build a complicated static-analysis framework.
+
+A simple deterministic repository-level audit is preferable.
+
+The certification should prove the architectural rule as strongly as practical.
+
+---
+
+## Phase 31 — Evaluate
+
+Run:
+
+```bash
+npm test
+npm run ml:verify
+npm run verify:release
+```
+
+and all targeted canonical-truth tests.
+
+Verify before/after database state where applicable.
+
+---
+
+## Phase 31 — EXIT CRITERIA
+
+* [ ] All `activity_progress` write paths have been audited.
+* [ ] Canonical writes converge on the approved service/path.
+* [ ] ML inference cannot mutate canonical progress.
+* [ ] Awaiting-review ML results cannot mutate canonical progress.
+* [ ] Anomaly evaluation cannot mutate canonical progress.
+* [ ] Human confirmation uses the existing canonical pathway.
+* [ ] Rejection does not mutate canonical progress.
+* [ ] Tests pass.
+* [ ] Release verification passes.
+* [ ] No unnecessary domain refactoring occurred.
+* [ ] No Phase 32+ functionality was implemented prematurely.
+
+---
+
+# PHASE 32 — SEMANTIC VERSIONING
+
+## OBJECTIVE
+
+Certify that the model artifacts and their feature contracts have explicit semantic versions and that the production loaders verify compatibility.
+
+The existing blueprint specifies:
+
+```text
+match-model.json   → version 1.0.0
+anomaly-model.json → version 1.0.0
+```
+
+and requires feature-contract version checking on backend startup.
+
+---
+
+## Phase 32 — PLAN
+
+Inspect:
+
+```text
+backend/src/ml/types.ts
+backend/src/ml/artifacts/match-model.json
+backend/src/ml/artifacts/anomaly-model.json
+MatchModelService
+AnomalyModelService
+startup/bootstrap code
+```
+
+Determine exactly where artifact versions are currently validated.
+
+Do not assume “version field exists” means version compatibility is enforced.
+
+---
+
+## Phase 32 — IMPLEMENT
+
+Verify both artifacts expose:
+
+```text
+version
+```
+
+and that the production loaders enforce compatibility with the currently supported schema/feature contract.
+
+At minimum:
+
+### Match
+
+Verify:
+
+```text
+version === expected supported version
+```
+
+and:
+
+```text
+featureNames
+```
+
+match the supported eight-feature contract exactly.
+
+### Anomaly
+
+Verify:
+
+```text
+version === expected supported version
+```
+
+and:
+
+```text
+featureNames
+```
+
+match the supported five-feature contract exactly.
+
+If version validation already exists and is correct, do not rewrite it.
+
+If a genuine gap exists, add the smallest explicit validation mechanism.
+
+---
+
+## Phase 32 — Negative Tests
+
+Test:
+
+```text
+unsupported artifact version
+```
+
+and verify production loading fails clearly rather than silently accepting an incompatible artifact.
+
+Also test:
+
+```text
+feature contract mismatch
+```
+
+and verify it is rejected.
+
+Do not silently downgrade or substitute another artifact.
+
+---
+
+## Phase 32 — Important Constraint
+
+Do not bump the versions merely because this phase exists.
+
+The current certified artifacts are:
+
+```text
+1.0.0
+```
+
+Keep them at `1.0.0` unless the actual contract changes.
+
+A version number should represent a real artifact/contract version, not a phase number.
+
+---
+
+## Phase 32 — Evaluate
+
+Run:
+
+```bash
+npm run ml:verify
+npm test
+npm run verify:release
+npm run build:backend
+npm run build:frontend
+```
+
+---
+
+## Phase 32 — EXIT CRITERIA
+
+* [ ] Match artifact version is explicit.
+* [ ] Anomaly artifact version is explicit.
+* [ ] Supported feature contracts are explicit.
+* [ ] Version compatibility is checked.
+* [ ] Feature contract mismatches fail.
+* [ ] Unsupported versions fail.
+* [ ] No silent version fallback exists.
+* [ ] Certified artifacts remain `1.0.0` unless a real contract change exists.
+* [ ] Tests/build/release pass.
+* [ ] No Phase 33+ functionality implemented prematurely.
+
+---
+
+# PHASE 33 — RETRAINING WORKFLOW
+
+## OBJECTIVE
+
+Create and verify a reproducible, explicit workflow for retraining and safely promoting new ML artifacts.
+
+The intended sequence is:
+
+```bash
+npm run ml:train
+npm run ml:evaluate
+npm run ml:verify
+npm test
+npm run verify:release
+git add backend/src/ml/artifacts/*.json
+git commit -m "feat(ml): retrain models on updated golden dataset"
+```
+
+The final two git commands are workflow guidance, not permission to automatically commit user work.
+
+Do NOT automatically create a Git commit unless explicitly required by the current repository workflow or user.
+
+---
+
+## Phase 33 — PLAN
+
+Inspect:
+
+```text
+scripts/ml/train_match_model.py
+scripts/ml/train_anomaly_model.py
+scripts/ml/evaluate_models.py
+scripts/ml/datasets/
+backend/src/ml/artifacts/
+package.json
+docs/ML-TRAINING.md
+```
+
+Determine whether the current workflow is actually reproducible and whether all required steps are documented.
+
+---
+
+## Phase 33 — IMPLEMENT
+
+Ensure the documented retraining workflow is executable and coherent:
+
+```text
+train
+  ↓
+evaluate
+  ↓
+verify
+  ↓
+full tests
+  ↓
+release verification
+  ↓
+promote artifacts
+```
+
+Do not introduce automatic deployment.
+
+Do not introduce CI/CD infrastructure unless already part of the repository.
+
+Do not automatically commit model artifacts.
+
+---
+
+## Phase 33 — Dataset Integrity
+
+Verify that retraining uses the intended datasets.
+
+For Match Model:
+
+* independent labels
+* positive pairs
+* hard negatives
+* soft negatives
+* grouped activity holdout
+
+For Anomaly Model:
+
+* normal baseline
+* controlled synthetic perturbations
+* normal-only fitting where required
+
+Do not alter the datasets merely to improve metrics.
+
+---
+
+## Phase 33 — Retraining Reproducibility
+
+Run:
+
+```bash
+npm run ml:train
+```
+
+then:
+
+```bash
+npm run ml:evaluate
+npm run ml:verify
+```
+
+Record actual results.
+
+If the artifact bytes are deterministic, report that.
+
+If artifacts differ, explain exactly why.
+
+Do not silently overwrite unexplained changes.
+
+---
+
+## Phase 33 — Promotion Safety
+
+The retraining workflow must make it difficult to promote a bad artifact.
+
+At minimum, verify that:
+
+```text
+training
+≠ promotion
+```
+
+and promotion only occurs after:
+
+```text
+evaluation
++
+artifact verification
++
+tests
++
+release verification
+```
+
+Do not build an unnecessary artifact registry.
+
+Do not introduce external ML infrastructure.
+
+---
+
+## Phase 33 — Evaluate
+
+Run the full workflow:
+
+```bash
+npm run ml:train
+npm run ml:evaluate
+npm run ml:verify
+npm test
+npm run verify:release
+```
+
+Record exact results.
+
+---
+
+## Phase 33 — EXIT CRITERIA
+
+* [ ] Retraining commands exist and work.
+* [ ] Evaluation follows training.
+* [ ] ML artifact verification follows evaluation.
+* [ ] Full tests follow verification.
+* [ ] Release verification follows tests.
+* [ ] Dataset integrity is preserved.
+* [ ] Grouped activity holdout remains intact.
+* [ ] Promotion requires passing verification.
+* [ ] No automatic deployment added.
+* [ ] No automatic git commit added.
+* [ ] Any artifact drift is understood.
+* [ ] Reproducibility is documented honestly.
+* [ ] No Phase 34+ functionality implemented prematurely.
+
+---
+
+# PHASE 34 — PROHIBITED TECHNOLOGIES AUDIT
+
+## OBJECTIVE
+
+Perform a final architecture audit confirming that the ML subsystem remains intentionally lightweight and local-first.
+
+The following must remain ABSENT from the production architecture:
+
+```text
+Pinecone
+Chroma
+Qdrant
+Milvus
+PyTorch
+TensorFlow
+Keras
+LLM fine-tuning
+Flask
+FastAPI
+Python production server
+GPU/CUDA dependencies
+```
+
+---
+
+## Phase 34 — AUDIT
+
+Search the repository for actual imports, dependencies, scripts, configuration, Docker requirements, and startup references.
+
+Do not simply search filenames.
+
+Inspect:
+
+```text
+package.json
+requirements.txt
+pyproject.toml
+render.yaml
+Dockerfile(s)
+backend source
+scripts/
+deployment config
+```
+
+where present.
+
+Distinguish:
+
+```text
+offline training tooling
+```
+
+from:
+
+```text
+production runtime
+```
+
+Python and NumPy may legitimately appear in offline ML tooling.
+
+Their existence alone is NOT a violation.
+
+---
+
+## Phase 34 — IMPLEMENTATION
+
+Only remove something if it genuinely violates the prohibited-technology boundary.
+
+Do not delete unrelated libraries merely because a keyword happens to appear in documentation or tests.
+
+If the audit passes already, make no code changes.
+
+Optionally create a concise audit record if useful:
+
+```text
+docs/ML-TECHNOLOGY-AUDIT.md
+```
+
+Only do so if it provides durable value and does not duplicate existing documentation unnecessarily.
+
+---
+
+## Phase 34 — Evaluate
+
+Run:
+
+```bash
+npm run ml:verify
+npm test
+npm run build:backend
+npm run build:frontend
+npm run verify:release
+```
+
+---
+
+## Phase 34 — EXIT CRITERIA
+
+* [ ] No prohibited production technology is present.
+* [ ] No vector database.
+* [ ] No heavyweight ML framework.
+* [ ] No LLM fine-tuning.
+* [ ] No Python production server.
+* [ ] No GPU/CUDA dependency.
+* [ ] Offline Python/NumPy tooling is clearly separated from production.
+* [ ] Tests/build/release pass.
+* [ ] No Phase 35+ implementation beyond final certification artifacts.
+
+---
+
+# PHASE 35 — FINAL ML DEFINITION OF DONE
+
+## OBJECTIVE
+
+This is the final closure phase.
+
+The task is to establish that the FieldLine ML subsystem satisfies its complete Definition of Done.
+
+Do NOT introduce a new ML capability.
+
+Do NOT continue feature development after this phase.
+
+---
+
+# PHASE 35 — MASTER CHECKLIST
+
+Verify every item below against the ACTUAL repository.
+
+## Dataset
+
+* [ ] `match_dataset.jsonl` exists.
+* [ ] `anomaly_dataset.jsonl` exists.
+* [ ] Match dataset uses strict activity holdout.
+* [ ] Match labels are independently authored rather than generated from the deterministic matcher.
+
+## Training
+
+* [ ] Match training is from scratch using Python/NumPy.
+* [ ] Anomaly training/fitting is offline.
+* [ ] JSON artifacts are generated.
+
+## Native Production Inference
+
+* [ ] Match inference runs natively in TypeScript.
+* [ ] Anomaly inference runs natively in TypeScript.
+* [ ] Production does not require Python.
+
+## Match Model
+
+* [ ] Eight candidate-level features are used.
+* [ ] `candidate_rank` is not used.
+* [ ] Deterministic candidate generation remains intact.
+* [ ] Match Model acts as a second-stage reranker.
+* [ ] Exact-ID behavior remains deterministic.
+* [ ] Dual-threshold auto-confirm is enforced.
+* [ ] ML confidence alone cannot auto-confirm.
+
+## Anomaly Model
+
+* [ ] Anomaly inference occurs pre-review.
+* [ ] Five anomaly features remain canonical.
+* [ ] Standardized baseline distance is used.
+* [ ] `d95` is fitted/exported.
+* [ ] `means` are finite.
+* [ ] `stds` are finite and strictly positive.
+* [ ] Severity thresholds are valid.
+* [ ] `distanceThreshold` is absent.
+* [ ] Minor negative corrections can remain normal.
+* [ ] Anomaly results remain advisory.
+
+## Artifact Safety
+
+* [ ] Artifact schema is validated.
+* [ ] Feature order is validated.
+* [ ] Feature dimensions are validated.
+* [ ] Invalid numerical parameters fail.
+* [ ] Unsupported artifact versions fail.
+* [ ] No silent repair/defaulting of invalid learned parameters.
+
+## Persistence / API
+
+* [ ] Migration `0010` exists and is valid.
+* [ ] Advisory ML metadata remains separate from canonical truth.
+* [ ] `/api/ml/status` reports actual model state.
+* [ ] Role-specific advisory projection remains intact.
+
+## UI
+
+* [ ] Match confidence appears in existing review cards.
+* [ ] Elevated anomaly state appears before confirmation.
+* [ ] Activity detail warning is present where intended.
+* [ ] No misleading fraud/lie terminology is used.
+
+## Canonical Truth
+
+* [ ] `activity_progress` remains append-only.
+* [ ] ML inference cannot mutate it.
+* [ ] Only the approved canonical progress service/path can commit progress.
+* [ ] Human confirmation remains the review boundary.
+
+## Release Verification
+
+* [ ] `npm run ml:verify` passes.
+* [ ] `npm run verify:release` passes with ML verification integrated.
+
+## Runtime / Deployment
+
+* [ ] Node 22 production runtime.
+* [ ] No Python runtime in production.
+* [ ] Artifacts remain lightweight.
+* [ ] Native inference remains lightweight.
+
+## Training Workflow
+
+* [ ] `npm run ml:train` works.
+* [ ] `npm run ml:evaluate` works.
+* [ ] `npm run ml:verify` works after retraining.
+* [ ] Full tests pass.
+* [ ] Release verification passes.
+
+---
+
+# PHASE 35 — FINAL MACHINE-CHECKABLE CERTIFICATION
+
+Create a final certification artifact if one does not already exist, for example:
+
+```text
+docs/ML-DEFINITION-OF-DONE.md
+```
+
+This should contain:
+
+* checklist item
+* verification method
+* actual status
+* evidence/command where useful
+* limitation/deviation where applicable
+
+Do not write “PASS” without evidence.
+
+Do not fabricate missing evidence.
+
+---
+
+# PHASE 35 — FINAL REGRESSION
+
+Run the COMPLETE final suite:
+
+```bash
+npm run ml:verify
+npm test
+npm run build:backend
+npm run build:frontend
+npm run verify:release
+```
+
+Also run:
+
+```bash
+npm run ml:evaluate
+```
+
+only if this reflects the actual current trained artifact state and does not mutate canonical project state.
+
+Where retraining has already been performed in Phase 33, do not unnecessarily retrain again merely to produce another log.
+
+---
+
+# PHASE 35 — FINAL GOLDEN CHECK
+
+Verify the three established REFINERY-U4 ML scenarios one final time where practical:
+
+### Scenario A
+
+```text
+Pump foundation piles completed to 65% at Area B crude pump bay
+```
+
+Expected architectural behavior:
+
+```text
+ACT-B02 is correctly surfaced as the leading candidate.
+```
+
+### Scenario B
+
+```text
+Crude pump foundation piling jumped to 98% complete today
+```
+
+Expected architectural behavior:
+
+```text
+elevated anomaly
++
+review recommendation
++
+canonical progress remains protected before confirmation
+```
+
+### Scenario C
+
+```text
+Crude pump foundation piles advanced to 68% complete today
+```
+
+Expected architectural behavior:
+
+```text
+normal / non-alert progression
+```
+
+Use actual production inference.
+
+Do not hard-code outputs.
+
+---
+
+# FINAL SCIENTIFIC HONESTY CHECK
+
+Before declaring the subsystem complete, confirm that documentation does NOT overclaim:
+
+Do NOT state:
+
+```text
+100% production accuracy
+```
+
+when the evidence is only the held-out dataset.
+
+Do NOT state:
+
+```text
+fraud detection
+```
+
+for the Anomaly Model.
+
+Do NOT state:
+
+```text
+83% probability of truth
+```
+
+for a raw Match Model probability.
+
+Use accurate language such as:
+
+```text
+held-out evaluation performance
+learned match probability
+statistical anomaly score
+review-prioritization signal
+```
+
+Document dataset and calibration limitations honestly.
+
+---
+
+# FINAL SCOPE LOCK
+
+After Phase 35:
+
+DO NOT:
+
+* add another model
+* tune thresholds without evidence
+* expand the feature set
+* redesign the deterministic matcher
+* introduce forecasting
+* introduce vector search
+* add cloud ML infrastructure
+* add a Python inference service
+* add a GPU
+* add LLM fine-tuning
+* redesign the frontend
+* alter canonical truth
+* start an unplanned “Phase 36 ML”
+
+The current ML implementation is considered CLOSED once the Definition of Done is satisfied.
+
+---
+
+# FINAL REPORT
+
+Return one comprehensive certification report:
+
+# FIELDLINE ML FINAL CERTIFICATION
+
+## Phase 31 — Canonical Truth Boundary
+
+`COMPLETED` / `BLOCKED`
+
+Report:
+
+* all canonical write paths discovered
+* approved write pathway
+* ML mutation tests
+* human confirmation test
+* append-only result
+
+## Phase 32 — Semantic Versioning
+
+`COMPLETED` / `BLOCKED`
+
+Report:
+
+* Match version
+* Anomaly version
+* feature contract validation
+* unsupported-version test
+* mismatch rejection behavior
+
+## Phase 33 — Retraining Workflow
+
+`COMPLETED` / `BLOCKED`
+
+Report:
+
+* training commands
+* evaluation results
+* verification results
+* artifact reproducibility/drift
+* promotion safety
+
+## Phase 34 — Technology Audit
+
+`COMPLETED` / `BLOCKED`
+
+Report:
+
+* prohibited technologies checked
+* production vs offline dependency separation
+* any violations discovered
+* any removals made
+
+## Phase 35 — Final Definition of Done
+
+`COMPLETED` / `BLOCKED`
+
+Report:
+
+* checklist result
+* certification artifact
+* final evidence
+* remaining limitations
+
+# FINAL SYSTEM METRICS
+
+Report actual current values:
+
+* total test files
+* total tests
+* Match Top-1
+* Match Top-3
+* Match ROC-AUC
+* artifact sizes
+* Match inference benchmark if previously measured
+* Anomaly inference benchmark if previously measured
+* training runtime if previously measured
+
+Do not manufacture or recompute metrics merely to make them look better.
+
+# FINAL BUILD / RELEASE
+
+Report exact results for:
+
+```text
+npm run ml:verify
+npm test
+npm run build:backend
+npm run build:frontend
+npm run verify:release
+```
+
+# FINAL ARCHITECTURAL STATEMENT
+
+Explicitly state whether these remain true:
+
+```text
+ML prediction != canonical truth
+```
+
+```text
+ML is advisory
+```
+
+```text
+activity_progress remains protected
+```
+
+```text
+production inference is native TypeScript
+```
+
+```text
+Python is offline-only
+```
+
+```text
+deterministic candidate generation remains intact
+```
+
+```text
+dual-threshold auto-confirm remains intact
+```
+
+# FINAL SCOPE STATEMENT
+
+Explicitly confirm:
+
+> Phases 31–35 were the final planned ML phases and no unplanned ML functionality was introduced.
+
+If any criterion is genuinely unmet, report `BLOCKED` for the relevant phase rather than disguising it as complete.
+
+Do not say “looks good”.
+
+Provide evidence.

@@ -234,6 +234,11 @@ export interface ActivityMatch {
   reviewState: MatchReviewState | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  mlConfidence?: number | null;
+  anomalyScore?: number | null;
+  anomalySeverity?: 'normal' | 'review' | 'high' | null;
+  anomalyReasonsJson?: string | null;
+  anomalyReasons?: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -253,6 +258,10 @@ export interface CreateActivityMatchInput {
   reviewState?: MatchReviewState | null;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
+  mlConfidence?: number | null;
+  anomalyScore?: number | null;
+  anomalySeverity?: 'normal' | 'review' | 'high' | null;
+  anomalyReasonsJson?: string | null;
 }
 
 // ==========================================

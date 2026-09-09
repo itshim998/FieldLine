@@ -79,6 +79,12 @@ export function ActivityCurrentState({
               <span>OVERDUE</span>
             </span>
           )}
+          {current.flaggedForVerification && (
+            <span className="verification-flag-pill">
+              <AlertTriangle size={13} />
+              <span>Last update flagged for supervisor verification</span>
+            </span>
+          )}
           <span className={`risk-classification-pill ${getRiskBadgeClass(current.riskClassification)}`}>
             {current.riskClassification.replace('_', ' ')}
           </span>
@@ -176,7 +182,7 @@ export function ActivityCurrentState({
             <span>Risk Analysis Signals & Deterministic Reasons:</span>
           </div>
           <div className="risk-reasons-list">
-            {current.riskReasons.map((r, idx) => (
+            {current.riskReasons.map((r: any, idx: number) => (
               <div key={idx} className="risk-reason-item">
                 <span className="risk-reason-bullet">&bull;</span>
                 <span className="risk-reason-text">{r.message}</span>

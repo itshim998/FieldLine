@@ -95,11 +95,27 @@ interface ActivityMatchDbRow {
   review_state: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
+  ml_confidence: number | null;
+  anomaly_score: number | null;
+  anomaly_severity: string | null;
+  anomaly_reasons_json: string | null;
   created_at: string;
   updated_at: string;
 }
 
 function mapRowToActivityMatch(row: ActivityMatchDbRow): ActivityMatch {
+  let anomalyReasons: string[] | null = null;
+  if (row.anomaly_reasons_json) {
+    try {
+      const parsed = JSON.parse(row.anomaly_reasons_json);
+      if (Array.isArray(parsed)) {
+        anomalyReasons = parsed;
+      }
+    } catch {
+      anomalyReasons = null;
+    }
+  }
+
   return {
     id: row.id,
     projectId: row.project_id,
@@ -115,6 +131,11 @@ function mapRowToActivityMatch(row: ActivityMatchDbRow): ActivityMatch {
     reviewState: (row.review_state as ActivityMatch['reviewState']) || null,
     reviewedBy: row.reviewed_by,
     reviewedAt: row.reviewed_at,
+    mlConfidence: row.ml_confidence !== undefined && row.ml_confidence !== null ? row.ml_confidence : null,
+    anomalyScore: row.anomaly_score !== undefined && row.anomaly_score !== null ? row.anomaly_score : null,
+    anomalySeverity: (row.anomaly_severity as ActivityMatch['anomalySeverity']) || null,
+    anomalyReasonsJson: row.anomaly_reasons_json || null,
+    anomalyReasons,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -138,9 +159,10 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        confidence_tier, review_state, reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at,
+        ml_confidence, anomaly_score, anomaly_severity, anomaly_reasons_json
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -159,7 +181,11 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         confidenceTier,
         reviewState,
         input.reviewedBy ?? null,
-        input.reviewedAt ?? null
+        input.reviewedAt ?? null,
+        input.mlConfidence ?? null,
+        input.anomalyScore ?? null,
+        input.anomalySeverity ?? null,
+        input.anomalyReasonsJson ?? null
       );
     } catch (err: unknown) {
       if (err instanceof Error && 'code' in err) {
@@ -193,9 +219,10 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        confidence_tier, review_state, reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at,
+        ml_confidence, anomaly_score, anomaly_severity, anomaly_reasons_json
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -222,7 +249,11 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
           confidenceTier,
           reviewState,
           input.reviewedBy ?? null,
-          input.reviewedAt ?? null
+          input.reviewedAt ?? null,
+          input.mlConfidence ?? null,
+          input.anomalyScore ?? null,
+          input.anomalySeverity ?? null,
+          input.anomalyReasonsJson ?? null
         );
         insertedIds.push(id);
       }
@@ -605,9 +636,10 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        confidence_tier, review_state, reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at,
+        ml_confidence, anomaly_score, anomaly_severity, anomaly_reasons_json
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -642,7 +674,11 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
           m.confidenceTier ?? null,
           m.reviewState ?? null,
           m.reviewedBy ?? null,
-          m.reviewedAt ?? null
+          m.reviewedAt ?? null,
+          m.mlConfidence ?? null,
+          m.anomalyScore ?? null,
+          m.anomalySeverity ?? null,
+          m.anomalyReasonsJson ?? null
         );
         insertedIds.push(id);
       }

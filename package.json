@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "type": "module",
   "scripts": {
     "start": "node dist/backend/src/index.js",
@@ -14,7 +17,7 @@
     "test:evaluation": "vitest run backend/tests/critical_workflow_e2e.test.ts",
     "test:watch": "vitest",
     "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "tsc -p tsconfig.backend.json",
+    "build:backend": "tsc -p tsconfig.backend.json && tsx scripts/copy-ml-artifacts.ts",
     "build:frontend": "vite build frontend --config frontend/vite.config.ts",
     "setup": "tsx scripts/setup.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
@@ -22,7 +25,12 @@
     "verify:release": "tsx scripts/verify-release.ts",
     "verify:baseline": "tsx scripts/verify-baseline.ts",
     "ai:smoke": "tsx scripts/ai-smoke.ts",
-    "gemini:smoke": "tsx scripts/gemini-live-smoke.ts"
+    "gemini:smoke": "tsx scripts/gemini-live-smoke.ts",
+    "ml:train:match": "python scripts/ml/train_match_model.py",
+    "ml:train:anomaly": "python scripts/ml/train_anomaly_model.py",
+    "ml:train": "npm run ml:train:match && npm run ml:train:anomaly",
+    "ml:evaluate": "python scripts/ml/evaluate_models.py",
+    "ml:verify": "tsx scripts/ml/verify-production-models.ts"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",

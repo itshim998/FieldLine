@@ -1,0 +1,5 @@
+# FieldLine Offline ML Training Environment
+# Offline Python dependencies ONLY. Zero production runtime dependencies.
+# Production runs purely on Node.js 22 + TypeScript.
+
+numpy>=1.26.0

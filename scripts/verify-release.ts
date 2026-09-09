@@ -26,6 +26,11 @@ const steps: Step[] = [
     name: '4. Golden Demo Invariant Verification',
     command: 'npm run demo:verify',
     description: 'Verify 68 machine-checkable demo invariants across all subsystems'
+  },
+  {
+    name: '5. ML Subsystem Verification',
+    command: 'npm run ml:verify',
+    description: 'Validate ML model artifacts, feature dimensions, and native TypeScript inference'
   }
 ];
 
@@ -33,7 +38,7 @@ async function runReleaseVerification(): Promise<void> {
   const startTime = Date.now();
   console.log('================================================================');
   console.log('🚀 FieldLine Master Release Verification Suite (Pass 36)');
-  console.log('Orchestrating Build + Test + Demo Reset + Demo Verification');
+  console.log('Orchestrating Build + Test + Demo Reset + Demo Verification + ML Verification');
   console.log('================================================================\n');
 
   for (let i = 0; i < steps.length; i++) {

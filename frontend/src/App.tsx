@@ -36,7 +36,8 @@ import {
   MessageSquare,
   LayoutDashboard,
   Sparkles,
-  LogOut
+  LogOut,
+  Cpu
 } from 'lucide-react';
 import { ProjectDashboardView } from './components/dashboard/ProjectDashboardView.js';
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
@@ -165,6 +166,10 @@ export interface ActivityMatch {
   reviewState: MatchReviewState | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  mlConfidence?: number | null;
+  anomalyScore?: number | null;
+  anomalySeverity?: 'normal' | 'review' | 'high' | null;
+  anomalyReasons?: string[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2508,6 +2513,12 @@ function MainAppContent(): React.JSX.Element {
                                                       )}
                                                     </div>
                                                     <div className="match-meta-pills">
+                                                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                                                        <span className="match-ml-badge">
+                                                          <Cpu size={11} />
+                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                        </span>
+                                                      )}
                                                       <span className="match-tier-badge tier-high">
                                                         {(m.confidenceTier || 'HIGH').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
                                                       </span>
@@ -2517,6 +2528,19 @@ function MainAppContent(): React.JSX.Element {
                                                       </span>
                                                     </div>
                                                   </div>
+                                                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                                                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                                                      <AlertTriangle size={14} className="anomaly-icon" />
+                                                      <div className="anomaly-body">
+                                                        <span className="anomaly-title">
+                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                        </span>
+                                                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                                                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
                                                   {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
                                                   <div className="match-card-actions">
                                                     <div className="match-reviewer-info">
@@ -2566,6 +2590,12 @@ function MainAppContent(): React.JSX.Element {
                                                       )}
                                                     </div>
                                                     <div className="match-meta-pills">
+                                                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                                                        <span className="match-ml-badge">
+                                                          <Cpu size={11} />
+                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                        </span>
+                                                      )}
                                                       <span className={`match-tier-badge tier-${m.confidenceTier || 'medium'}`}>
                                                         {(m.confidenceTier || 'MEDIUM').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
                                                       </span>
@@ -2575,6 +2605,19 @@ function MainAppContent(): React.JSX.Element {
                                                       </span>
                                                     </div>
                                                   </div>
+                                                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                                                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                                                      <AlertTriangle size={14} className="anomaly-icon" />
+                                                      <div className="anomaly-body">
+                                                        <span className="anomaly-title">
+                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                        </span>
+                                                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                                                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
                                                   {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
                                                   
                                                   <div className="match-card-actions">
@@ -2656,6 +2699,12 @@ function MainAppContent(): React.JSX.Element {
                                                       <span>Initial Suggestion: {act?.name || 'Uncertain Activity'}</span>
                                                     </div>
                                                     <div className="match-meta-pills">
+                                                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                                                        <span className="match-ml-badge">
+                                                          <Cpu size={11} />
+                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                        </span>
+                                                      )}
                                                       <span className="match-tier-badge tier-low">
                                                         LOW &bull; {Math.round(m.confidenceScore * 100)}%
                                                       </span>
@@ -2665,6 +2714,19 @@ function MainAppContent(): React.JSX.Element {
                                                       </span>
                                                     </div>
                                                   </div>
+                                                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                                                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                                                      <AlertTriangle size={14} className="anomaly-icon" />
+                                                      <div className="anomaly-body">
+                                                        <span className="anomaly-title">
+                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                        </span>
+                                                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                                                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  )}
                                                   <p className="match-rationale-text" style={{ color: '#d8b4fe' }}>
                                                     ⚠ Low confidence candidate match. Human supervisor must select the correct activity before progress can be recorded.
                                                   </p>

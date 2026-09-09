@@ -110,20 +110,6 @@ export class DefaultActivityDetailService implements ActivityDetailService {
     const snapItem = snapshot.activities.find((a) => a.activityId === activityId);
     const riskItem = riskStatus.activities.find((a) => a.activityId === activityId);
 
-    const current: ActivityDetailCurrentState = {
-      plannedProgress: snapItem ? snapItem.plannedProgress : 0,
-      actualProgress: snapItem ? snapItem.actualProgress : 0,
-      progressVariance: snapItem ? snapItem.progressVariance : 0,
-      varianceState: snapItem ? snapItem.varianceState : 'on_plan',
-      status: snapItem ? snapItem.status : 'not_started',
-      overdue: snapItem ? snapItem.overdue : false,
-      riskClassification: riskItem ? riskItem.classification : 'ON_TRACK',
-      riskReasons: riskItem ? riskItem.reasons : [],
-      actualStart: snapItem ? snapItem.actualStart : null,
-      actualFinish: snapItem ? snapItem.actualFinish : null,
-      asOfDate: canonicalAsOfDate
-    };
-
     // 5. Query ActivityProgress history (strictly project-scoped)
     const allObservations = this.activityProgressRepo.listByActivityId(activityId, projectId);
 
@@ -141,6 +127,28 @@ export class DefaultActivityDetailService implements ActivityDetailService {
     // 6. Query ActivityMatches (strictly project-scoped)
     const rawMatches = this.activityMatchRepo.listByActivityId(activityId, projectId);
 
+    const hasAnomalyFlag = rawMatches.some(
+      (m) =>
+        m.anomalySeverity === 'review' ||
+        m.anomalySeverity === 'high' ||
+        (m.anomalyScore !== null && m.anomalyScore !== undefined && m.anomalyScore >= 0.5)
+    );
+
+    const current: ActivityDetailCurrentState = {
+      plannedProgress: snapItem ? snapItem.plannedProgress : 0,
+      actualProgress: snapItem ? snapItem.actualProgress : 0,
+      progressVariance: snapItem ? snapItem.progressVariance : 0,
+      varianceState: snapItem ? snapItem.varianceState : 'on_plan',
+      status: snapItem ? snapItem.status : 'not_started',
+      overdue: snapItem ? snapItem.overdue : false,
+      riskClassification: riskItem ? riskItem.classification : 'ON_TRACK',
+      riskReasons: riskItem ? riskItem.reasons : [],
+      actualStart: snapItem ? snapItem.actualStart : null,
+      actualFinish: snapItem ? snapItem.actualFinish : null,
+      asOfDate: canonicalAsOfDate,
+      ...(hasAnomalyFlag ? { flaggedForVerification: true } : {})
+    };
+
     const matches: ActivityDetailMatch[] = rawMatches.map((m) => ({
       matchId: m.id,
       progressUpdateId: m.progressUpdateId,
@@ -153,7 +161,11 @@ export class DefaultActivityDetailService implements ActivityDetailService {
       rationale: m.rationale,
       reviewedBy: m.reviewedBy,
       reviewedAt: m.reviewedAt,
-      canonicalProgressEligible: m.status === 'confirmed'
+      canonicalProgressEligible: m.status === 'confirmed',
+      mlConfidence: m.mlConfidence ?? null,
+      anomalyScore: m.anomalyScore ?? null,
+      anomalySeverity: m.anomalySeverity ?? null,
+      anomalyReasons: m.anomalyReasons ?? null
     }));
 
     // 7. Batch lookup for relevant field progress reports (avoiding N+1 queries)

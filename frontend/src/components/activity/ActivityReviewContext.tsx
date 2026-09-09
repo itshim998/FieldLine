@@ -7,7 +7,8 @@ import {
   User,
   Clock,
   Check,
-  HelpCircle
+  HelpCircle,
+  Cpu
 } from 'lucide-react';
 import { ActivityDetailMatch } from '../../services/activity-detail/activity-detail.types.js';
 
@@ -89,6 +90,12 @@ export function ActivityReviewContext({
                   <div className="match-card-top-row">
                     <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
                     <div className="match-pills-row">
+                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                        <span className="match-ml-badge">
+                          <Cpu size={11} />
+                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                        </span>
+                      )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
                         {(m.confidenceTier || 'HIGH').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
                       </span>
@@ -98,6 +105,20 @@ export function ActivityReviewContext({
                       </span>
                     </div>
                   </div>
+
+                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                      <AlertTriangle size={14} className="anomaly-icon" />
+                      <div className="anomaly-body">
+                        <span className="anomaly-title">
+                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                        </span>
+                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {m.matchedText && (
                     <div className="matched-text-box">
@@ -143,12 +164,32 @@ export function ActivityReviewContext({
                   <div className="match-card-top-row">
                     <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
                     <div className="match-pills-row">
+                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                        <span className="match-ml-badge">
+                          <Cpu size={11} />
+                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                        </span>
+                      )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
                         {(m.confidenceTier || 'MED').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
                       </span>
                       <span className="status-badge-suggested">Suggested</span>
                     </div>
                   </div>
+
+                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                      <AlertTriangle size={14} className="anomaly-icon" />
+                      <div className="anomaly-body">
+                        <span className="anomaly-title">
+                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                        </span>
+                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {m.matchedText && (
                     <div className="matched-text-box">
@@ -183,8 +224,30 @@ export function ActivityReviewContext({
                 <div key={m.matchId} className="detail-match-card unresolved">
                   <div className="match-card-top-row">
                     <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
-                    <span className="status-badge-unresolved">Unresolved</span>
+                    <div className="match-pills-row">
+                      {m.mlConfidence !== null && m.mlConfidence !== undefined && (
+                        <span className="match-ml-badge">
+                          <Cpu size={11} />
+                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                        </span>
+                      )}
+                      <span className="status-badge-unresolved">Unresolved</span>
+                    </div>
                   </div>
+
+                  {m.anomalySeverity && m.anomalySeverity !== 'normal' && (
+                    <div className={`anomaly-warning-banner severity-${m.anomalySeverity}`}>
+                      <AlertTriangle size={14} className="anomaly-icon" />
+                      <div className="anomaly-body">
+                        <span className="anomaly-title">
+                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                        </span>
+                        {m.anomalyReasons && m.anomalyReasons.length > 0 && (
+                          <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {m.matchedText && (
                     <div className="matched-text-box">
                       <span className="matched-label">Matched Text:</span>

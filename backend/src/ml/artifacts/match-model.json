@@ -1,0 +1,46 @@
+{
+  "modelType": "logistic_regression",
+  "version": "1.0.0",
+  "featureNames": [
+    "name_similarity",
+    "description_similarity",
+    "location_exact_match",
+    "location_similarity",
+    "location_contradiction",
+    "wbs_match",
+    "exact_id_match",
+    "score_gap_from_second_candidate"
+  ],
+  "means": [
+    0.169047,
+    0.127184,
+    0.554318,
+    0.671393,
+    0.250696,
+    0.061281,
+    0.061281,
+    0.123398
+  ],
+  "stds": [
+    0.244853,
+    0.169519,
+    0.497041,
+    0.397773,
+    0.433414,
+    0.239846,
+    0.239846,
+    0.231056
+  ],
+  "weights": [
+    1.155272,
+    1.59458,
+    0.431519,
+    0.351797,
+    -0.450033,
+    1.146726,
+    0.552812,
+    1.680765
+  ],
+  "bias": -0.572576,
+  "threshold": 0.5
+}

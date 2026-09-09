@@ -1,0 +1,30 @@
+{
+  "modelType": "standardized_distance_anomaly",
+  "version": "1.0.0",
+  "featureNames": [
+    "progress_delta",
+    "daily_velocity",
+    "progress_variance",
+    "reported_percent",
+    "is_regression"
+  ],
+  "means": [
+    11.9437,
+    5.1228,
+    -0.3206,
+    54.3897,
+    0.0939
+  ],
+  "stds": [
+    9.1004,
+    2.7381,
+    1.6038,
+    31.9391,
+    0.2924
+  ],
+  "d95": 4.2221,
+  "severityThresholds": {
+    "review": 0.5,
+    "high": 0.75
+  }
+}

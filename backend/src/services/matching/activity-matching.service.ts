@@ -3,6 +3,7 @@ import { ProgressUpdateRepository, progressUpdateRepository as defaultProgressUp
 import { ActivityRepository, activityRepository as defaultActivityRepo } from '../../repositories/activity.repository.js';
 import { ActivityMatchRepository, activityMatchRepository as defaultActivityMatchRepo } from '../../repositories/activity-match.repository.js';
 import { ProjectEventRepository, projectEventRepository as defaultProjectEventRepo } from '../../repositories/project-event.repository.js';
+import { ActivityProgressRepository, activityProgressRepository as defaultActivityProgressRepo } from '../../repositories/activity-progress.repository.js';
 import { FieldProgressExtraction } from '../../ai/contracts/field-progress-extraction.contract.js';
 import {
   CandidateMatch,
@@ -14,7 +15,13 @@ import { scoreActivityCandidate } from './activity-match-scoring.js';
 import { SemanticActivityMatcher, defaultSemanticMatcher } from './semantic-matcher.js';
 import { LLMActivityDisambiguator, defaultLlmActivityDisambiguator } from './llm-disambiguator.js';
 import { classifyMatchConfidence, DEFAULT_MIN_CONFIDENCE_THRESHOLD, DEFAULT_AUTO_CONFIRM_MARGIN, DEFAULT_HIGH_CONFIDENCE_THRESHOLD, DEFAULT_MEDIUM_CONFIDENCE_THRESHOLD } from './match-review-policy.js';
-import { ActivityMatch, CreateActivityMatchInput, CreateProjectEventInput } from '../../models/domain.types.js';
+import { Activity, ActivityMatch, CreateActivityMatchInput, CreateProjectEventInput } from '../../models/domain.types.js';
+import { MatchModelService, defaultMatchModelService } from '../../ml/match/match-model.service.js';
+import { extractMatchFeatures } from '../../ml/match/match-feature-extractor.js';
+import { AnomalyModelService, defaultAnomalyModelService } from '../../ml/anomaly/anomaly-model.service.js';
+import { extractAnomalyFeatures } from '../../ml/anomaly/anomaly-feature-extractor.js';
+import { calculatePlannedProgress } from '../snapshot/progress-snapshot.calculator.js';
+import { COLD_START_ANOMALY_PREDICTION, AnomalyPrediction } from '../../ml/types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
@@ -39,6 +46,9 @@ export class ActivityMatchingService {
   private projectEventRepo: ProjectEventRepository;
   private semanticMatcher: SemanticActivityMatcher;
   private llmDisambiguator: LLMActivityDisambiguator;
+  private matchModelService: MatchModelService;
+  private activityProgressRepo: ActivityProgressRepository;
+  private anomalyModelService: AnomalyModelService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -48,6 +58,9 @@ export class ActivityMatchingService {
     projectEventRepo?: ProjectEventRepository;
     semanticMatcher?: SemanticActivityMatcher;
     llmDisambiguator?: LLMActivityDisambiguator;
+    matchModelService?: MatchModelService;
+    activityProgressRepo?: ActivityProgressRepository;
+    anomalyModelService?: AnomalyModelService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.progressUpdateRepo = dependencies?.progressUpdateRepo || defaultProgressUpdateRepo;
@@ -56,6 +69,9 @@ export class ActivityMatchingService {
     this.projectEventRepo = dependencies?.projectEventRepo || defaultProjectEventRepo;
     this.semanticMatcher = dependencies?.semanticMatcher || defaultSemanticMatcher;
     this.llmDisambiguator = dependencies?.llmDisambiguator || defaultLlmActivityDisambiguator;
+    this.matchModelService = dependencies?.matchModelService || defaultMatchModelService;
+    this.activityProgressRepo = dependencies?.activityProgressRepo || defaultActivityProgressRepo;
+    this.anomalyModelService = dependencies?.anomalyModelService || defaultAnomalyModelService;
   }
 
   /**
@@ -103,25 +119,136 @@ export class ActivityMatchingService {
     // 3. Score each field fact against project activities
     for (const fact of extraction.items) {
       const candidates: CandidateMatch[] = [];
+      const activityMap = new Map<string, Activity>();
 
       for (const activity of activities) {
+        activityMap.set(activity.id, activity);
         const candidate = scoreActivityCandidate(fact, activity);
         if (candidate.confidenceScore >= minConfidenceThreshold) {
           candidates.push(candidate);
         }
       }
 
-      // Sort descending by confidence score
+      // Sort descending by deterministic confidence score
       candidates.sort((a, b) => b.confidenceScore - a.confidenceScore);
 
-      let rankedCandidates = [...candidates];
+      // Determine effective report date for planned progress and anomaly calculations
+      const reportDate = options.asOfDate || new Date().toISOString().slice(0, 10);
+
+      // Score candidates with Match Model (ML Reranker - Phase 10) & Anomaly Model (Phase 18)
+      const rankedWithMl: CandidateMatch[] = candidates.map((candidate, idx) => {
+        // Deterministic candidate separation:
+        // runnerUpScore = best deterministic competitor's score
+        // For candidate 0: runnerUp is candidate 1 (if exists)
+        // For candidate k > 0: best competitor is candidate 0
+        const runnerUp = idx === 0 ? candidates[1] : candidates[0];
+        const scoreGap = runnerUp
+          ? Math.max(0, candidate.confidenceScore - runnerUp.confidenceScore)
+          : 1.0;
+
+        let mlConfidence: number | undefined = undefined;
+        let finalScore = candidate.confidenceScore;
+        let rationale = candidate.rationale;
+
+        const act = activityMap.get(candidate.activityId);
+        if (this.matchModelService.isAvailable() && act) {
+          const features = extractMatchFeatures(
+            { reference: fact.reference, location: fact.location },
+            {
+              externalId: act.externalId,
+              name: act.name,
+              description: act.description,
+              wbsCode: act.wbsCode,
+              location: act.location
+            },
+            scoreGap
+          );
+          mlConfidence = this.matchModelService.predict(features);
+
+          if (candidate.matchMethod === 'exact_id') {
+            // Exact ID candidates retain deterministic exact-ID score behavior
+            finalScore = candidate.confidenceScore;
+          } else {
+            // Plan formula: 0.4 deterministic + 0.6 ML confidence
+            finalScore = Math.round((candidate.confidenceScore * 0.4 + mlConfidence * 0.6) * 1000) / 1000;
+          }
+
+          if (!rationale.includes('Learned ML confidence')) {
+            rationale = `${candidate.rationale}; Learned ML confidence: ${Math.round(mlConfidence * 100)}%`;
+          }
+        }
+
+        // Anomaly Model (Review-Prioritization Assistant - Phase 18)
+        // Evaluates candidates with non-null reported progress against prior canonical history
+        let anomaly: AnomalyPrediction | undefined = undefined;
+        if (fact.progress_percent !== null && fact.progress_percent !== undefined && act) {
+          const priorObservation = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+            act.id,
+            projectId,
+            reportDate
+          );
+
+          if (!priorObservation) {
+            // Safe cold start: no prior canonical observation exists
+            anomaly = { ...COLD_START_ANOMALY_PREDICTION };
+          } else {
+            const { plannedProgress } = calculatePlannedProgress(
+              act.plannedStart,
+              act.plannedFinish,
+              reportDate,
+              act.externalId || act.name
+            );
+
+            const anomalyFeatures = extractAnomalyFeatures({
+              reportedPercent: fact.progress_percent,
+              priorObservation,
+              plannedPercent: plannedProgress,
+              reportDate
+            });
+
+            if (anomalyFeatures && this.anomalyModelService.isAvailable()) {
+              anomaly = this.anomalyModelService.predict(anomalyFeatures);
+            } else {
+              anomaly = { ...COLD_START_ANOMALY_PREDICTION };
+            }
+          }
+        }
+
+        return {
+          ...candidate,
+          deterministicScore: candidate.confidenceScore,
+          rationale,
+          mlConfidence: mlConfidence ?? null,
+          finalScore,
+          scoreGap,
+          anomaly,
+          anomalyScore: anomaly ? anomaly.anomalyScore : null,
+          anomalySeverity: anomaly ? anomaly.severity : null,
+          anomalyReasons: anomaly ? anomaly.reasons : null
+        };
+      });
+
+      // Rerank candidates by final score descending
+      rankedWithMl.sort((a, b) => {
+        const scoreA = a.finalScore ?? a.confidenceScore;
+        const scoreB = b.finalScore ?? b.confidenceScore;
+        if (Math.abs(scoreB - scoreA) > 1e-6) {
+          return scoreB - scoreA;
+        }
+        return b.confidenceScore - a.confidenceScore;
+      });
+
+      let rankedCandidates = [...rankedWithMl];
 
       // Disambiguate if ambiguous top candidates exist and LLM disambiguation is enabled
       if (
         enableLlmDisambiguation &&
         rankedCandidates.length >= 2 &&
         rankedCandidates[0].matchMethod !== 'exact_id' &&
-        Math.abs(rankedCandidates[0].confidenceScore - rankedCandidates[1].confidenceScore) <= alternativeScoreMargin
+        Math.abs(
+          (rankedCandidates[0].finalScore ?? rankedCandidates[0].confidenceScore) -
+            (rankedCandidates[1].finalScore ?? rankedCandidates[1].confidenceScore)
+        ) <= alternativeScoreMargin
       ) {
         rankedCandidates = await this.llmDisambiguator.disambiguate(fact, rankedCandidates.slice(0, 3));
       }
@@ -135,6 +262,34 @@ export class ActivityMatchingService {
       }
 
       const reviewDecision = classifyMatchConfidence(bestMatch, alternatives);
+
+      // Enforce strict dual-threshold auto-confirm gate (Phase 10)
+      // Exact ID matches retain deterministic exact-ID auto-confirm behavior.
+      // For all non-exact matches:
+      //   Auto-confirm ONLY IF:
+      //     deterministicScore >= 0.90
+      //     AND mlConfidence >= 0.85
+      //     AND deterministic scoreGap >= 0.15
+      // If any condition fails:
+      //   autoConfirm = false
+      //   reviewState = 'awaiting_review'
+      if (bestMatch) {
+        const isExactId = bestMatch.matchMethod === 'exact_id';
+        if (!isExactId) {
+          const s_det = bestMatch.confidenceScore;
+          const p_ml = bestMatch.mlConfidence ?? 0;
+          const scoreGap = bestMatch.scoreGap ?? 0;
+
+          const meetsGate = s_det >= 0.90 && p_ml >= 0.85 && scoreGap >= 0.15;
+          if (!meetsGate) {
+            reviewDecision.autoConfirm = false;
+            reviewDecision.reviewState = 'awaiting_review';
+            if (reviewDecision.tier === 'high') {
+              reviewDecision.tier = 'medium';
+            }
+          }
+        }
+      }
 
       matchResults.push({
         fact,
@@ -177,8 +332,11 @@ export class ActivityMatchingService {
       );
     }
 
-    // 2. Compute candidate matches
-    const matchResults = await this.computeMatches(projectId, extraction, options);
+    // 2. Compute candidate matches (passing progress report date as-of date)
+    const matchResults = await this.computeMatches(projectId, extraction, {
+      ...options,
+      asOfDate: options.asOfDate || progressRecord.reportDate
+    });
 
     // 3. Persist matches and events atomically if requested
     if (persist) {
@@ -192,13 +350,18 @@ export class ActivityMatchingService {
         const decision = r.reviewDecision || classifyMatchConfidence(r.bestMatch, r.alternatives);
         const isAutoConfirm = decision.autoConfirm;
         const matchId = crypto.randomUUID();
+        const effectiveScore = r.bestMatch.finalScore ?? r.bestMatch.confidenceScore;
+
+        const anomalyScore = r.bestMatch.anomalyScore ?? r.bestMatch.anomaly?.anomalyScore ?? null;
+        const anomalySeverity = r.bestMatch.anomalySeverity ?? r.bestMatch.anomaly?.severity ?? null;
+        const anomalyReasons = r.bestMatch.anomalyReasons ?? r.bestMatch.anomaly?.reasons ?? null;
 
         toPersist.push({
           id: matchId,
           projectId,
           progressUpdateId,
           activityId: r.bestMatch.activityId,
-          confidenceScore: r.bestMatch.confidenceScore,
+          confidenceScore: effectiveScore,
           matchMethod: r.bestMatch.matchMethod,
           matchedText: r.bestMatch.matchedText,
           rationale: r.bestMatch.rationale,
@@ -206,7 +369,11 @@ export class ActivityMatchingService {
           confidenceTier: decision.tier,
           reviewState: decision.reviewState,
           reviewedBy: isAutoConfirm ? 'system' : null,
-          reviewedAt: isAutoConfirm ? nowIso : null
+          reviewedAt: isAutoConfirm ? nowIso : null,
+          mlConfidence: r.bestMatch.mlConfidence ?? null,
+          anomalyScore,
+          anomalySeverity,
+          anomalyReasonsJson: anomalyReasons && anomalyReasons.length > 0 ? JSON.stringify(anomalyReasons) : null
         });
 
         if (isAutoConfirm) {
@@ -215,14 +382,17 @@ export class ActivityMatchingService {
             eventType: 'match_auto_confirmed',
             entityType: 'activity_matches',
             entityId: matchId,
-            summary: `Activity match automatically confirmed by system for activity '${r.bestMatch.activityId}' (${(r.bestMatch.confidenceScore * 100).toFixed(0)}% confidence)`,
+            summary: `Activity match automatically confirmed by system for activity '${r.bestMatch.activityId}' (${(effectiveScore * 100).toFixed(0)}% confidence)`,
             payloadJson: JSON.stringify({
               matchId,
               progressUpdateId,
               activityId: r.bestMatch.activityId,
-              confidenceScore: r.bestMatch.confidenceScore,
+              confidenceScore: effectiveScore,
+              deterministicScore: r.bestMatch.confidenceScore,
+              mlConfidence: r.bestMatch.mlConfidence,
               confidenceTier: decision.tier,
-              reviewSource: 'system'
+              reviewSource: 'system',
+              anomaly: r.bestMatch.anomaly
             })
           });
         } else {
@@ -231,18 +401,22 @@ export class ActivityMatchingService {
             eventType: 'match_suggested',
             entityType: 'activity_matches',
             entityId: matchId,
-            summary: `Activity match suggested for activity '${r.bestMatch.activityId}' (${(r.bestMatch.confidenceScore * 100).toFixed(0)}% confidence, ${decision.tier} tier, state: ${decision.reviewState})`,
+            summary: `Activity match suggested for activity '${r.bestMatch.activityId}' (${(effectiveScore * 100).toFixed(0)}% confidence, ${decision.tier} tier, state: ${decision.reviewState})`,
             payloadJson: JSON.stringify({
               matchId,
               progressUpdateId,
               activityId: r.bestMatch.activityId,
-              confidenceScore: r.bestMatch.confidenceScore,
+              confidenceScore: effectiveScore,
+              deterministicScore: r.bestMatch.confidenceScore,
+              mlConfidence: r.bestMatch.mlConfidence,
               confidenceTier: decision.tier,
-              reviewState: decision.reviewState
+              reviewState: decision.reviewState,
+              anomaly: r.bestMatch.anomaly
             })
           });
         }
       }
+
 
       this.activityMatchRepo.persistMatchesAndEventsAtomically({
         projectId,

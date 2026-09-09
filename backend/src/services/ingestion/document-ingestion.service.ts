@@ -214,7 +214,9 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
 
     // 6. Compute candidate matches outside transaction
     logger.debug('DocumentIngestionService: Computing candidate matches via ActivityMatchingService');
-    const matchResults = await this.matchingService.computeMatches(projectId, extraction);
+    const matchResults = await this.matchingService.computeMatches(projectId, extraction, {
+      asOfDate: reportDateStr
+    });
 
     // 7. Atomic transaction: create progress report, link evidence, and persist matches
     const mappedSourceType = mapSourceTypeToProgressUpdateType(normalizedDoc.sourceType);

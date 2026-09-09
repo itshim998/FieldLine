@@ -9497,6 +9497,107 @@ body {
   margin-left: 0.75rem;
 }
 
+/* =========================================================================
+   PHASE 19 — ML Match & Anomaly Advisory UI Enhancements
+   ========================================================================= */
+
+.match-ml-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.18rem 0.55rem;
+  border-radius: 9999px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.25));
+  border: 1px solid rgba(168, 85, 247, 0.45);
+  color: #c084fc;
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.15);
+  text-transform: uppercase;
+}
+
+.match-ml-badge svg {
+  color: #a855f7;
+  flex-shrink: 0;
+}
+
+.anomaly-warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  font-size: 0.75rem;
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.anomaly-warning-banner.severity-review {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+}
+
+.anomaly-warning-banner.severity-review .anomaly-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.anomaly-warning-banner.severity-high {
+  background: rgba(244, 63, 94, 0.14);
+  border: 1px solid rgba(244, 63, 94, 0.45);
+  color: #fb7185;
+}
+
+.anomaly-warning-banner.severity-high .anomaly-icon {
+  color: #f43f5e;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.anomaly-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
+.anomaly-title {
+  font-weight: 700;
+  font-size: 0.76rem;
+  letter-spacing: 0.01em;
+}
+
+.anomaly-desc {
+  font-size: 0.71rem;
+  opacity: 0.92;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.verification-flag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.18rem 0.55rem;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.15);
+}
+
+.verification-flag-pill svg {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+
 
 
 

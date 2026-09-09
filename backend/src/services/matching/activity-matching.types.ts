@@ -1,6 +1,7 @@
 import { MatchMethod, MatchConfidenceTier } from '../../models/domain.types.js';
 import { FieldProgressItem } from '../../ai/contracts/field-progress-extraction.contract.js';
 import { MatchReviewDecision } from './match-review-policy.js';
+import { AnomalyPrediction } from '../../ml/types.js';
 
 /**
  * Individual candidate activity match for a field progress fact.
@@ -10,9 +11,17 @@ export interface CandidateMatch {
   activityExternalId: string;
   activityName: string;
   confidenceScore: number;
+  deterministicScore?: number;
   matchMethod: MatchMethod;
   matchedText: string | null;
   rationale: string;
+  mlConfidence?: number | null;
+  finalScore?: number;
+  scoreGap?: number;
+  anomaly?: AnomalyPrediction;
+  anomalyScore?: number | null;
+  anomalySeverity?: 'normal' | 'review' | 'high' | null;
+  anomalyReasons?: string[] | null;
 }
 
 /**
@@ -44,4 +53,6 @@ export interface MatchingOptions {
   alternativeScoreMargin?: number;
   maxAlternatives?: number;
   enableLlmDisambiguation?: boolean;
+  asOfDate?: string;
 }
+

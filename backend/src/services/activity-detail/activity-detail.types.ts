@@ -39,6 +39,7 @@ export interface ActivityDetailCurrentState {
   actualStart: string | null;
   actualFinish: string | null;
   asOfDate: string;
+  flaggedForVerification?: boolean;
 }
 
 export interface ActivityDetailTimelineItem {
@@ -79,6 +80,10 @@ export interface ActivityDetailMatch {
   reviewedBy: string | null;
   reviewedAt: string | null;
   canonicalProgressEligible: boolean;
+  mlConfidence?: number | null;
+  anomalyScore?: number | null;
+  anomalySeverity?: 'normal' | 'review' | 'high' | null;
+  anomalyReasons?: string[] | null;
 }
 
 export interface ActivityDetailEvidence {

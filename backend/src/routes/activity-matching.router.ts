@@ -23,6 +23,11 @@ export function sanitizeMatchForRole<T extends Record<string, any>>(match: T, ro
     const copy = { ...match } as Record<string, any>;
     delete copy.confidenceScore;
     copy.confidenceTier = null;
+    delete copy.mlConfidence;
+    delete copy.anomalyScore;
+    delete copy.anomalySeverity;
+    delete copy.anomalyReasons;
+    delete copy.anomalyReasonsJson;
     return copy as T;
   }
   return match;
