@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getValidatedEnv } from '../backend/src/config/env.js';
 import { initDatabase, closeDatabase, isDatabaseHealthy } from '../backend/src/database/db.js';
-import { getAppliedMigrations } from '../backend/src/database/migrator.js';
+import { getAppliedMigrations, runMigrations } from '../backend/src/database/migrator.js';
 import { seedGoldenDemo } from '../demo/golden-demo-seeder.js';
 import { verifyGoldenDemoEnvironment } from './demo-verify.js';
 
@@ -62,6 +62,19 @@ async function resetDemoEnvironment(): Promise<void> {
   // 4. Reinitialize fresh SQLite database with authoritative migrations
   console.log(`📦 Re-initializing clean SQLite database at: ${env.DATABASE_PATH}`);
   const db = initDatabase();
+
+  const existingTables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+    .all() as Array<{ name: string }>;
+  if (existingTables.length > 0) {
+    db.pragma('foreign_keys = OFF');
+    for (const t of existingTables) {
+      db.prepare(`DROP TABLE IF EXISTS "${t.name}"`).run();
+    }
+    db.pragma('foreign_keys = ON');
+    runMigrations(db);
+    console.log(`🧹 Dropped ${existingTables.length} pre-existing tables and re-applied migrations to ensure clean baseline.`);
+  }
 
   const applied = getAppliedMigrations(db);
   console.log(`✅ SQLite migrations applied on fresh database: ${applied.join(', ')}`);

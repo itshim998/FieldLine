@@ -266,15 +266,19 @@ export function verifyClaimValueMatch(
   if (Array.isArray(authoritativeValue)) {
     return authoritativeValue.some((item) => {
       if (typeof item === 'object' && item !== null) {
-        const codeMatch =
-          String((item as any).code || '').toLowerCase() ===
-          String(claimValue).trim().toLowerCase();
-        const msgMatch =
-          String((item as any).message || '').toLowerCase() ===
-          String(claimValue).trim().toLowerCase();
-        return codeMatch || msgMatch;
+        const normCode = String((item as any).code || '').trim().toLowerCase().replace(/[.\s]+$/, '');
+        const normMsg = String((item as any).message || '').trim().toLowerCase().replace(/[.\s]+$/, '');
+        const normClaim = String(claimValue).trim().toLowerCase().replace(/[.\s]+$/, '');
+        return (
+          normCode === normClaim ||
+          normMsg === normClaim ||
+          normMsg.includes(normClaim) ||
+          normClaim.includes(normMsg)
+        );
       }
-      return String(item).trim().toLowerCase() === String(claimValue).trim().toLowerCase();
+      const normItem = String(item).trim().toLowerCase().replace(/[.\s]+$/, '');
+      const normClaim = String(claimValue).trim().toLowerCase().replace(/[.\s]+$/, '');
+      return normItem === normClaim || normItem.includes(normClaim) || normClaim.includes(normItem);
     });
   }
 

@@ -23,6 +23,10 @@ import {
   fieldProgressExtractionService as defaultExtractionService
 } from '../../ai/services/field-progress-extraction.service.js';
 import {
+  FieldProgressNormalizationService,
+  fieldProgressNormalizationService as defaultNormalizationService
+} from '../../ai/services/field-progress-normalization.service.js';
+import {
   ActivityMatchingService,
   activityMatchingService as defaultMatchingService
 } from '../matching/activity-matching.service.js';
@@ -83,6 +87,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   private progressService: ProgressService;
   private extractionService: FieldProgressExtractionService;
   private matchingService: ActivityMatchingService;
+  private normalizationService: FieldProgressNormalizationService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -93,6 +98,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     progressService?: ProgressService;
     extractionService?: FieldProgressExtractionService;
     matchingService?: ActivityMatchingService;
+    normalizationService?: FieldProgressNormalizationService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
@@ -102,6 +108,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     this.progressService = dependencies?.progressService || defaultProgressService;
     this.extractionService = dependencies?.extractionService || defaultExtractionService;
     this.matchingService = dependencies?.matchingService || defaultMatchingService;
+    this.normalizationService = dependencies?.normalizationService || defaultNormalizationService;
   }
 
   getOperationalTasks(
@@ -370,11 +377,21 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
       throw new ValidationError('Either activityId or progress notes must be provided');
     }
 
+    let canonicalNotes = notesText;
+    try {
+      const normalized = await this.normalizationService.normalizeToEnglish(notesText);
+      canonicalNotes = normalized.englishText;
+    } catch (normErr: any) {
+      logger.warn(
+        `WorkerOperationalService: Normalization failed for notes, falling back to raw notes: ${normErr?.message || normErr}`
+      );
+    }
+
     // 1. Create progress record
     const updateRecord = this.progressUpdateRepo.create({
       projectId,
       reportDate,
-      rawText: notesText,
+      rawText: canonicalNotes,
       reporterName,
       reporterRole,
       sourceType,
@@ -383,7 +400,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
 
     // 2. Run AI extraction & matching pipeline
     try {
-      const extraction = await this.extractionService.extractFromReport(notesText);
+      const extraction = await this.extractionService.extractFromReport(canonicalNotes);
       if (extraction && extraction.items && extraction.items.length > 0) {
         await this.matchingService.matchProgressUpdate(
           projectId,

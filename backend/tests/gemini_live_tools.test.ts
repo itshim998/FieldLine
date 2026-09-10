@@ -15,6 +15,7 @@ import { DefaultProgressUpdateService } from '../src/services/progress-update.se
 import { ActivityMatchingService } from '../src/services/matching/activity-matching.service.js';
 import { DefaultProgressService } from '../src/services/progress/progress.service.js';
 import { FieldProgressExtractionService } from '../src/ai/services/field-progress-extraction.service.js';
+import { FieldProgressNormalizationService } from '../src/ai/services/field-progress-normalization.service.js';
 import {
   LiveToolHandlers,
   createLiveToolExecutor,
@@ -182,6 +183,17 @@ describe('Gemini Live Tools, Grounding & Verbal Confirmation (Pass 3)', () => {
       location: 'Sector South',
       plannedStart: '2026-09-12',
       plannedFinish: '2026-09-30',
+      baselineProgress: 0
+    });
+
+    activityRepo.create({
+      projectId: testProject.id,
+      scheduleId: testSchedule.id,
+      externalId: 'PR-B07',
+      name: 'Pipe Rack PR-B07 structural steel erection',
+      location: 'Pipe Rack Area',
+      plannedStart: '2026-09-01',
+      plannedFinish: '2026-09-10',
       baselineProgress: 0
     });
 
@@ -611,6 +623,155 @@ describe('Gemini Live Tools, Grounding & Verbal Confirmation (Pass 3)', () => {
       const allRes = await handlers.searchProjectActivities(testProject.id, undefined, 'all', undefined, 20);
       expect(allRes.status).toBe('success');
       expect(allRes.activities.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('8. Multilingual Field Progress English Normalization (Section 14)', () => {
+    it('1. English statement preserves exact text in canonical progress update', async () => {
+      const englishStatement = 'PR-B07 is complete.';
+
+      (mockExtractionService.extractFromReport as any).mockResolvedValueOnce({
+        items: [
+          {
+            reference: 'PR-B07 structural steel erection',
+            location: 'Pipe Rack Area',
+            progress_percent: 100,
+            status: 'completed'
+          }
+        ]
+      });
+
+      const res = await handlers.recordFieldProgress(testProject.id, englishStatement);
+      expect(res.status).toBe('queued');
+
+      await new Promise((r) => setTimeout(r, 60));
+
+      const updates = progressUpdateRepo.listByProjectId(testProject.id);
+      const voiceUpdate = updates.find((u) => u.sourceType === 'voice' && u.rawText.includes('PR-B07'));
+      expect(voiceUpdate).toBeDefined();
+      expect(voiceUpdate!.rawText).toBe(englishStatement);
+    });
+
+    it('2. Banglish statement "PR-B07 complete hoye geche" normalizes to canonical English "PR-B07 is complete."', async () => {
+      const banglishStatement = 'PR-B07 complete hoye geche';
+
+      (mockExtractionService.extractFromReport as any).mockResolvedValueOnce({
+        items: [
+          {
+            reference: 'PR-B07',
+            location: 'Pipe Rack Area',
+            progress_percent: 100,
+            status: 'completed'
+          }
+        ]
+      });
+
+      const clientEvents: any[] = [];
+      const verbalConfirmations: string[] = [];
+      const mockContext: LiveToolExecutionContext = {
+        session: {
+          dispatchVerbalConfirmation: (text) => verbalConfirmations.push(text),
+          sendToClient: (p) => clientEvents.push(p)
+        }
+      };
+
+      const res = await handlers.recordFieldProgress(testProject.id, banglishStatement, mockContext);
+      expect(res.status).toBe('queued');
+
+      await new Promise((r) => setTimeout(r, 80));
+
+      // Verify Groq extraction received canonical English statement, NOT Banglish
+      expect(mockExtractionService.extractFromReport).toHaveBeenCalledWith('PR-B07 is complete.');
+
+      // Verify stored progress update has English text ONLY
+      const updates = progressUpdateRepo.listByProjectId(testProject.id);
+      const voiceUpdate = updates.find((u) => u.sourceType === 'voice' && u.rawText === 'PR-B07 is complete.');
+      expect(voiceUpdate).toBeDefined();
+      expect(voiceUpdate!.rawText).toBe('PR-B07 is complete.');
+      expect(voiceUpdate!.rawText).not.toContain('hoye geche');
+
+      // Verify verbal confirmation and client event
+      expect(verbalConfirmations.length).toBeGreaterThan(0);
+      expect(verbalConfirmations[0]).toContain('Update verified:');
+      expect(clientEvents[0].type).toBe('progress_verified');
+    });
+
+    it('3. Mixed-language statement normalizes to English before storage', async () => {
+      const mixedStatement = 'PR-B07 complete hoye geche, bolts ka kaam done';
+
+      (mockExtractionService.extractFromReport as any).mockResolvedValueOnce({
+        items: [
+          {
+            reference: 'PR-B07',
+            location: 'Pipe Rack Area',
+            progress_percent: 100,
+            status: 'completed'
+          }
+        ]
+      });
+
+      const res = await handlers.recordFieldProgress(testProject.id, mixedStatement);
+      expect(res.status).toBe('queued');
+
+      await new Promise((r) => setTimeout(r, 80));
+
+      const updates = progressUpdateRepo.listByProjectId(testProject.id);
+      const voiceUpdate = updates.find((u) => u.sourceType === 'voice' && u.rawText.includes('PR-B07'));
+      expect(voiceUpdate).toBeDefined();
+      expect(voiceUpdate!.rawText).toBe('PR-B07 is complete; bolt installation work is finished.');
+      expect(voiceUpdate!.rawText).not.toContain('hoye geche');
+      expect(voiceUpdate!.rawText).not.toContain('ka kaam');
+    });
+
+    it('4. Normalization failure does NOT persist non-English progress and informs worker conversationally', async () => {
+      const failingNormService = {
+        normalizeToEnglish: vi.fn().mockRejectedValue(new Error('AI normalization model timeout'))
+      } as unknown as FieldProgressNormalizationService;
+
+      const failingHandlers = new LiveToolHandlers({
+        activityRepo,
+        projectRepo,
+        activityMatchRepo,
+        activityResolver,
+        snapshotService,
+        intelligenceService,
+        extractionService: mockExtractionService,
+        normalizationService: failingNormService,
+        progressUpdateService,
+        matchingService,
+        progressService
+      });
+
+      const verbalConfirmations: string[] = [];
+      const clientEvents: any[] = [];
+      const mockContext: LiveToolExecutionContext = {
+        session: {
+          dispatchVerbalConfirmation: (text) => verbalConfirmations.push(text),
+          sendToClient: (p) => clientEvents.push(p)
+        }
+      };
+
+      const statement = 'Unknown foreign statement that causes error';
+      const initialUpdateCount = progressUpdateRepo.listByProjectId(testProject.id).length;
+
+      const res = await failingHandlers.recordFieldProgress(testProject.id, statement, mockContext);
+      expect(res.status).toBe('queued');
+
+      await new Promise((r) => setTimeout(r, 60));
+
+      // Verify no new progress update was persisted to SQLite!
+      const afterUpdateCount = progressUpdateRepo.listByProjectId(testProject.id).length;
+      expect(afterUpdateCount).toBe(initialUpdateCount);
+
+      // Verify verbal confirmation informing worker that normalization failed
+      expect(verbalConfirmations).toHaveLength(1);
+      expect(verbalConfirmations[0]).toContain('Progress update normalization failed');
+      expect(verbalConfirmations[0]).toContain('could not safely normalize that progress report into English');
+
+      // Verify client event was sent
+      expect(clientEvents).toHaveLength(1);
+      expect(clientEvents[0].type).toBe('progress_normalization_failed');
+      expect(clientEvents[0].rawStatement).toBe(statement);
     });
   });
 });

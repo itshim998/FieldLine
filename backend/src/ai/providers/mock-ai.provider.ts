@@ -56,6 +56,108 @@ export class MockAIProvider implements AIProvider {
       return this.mockStructuredResponse;
     }
 
+    // 0. Field Progress Normalization
+    const defaultNormalizationPayload = {
+      isEnglish: true,
+      detectedLanguage: 'English',
+      englishText: 'Pipe Rack PR-07 is 65% complete.'
+    };
+
+    if (_schema.safeParse(defaultNormalizationPayload).success && _prompt.includes('--- WORKER PROGRESS STATEMENT ---')) {
+      const stmtMatch = _prompt.match(/--- WORKER PROGRESS STATEMENT ---\r?\n([\s\S]*?)\r?\n--- END WORKER PROGRESS STATEMENT ---/);
+      const rawText = stmtMatch ? stmtMatch[1].trim() : _prompt.trim();
+
+      // Check specific canonical examples
+      if (rawText === 'PR-B07 complete hoye geche') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Bengali (Banglish)',
+          englishText: 'PR-B07 is complete.'
+        };
+      }
+      if (rawText === 'PR-B07 complete ho gaya') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Hindi (Hinglish)',
+          englishText: 'PR-B07 is complete.'
+        };
+      }
+      if (rawText === 'PR-B07 ka piling 65 percent complete hai') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Hindi (Hinglish)',
+          englishText: 'PR-B07 piling is 65 percent complete.'
+        };
+      }
+      if (rawText === 'PR-B07 complete hoye geche, bolts ka kaam done') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Bengali/Hindi (Mixed)',
+          englishText: 'PR-B07 is complete; bolt installation work is finished.'
+        };
+      }
+      if (rawText === 'ACT-B02 Area B te 68% complete') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Bengali (Banglish)',
+          englishText: 'ACT-B02 in Area B is 68% complete.'
+        };
+      }
+      if (rawText === '171 piles complete hoye geche at Area B') {
+        return {
+          isEnglish: false,
+          detectedLanguage: 'Bengali (Banglish)',
+          englishText: '171 piles are complete at Area B.'
+        };
+      }
+
+      // Pattern matching for general Bangla/Hindi/Banglish phrases
+      const lower = rawText.toLowerCase();
+      const nonEnglishKeywords: Array<string | RegExp> = [
+        'hoye geche',
+        'ho gaya',
+        'hoyeche',
+        /\bte\b/i,
+        'ka piling',
+        'ka kaam',
+        /\bhai\b/i,
+        'kora hoyeche',
+        'shuru hoyeche',
+        'shesh hoyeche',
+        'khatam'
+      ];
+      const hasNonEnglish = nonEnglishKeywords.some((kw) =>
+        typeof kw === 'string' ? lower.includes(kw) : kw.test(rawText)
+      );
+
+      if (hasNonEnglish) {
+        let translated = rawText
+          .replace(/complete\s+hoye\s+geche/gi, 'is complete.')
+          .replace(/complete\s+ho\s+gaya/gi, 'is complete.')
+          .replace(/ka\s+piling/gi, 'piling')
+          .replace(/(\d+)\s+percent\s+complete\s+hai/gi, 'is $1 percent complete.')
+          .replace(/\bte\s+(\d+)%\s+complete/gi, 'is $1% complete')
+          .trim();
+
+        if (translated === rawText) {
+          translated = `${rawText} is complete.`;
+        }
+
+        return {
+          isEnglish: false,
+          detectedLanguage: lower.includes('hoye') || /\bte\b/i.test(rawText) ? 'Bengali (Banglish)' : 'Hindi (Hinglish)',
+          englishText: translated
+        };
+      }
+
+      // Default: already English
+      return {
+        isEnglish: true,
+        detectedLanguage: 'English',
+        englishText: rawText
+      };
+    }
+
     // 1. Dynamic Assistant Intent parsing
     const defaultAssistantIntentPayload = {
       intent: 'delayed',

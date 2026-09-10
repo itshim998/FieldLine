@@ -1,1263 +1,667 @@
-You are performing the **final closure and certification sequence for the FieldLine ML subsystem**.
+# FIELDLINE — ENGLISH-ONLY CANONICAL PROJECT PROGRESS FIX
 
-# FIELDLINE ML — PHASES 31–35
+Repository:
+itshim998/FieldLine
 
-## AUTHORITATIVE PLAN
+Target branch/commit:
+main / 47295665adba286add44410cf9df926e9c818b96
 
-The authoritative ML implementation blueprint is:
+We found a real product defect in the Live Voice reporting path.
 
-```text
-ChatGPT_plan.md
-```
+Observed behavior:
 
-Phases **1–30 are already implemented and verified**.
+Worker speaks in Bangla/Banglish:
 
-The remaining phases are:
+"PR-B07 complete hoye geche"
 
-```text
-Phase 31 → Canonical Truth Boundary Certification
-Phase 32 → Semantic Versioning
-Phase 33 → Retraining Workflow
-Phase 34 → Prohibited Technologies Audit
-Phase 35 → Final Definition of Done
-```
+Gemini Live correctly responds conversationally in Bengali, but FieldLine stores the project progress update as:
 
-These phases represent the **closure of the current ML implementation**.
+"PR-B07 complete hoye geche"
 
-Do not invent Phase 36+ ML functionality.
+This is NOT acceptable.
 
-Do not add a new model.
+REQUIRED PRODUCT INVARIANT:
 
-Do not redesign the existing models.
+The worker may speak in any supported natural language.
 
-Do not “improve” model performance merely because optimization is possible.
+Gemini Live may continue responding conversationally in that language.
 
-The objective is to **prove, document, and freeze the existing architecture**.
+BUT every canonical FieldLine project progress update that enters the project-record / matching pipeline MUST be normalized to ENGLISH.
 
----
+Examples:
 
-# MANDATORY EXECUTION RULE
+Input:
+"PR-B07 complete hoye geche"
 
-Even though this prompt contains Phases 31–35, execute them strictly in order:
+Canonical stored project update:
+"PR-B07 is complete."
 
-```text
-PLAN
-  ↓
-IMPLEMENT
-  ↓
-EVALUATE
-  ↓
-VERIFY
-  ↓
-PHASE EXIT
-  ↓
-NEXT PHASE
-```
+Input:
+"Pipe Rack PR-07 is 65% complete."
 
-Do not proceed to the next phase until the current phase has been verified.
+Canonical stored project update:
+"Pipe Rack PR-07 is 65% complete."
 
-Do not combine unrelated changes.
+Input:
+"PR-B07 complete hoye geche, bolts ka kaam done"
 
----
+Canonical stored project update:
+"PR-B07 is complete; bolt installation work is finished."
 
-# CURRENT CERTIFIED ML ARCHITECTURE
+Do NOT rewrite already-English text unnecessarily.
 
-FieldLine uses a strict dual-layer architecture.
+=========================================================
 
-## Probabilistic layer
+1. CURRENT IMPLEMENTATION — VERIFIED
+   =========================================================
 
-```text
-Gemini / Groq / MockAI
-        ↓
-structured field facts
+Relevant files:
 
+backend/src/ai/live/live-context-builder.ts
+backend/src/ai/live/upstream-gemini-socket.ts
+backend/src/ai/live/live-tool-handlers.ts
+backend/src/ai/services/field-progress-extraction.service.ts
+backend/src/ai/services/ai.service.ts
+backend/src/repositories/progress-update.repository.ts
+frontend/src/components/assistant/live/useLiveVoiceSession.ts
+
+Current Live Voice system instructions explicitly say:
+
+"When a worker reports completed or updated work, immediately invoke the 'record_field_progress' tool with their exact verbal statement."
+
+The `record_field_progress(projectId, rawStatement)` tool currently receives the worker statement and sends it into the progress persistence / extraction / matching flow.
+
+The current field-progress extraction prompt also receives the report as raw text and contains no English-normalization requirement.
+
+Therefore the current implementation preserves the worker's original language into the project progress record.
+
+=========================================================
+2. REQUIRED ARCHITECTURE
+========================
+
+Implement a backend canonicalization step:
+
+WORKER SPEECH
+↓
+Gemini Live conversation
+↓
+record_field_progress(projectId, rawStatement)
+↓
+ENGLISH CANONICALIZATION
+↓
+canonical English progress statement
+↓
+FieldProgressExtractionService
+↓
+ActivityMatchingService
+↓
 Match Model
-        ↓
-candidate reranking / confidence
+↓
+Anomaly Model when applicable
+↓
+existing confirmation/review rules
+↓
+ProgressUpdate persistence / canonical project workflow
 
-Anomaly Model
-        ↓
-review-prioritization advisory
-```
+Do NOT make the browser perform translation.
 
-## Deterministic authoritative layer
+Do NOT rely on Gemini Live's conversational response language.
 
-```text
-human-confirmed result
-        ↓
-ProgressService.normalizeAndRecordProgress()
-        ↓
-activity_progress
-        ↓
-deterministic snapshots / variance / risk
-```
+Do NOT change the conversational response language policy merely to solve this.
 
----
+The assistant can continue speaking to the worker in Bengali/Hindi/etc.
 
-# NON-NEGOTIABLE INVARIANTS
+Only the PROJECT UPDATE must be English.
 
-These must remain true throughout Phases 31–35.
+=========================================================
+3. CREATE A DEDICATED ENGLISH NORMALIZATION SERVICE
+===================================================
 
-## Canonical Truth
+Prefer a dedicated backend service, for example:
 
-```text
-ML prediction != canonical truth
-```
+backend/src/ai/services/field-progress-normalization.service.ts
 
-Neither ML model may directly mutate:
+or an equally appropriate existing AI service location.
 
-```text
-activity_progress
-```
+Do NOT put translation logic directly into the repository.
 
-Only the existing verified canonical progress pathway may write to `activity_progress`.
+Do NOT put translation logic into the React frontend.
 
-The Match Model, Anomaly Model, artifact verifier, documentation, and retraining workflow must never bypass this boundary.
+The normalization service should use the existing AIService abstraction rather than directly calling Gemini/Groq SDKs.
 
----
+Existing AIService supports:
 
-## Match Model
+generateText(...)
+extractStructured(...)
 
-The Match Model remains a **second-stage reranker**.
+Prefer `extractStructured(...)` with a strict Zod schema.
 
-The existing deterministic matcher:
+Suggested schema:
 
-```text
-backend/src/services/matching/activity-match-scoring.ts
-```
+{
+"isEnglish": boolean,
+"detectedLanguage": string,
+"englishText": string
+}
 
-must remain intact.
+The normalization service should:
 
-Do not replace deterministic candidate generation with ML.
+1. validate non-empty input
+2. determine whether the source is already English
+3. if English:
 
-For non-exact matches, preserve:
+   * return the original text unchanged
+4. if non-English or mixed-language:
 
-```text
-deterministic score >= 0.90
-AND
-ML confidence >= 0.85
-AND
-candidate separation >= 0.15
-```
+   * produce a faithful English translation
+5. preserve project-specific identifiers, activity codes, percentages, quantities, dates, locations, units, and technical terms
+6. never invent missing facts
+7. never convert "approximate" into exact values
+8. never infer unstated progress
+9. never perform activity matching
+10. never change the semantic meaning of the report
+11. return only the structured normalization result
 
-ML confidence alone can never auto-confirm.
+=========================================================
+4. NORMALIZATION PROMPT REQUIREMENTS
+====================================
 
-Exact external-ID matches retain their deterministic path.
+The prompt must explicitly say:
 
----
+* The output `englishText` is the canonical internal project progress statement.
+* The output MUST be in English.
+* Preserve identifiers exactly.
+* Preserve numeric values exactly.
+* Preserve percentages exactly.
+* Preserve dates exactly.
+* Preserve quantities and units exactly.
+* Preserve construction terminology.
+* Do not summarize.
+* Do not embellish.
+* Do not infer.
+* Do not invent.
+* Do not change a worker's factual claim.
+* Translate only enough to make the statement clear English.
+* If the input is already English, return the text unchanged.
 
-## Anomaly Model
+Examples must include:
 
-The Anomaly Model remains:
+"PR-B07 complete hoye geche"
+→ "PR-B07 is complete."
 
-```text
-unsupervised statistical anomaly detector
-+
-advisory review prioritization
-```
+"PR-B07 complete ho gaya"
+→ "PR-B07 is complete."
 
-It is NOT a:
+"PR-B07 ka piling 65 percent complete hai"
+→ "PR-B07 piling is 65 percent complete."
 
-```text
-fraud detector
-lie detector
-worker honesty detector
-authenticity classifier
-```
+"Pipe Rack PR-07 is 65% complete."
+→ unchanged.
 
----
+=========================================================
+5. IMPORTANT: PRESERVE IDENTIFIERS EXACTLY
+==========================================
 
-## Production Runtime
+Do NOT translate or alter:
 
-Production remains:
+ACT-A01
+ACT-B02
+ACT-C01
+ACT-D03
+ACT-E02
+ACT-F01
+PR-B07
+PR-07
+WBS codes
+equipment tags
+area identifiers
+section identifiers
+percentages
+quantities
+units
 
-```text
-Node.js 22
-TypeScript
-Express
-Better-SQLite3
-native TypeScript ML inference
-small JSON artifacts
-```
+For example:
 
-Offline training remains:
+"PR-B07 complete hoye geche"
 
-```text
-Python 3
-NumPy
-```
+MUST NOT become:
 
-Do not introduce:
+"PR B07 is complete"
+or:
+"Project B07 is complete"
 
-```text
-PyTorch
-TensorFlow
-Keras
-CUDA
-GPU runtime
-vector database
-embedding infrastructure
-Python server
-remote ML inference service
-LLM fine-tuning
-```
+It must preserve:
+"PR-B07"
 
----
+Likewise:
 
-# INITIAL RECONNAISSANCE
+"Area B te 68% complete"
 
-Before making any changes:
-
-```bash
-git status
-git diff
-git log --oneline -20
-```
-
-Inspect:
-
-```text
-ChatGPT_plan.md
-backend/src/ml/
-backend/src/ml/artifacts/
-backend/src/ml/match/
-backend/src/ml/anomaly/
-scripts/ml/
-scripts/verify-release.ts
-package.json
-backend/src/services/ProgressService* or equivalent
-activity_progress repository/write paths
-migration 0010
-docs/ML-ARCHITECTURE.md
-docs/ML-TRAINING.md
-```
-
-Determine the actual current state.
-
-Do not delete/reset/revert user changes.
-
-Do not assume the repository exactly matches an earlier walkthrough.
-
----
-
-# PHASE 31 — CANONICAL TRUTH BOUNDARY CERTIFICATION
-
-## OBJECTIVE
-
-Machine-prove that the ML subsystem cannot silently become a second source of canonical project truth.
-
-The required architectural claims are:
-
-```text
-activity_progress is append-only
-```
-
+must preserve:
+"Area B"
 and:
+"68%"
 
-```text
-only ProgressService.normalizeAndRecordProgress()
-can write to activity_progress
-```
+=========================================================
+6. USE CANONICAL ENGLISH FOR THE DOWNSTREAM PIPELINE
+====================================================
 
-and:
+This is critical.
 
-```text
-ML predictions are advisory signals only
-```
+Once normalization succeeds:
 
----
+const canonicalEnglishStatement = normalized.englishText;
 
-## Phase 31 — PLAN
+Use canonicalEnglishStatement for:
 
-Identify every code path that can potentially mutate:
+* FieldProgressExtractionService
+* progress update creation
+* matching
+* anomaly-related downstream interpretation where report text is consumed
+* any persisted canonical progress-update text
+* downstream review display where the progress report body is shown
 
-```text
-activity_progress
-```
+Do NOT continue feeding the original Bangla/Banglish statement into the extraction/matching pipeline.
 
-Search the entire backend codebase.
+The English canonical statement must become the authoritative textual representation of that progress update.
 
-Do not rely only on filenames.
+=========================================================
+7. WHERE TO INTEGRATE
+=====================
 
-Search for:
+The primary integration point should be:
 
-```text
-INSERT INTO activity_progress
-UPDATE activity_progress
-DELETE FROM activity_progress
-activityProgressRepository
-normalizeAndRecordProgress
-progress writes
-```
+backend/src/ai/live/live-tool-handlers.ts
 
-Build a concise write-path inventory.
+specifically:
 
-The goal is to establish:
+recordFieldProgress(...)
 
-```text
-ALL activity_progress write paths
-```
+Current flow conceptually:
 
-and verify that they converge on the intended canonical service.
+rawStatement
+→ progressUpdateService.createManualUpdate(...)
+→ extraction
+→ matching
+→ normalization
 
----
+Change to:
 
-## Phase 31 — IMPLEMENT
+rawStatement
+→ normalizeFieldProgressToEnglish(rawStatement)
+→ canonicalEnglishStatement
+→ extraction(canonicalEnglishStatement)
+→ create progress update using canonicalEnglishStatement
+→ existing matching pipeline
+→ existing progress/review logic
 
-Only make changes if necessary to close a genuine architectural hole.
+Prefer normalizing BEFORE persistence so the persisted project progress update is English-only.
 
-Prefer certification tests and static checks over refactoring existing working code.
+Do not alter the existing matching model or anomaly model.
 
-Create or strengthen a dedicated test suite if useful, e.g.:
+Do not bypass the existing ActivityMatchingService.
 
-```text
-backend/tests/ml_canonical_truth_boundary.test.ts
-```
+=========================================================
+8. AUDIT OTHER PROGRESS-UPDATE ENTRY POINTS
+===========================================
 
-Test at minimum:
+Search the entire backend for every code path capable of creating:
 
-### Test A — ML inference alone
+ProgressUpdate
+progress_updates
+progressUpdateService.createManualUpdate
+progressUpdateRepository.create
+commitDocumentIngestionTransaction
 
-Run Match Model / Anomaly Model inference.
+Determine which sources are expected to be canonical English project progress.
 
-Assert:
+The English-only invariant must hold for worker progress reports.
 
-```text
-activity_progress
-```
+Do not blindly translate:
 
-is unchanged.
+* audit metadata
+* system event summaries
+* assistant conversation transcripts
+* chat messages
+* conversational UI text
 
-### Test B — ambiguous/review state
+Only canonical project progress-report content needs this invariant.
 
-Run the ML pipeline for an ambiguous candidate.
+=========================================================
+9. DO NOT BREAK LIVE ASSISTANT LANGUAGE BEHAVIOR
+================================================
 
-Assert:
+This is essential.
 
-```text
-reviewState === 'awaiting_review'
-```
+The worker may speak Bengali, Hindi, Banglish, etc.
 
-and canonical progress remains unchanged.
+Gemini Live may continue replying naturally in the same language.
 
-### Test C — anomaly warning
+DO NOT force Gemini's spoken response to English.
 
-Run an anomalous update through the pre-review pathway.
+DO NOT force input transcription shown in the live conversational UI to English.
 
-Assert:
+The live conversation transcript may remain in the worker's original language.
 
-```text
-anomalyScore / severity / reasons
-```
+The requirement is:
 
-are advisory and do not mutate canonical progress.
+CONVERSATION LANGUAGE:
+natural / multilingual
 
-### Test D — supervisor confirmation
+PROJECT UPDATE LANGUAGE:
+English only
 
-Perform the existing human confirmation flow.
+Those are separate concerns.
 
-Assert canonical progress changes only through the existing canonical service.
+=========================================================
+10. PRESERVE ORIGINAL TRANSCRIPT WITHOUT CORRUPTING THE CANONICAL UPDATE
+========================================================================
 
-Do not create a second canonical write mechanism.
+If the existing UI needs the original speech transcript for conversational continuity, leave the live transcript unchanged.
 
-### Test E — rejection
+Do NOT overwrite:
 
-Reject a proposed match.
+* live audio transcription UI
+* conversational message history
 
-Assert that no unauthorized canonical progress mutation occurs.
+with the English canonical version.
 
----
+The English normalization applies specifically to the project-progress persistence path.
 
-## Phase 31 — Stronger Static Boundary Audit
+If an audit trail for the original worker statement already exists, preserve that capability.
 
-Where practical, implement a lightweight machine-checkable assertion that canonical `activity_progress` writes are limited to the approved service/repository path.
+Do NOT unnecessarily add a new database column unless required.
 
-Do NOT build a complicated static-analysis framework.
+If you determine that an originalStatement field or event metadata is genuinely necessary for auditability, explain why before adding a migration.
 
-A simple deterministic repository-level audit is preferable.
+Do not store the original multilingual statement in `ProgressUpdate.rawText` if that field is the canonical project progress text.
 
-The certification should prove the architectural rule as strongly as practical.
+=========================================================
+11. PROGRESS UPDATE DISPLAY
+===========================
 
----
+The Admin "Field Progress History" / progress update timeline should display the English canonical progress statement.
 
-## Phase 31 — Evaluate
+For example:
 
-Run:
+Worker said:
+"PR-B07 complete hoye geche"
 
-```bash
-npm test
-npm run ml:verify
-npm run verify:release
-```
+Live conversation transcript:
+"PR-B07 complete hoye geche"
 
-and all targeted canonical-truth tests.
+Stored/admin progress update:
+"PR-B07 is complete."
 
-Verify before/after database state where applicable.
+This distinction is intentional.
 
----
+=========================================================
+12. FAILURE HANDLING
+====================
 
-## Phase 31 — EXIT CRITERIA
+If English normalization fails:
 
-* [ ] All `activity_progress` write paths have been audited.
-* [ ] Canonical writes converge on the approved service/path.
-* [ ] ML inference cannot mutate canonical progress.
-* [ ] Awaiting-review ML results cannot mutate canonical progress.
-* [ ] Anomaly evaluation cannot mutate canonical progress.
-* [ ] Human confirmation uses the existing canonical pathway.
-* [ ] Rejection does not mutate canonical progress.
-* [ ] Tests pass.
-* [ ] Release verification passes.
-* [ ] No unnecessary domain refactoring occurred.
-* [ ] No Phase 32+ functionality was implemented prematurely.
+DO NOT silently persist the non-English statement as canonical project progress.
 
----
+Preferred safe behavior:
 
-# PHASE 32 — SEMANTIC VERSIONING
+* return a recoverable error state
+* do not create a misleading canonical progress update
+* inform the worker conversationally that the system could not safely normalize the report yet
+* allow retry
 
-## OBJECTIVE
+Never silently fall back to storing Bangla/Banglish as canonical English progress.
 
-Certify that the model artifacts and their feature contracts have explicit semantic versions and that the production loaders verify compatibility.
+If and only if the source is confidently already English, bypass translation and preserve it exactly.
 
-The existing blueprint specifies:
+=========================================================
+13. TEST CASES — MANDATORY
+==========================
 
-```text
-match-model.json   → version 1.0.0
-anomaly-model.json → version 1.0.0
-```
-
-and requires feature-contract version checking on backend startup.
-
----
-
-## Phase 32 — PLAN
-
-Inspect:
-
-```text
-backend/src/ml/types.ts
-backend/src/ml/artifacts/match-model.json
-backend/src/ml/artifacts/anomaly-model.json
-MatchModelService
-AnomalyModelService
-startup/bootstrap code
-```
-
-Determine exactly where artifact versions are currently validated.
-
-Do not assume “version field exists” means version compatibility is enforced.
-
----
-
-## Phase 32 — IMPLEMENT
-
-Verify both artifacts expose:
-
-```text
-version
-```
-
-and that the production loaders enforce compatibility with the currently supported schema/feature contract.
+Add unit tests for the new normalization service.
 
 At minimum:
 
-### Match
+A.
+Input:
+"PR-B07 complete hoye geche"
+
+Expected:
+isEnglish = false
+englishText = "PR-B07 is complete."
+
+B.
+Input:
+"PR-B07 complete ho gaya"
+
+Expected:
+English canonical statement equivalent to:
+"PR-B07 is complete."
+
+C.
+Input:
+"PR-B07 ka piling 65 percent complete hai"
+
+Expected:
+English statement preserving:
+PR-B07
+piling
+65 percent
+
+D.
+Input:
+"Pipe Rack PR-07 is 65% complete."
+
+Expected:
+isEnglish = true
+englishText exactly equals input
+
+E.
+Input containing technical identifier:
+"ACT-B02 Area B te 68% complete"
+
+Expected:
+ACT-B02 preserved
+Area B preserved
+68% preserved
+
+F.
+Input with quantity:
+"171 piles complete hoye geche at Area B"
+
+Expected:
+171 preserved
+Area B preserved
+
+=========================================================
+14. LIVE TOOL REGRESSION TESTS
+==============================
+
+Extend backend/tests/gemini_live_tools.test.ts and/or appropriate live tests.
 
 Verify:
 
-```text
-version === expected supported version
-```
+1. English statement:
+   "PR-B07 is complete."
+   → canonical progress update contains exactly English statement.
 
-and:
+2. Banglish/Bengali-like statement:
+   "PR-B07 complete hoye geche"
+   → stored progress update contains English canonical statement.
 
-```text
-featureNames
-```
+3. Mixed-language statement
+   → stored progress update is English.
 
-match the supported eight-feature contract exactly.
+4. Live tool still returns successful queued/verified behavior.
 
-### Anomaly
+5. Matching still uses the canonical English statement.
+
+6. Existing Match Model behavior remains intact.
+
+7. Existing Anomaly Model behavior remains intact.
+
+8. Existing canonical-truth protections remain intact.
+
+=========================================================
+15. END-TO-END GOLDEN / BROWSER TEST
+====================================
+
+Use the Golden Demo project:
+
+REFINERY-U4
+Refinery Expansion — Unit 4
+
+Clean baseline:
+
+npm run demo:reset
+
+Login as Golden Demo Worker.
+
+Open:
+
+Fast Capture
+→ Live Voice
+
+Say in a non-English / mixed-language form:
+
+"PR-B07 complete hoye geche"
 
 Verify:
 
-```text
-version === expected supported version
-```
+A. Gemini responds conversationally in Bengali/Banglish as appropriate.
 
-and:
+B. Live conversational transcript may remain:
+"PR-B07 complete hoye geche"
 
-```text
-featureNames
-```
+C. The persisted Field Progress History entry is English-only:
+"PR-B07 is complete."
 
-match the supported five-feature contract exactly.
+D. Admin reviewing the progress update sees the English canonical report text.
 
-If version validation already exists and is correct, do not rewrite it.
+E. Matching/extraction consumes the English canonical statement.
 
-If a genuine gap exists, add the smallest explicit validation mechanism.
+=========================================================
+16. VERIFY NORMAL ENGLISH VOICE FLOW
+====================================
 
----
+Use existing known-good English flow:
 
-## Phase 32 — Negative Tests
+"Pipe Rack PR-07 is at 65% erection."
 
-Test:
+Expected:
 
-```text
-unsupported artifact version
-```
+* statement remains English
+* no unnecessary paraphrase
+* activity still resolves to ACT-C01
+* progress 65%
+* existing verified voice workflow still succeeds
 
-and verify production loading fails clearly rather than silently accepting an incompatible artifact.
+Do NOT introduce an extra translation pass that changes already-English wording unnecessarily.
 
-Also test:
+=========================================================
+17. VERIFY EXISTING ML DEMO FLOWS STILL WORK
+============================================
 
-```text
-feature contract mismatch
-```
+After implementing the normalization layer, re-run:
 
-and verify it is rejected.
+Match scenario:
+"Pump foundation piles completed to 65% at Area B crude pump bay"
 
-Do not silently downgrade or substitute another artifact.
+Expected:
+ACT-B02
+ML confidence remains elevated
+existing matching behavior unchanged
 
----
+Anomaly scenario:
+"Crude pump foundation piling jumped to 98% complete today"
 
-## Phase 32 — Important Constraint
+Expected:
+ACT-B02
+High anomaly
+existing anomaly behavior unchanged
 
-Do not bump the versions merely because this phase exists.
+Normal control:
+"Crude pump foundation piles advanced to 68% complete today"
 
-The current certified artifacts are:
+Expected:
+normal anomaly behavior
 
-```text
-1.0.0
-```
+The normalization change MUST NOT alter existing ML outputs for already-English demo scenarios.
 
-Keep them at `1.0.0` unless the actual contract changes.
+=========================================================
+18. DO NOT CHANGE THE ML ARCHITECTURE
+=====================================
 
-A version number should represent a real artifact/contract version, not a phase number.
+This task is ONLY about multilingual worker-input normalization.
 
----
+Do NOT:
 
-## Phase 32 — Evaluate
+* retrain the Match Model
+* change Match Model features
+* change Match Model thresholds
+* change Anomaly Model thresholds
+* change anomaly formulas
+* change deterministic candidate scoring
+* change canonical truth policy
+* rewrite Live Voice architecture
 
-Run:
+The goal is to insert a clean language-normalization boundary before canonical project progress persistence.
 
-```bash
-npm run ml:verify
-npm test
-npm run verify:release
-npm run build:backend
-npm run build:frontend
-```
-
----
-
-## Phase 32 — EXIT CRITERIA
-
-* [ ] Match artifact version is explicit.
-* [ ] Anomaly artifact version is explicit.
-* [ ] Supported feature contracts are explicit.
-* [ ] Version compatibility is checked.
-* [ ] Feature contract mismatches fail.
-* [ ] Unsupported versions fail.
-* [ ] No silent version fallback exists.
-* [ ] Certified artifacts remain `1.0.0` unless a real contract change exists.
-* [ ] Tests/build/release pass.
-* [ ] No Phase 33+ functionality implemented prematurely.
-
----
-
-# PHASE 33 — RETRAINING WORKFLOW
-
-## OBJECTIVE
-
-Create and verify a reproducible, explicit workflow for retraining and safely promoting new ML artifacts.
-
-The intended sequence is:
-
-```bash
-npm run ml:train
-npm run ml:evaluate
-npm run ml:verify
-npm test
-npm run verify:release
-git add backend/src/ml/artifacts/*.json
-git commit -m "feat(ml): retrain models on updated golden dataset"
-```
-
-The final two git commands are workflow guidance, not permission to automatically commit user work.
-
-Do NOT automatically create a Git commit unless explicitly required by the current repository workflow or user.
-
----
-
-## Phase 33 — PLAN
-
-Inspect:
-
-```text
-scripts/ml/train_match_model.py
-scripts/ml/train_anomaly_model.py
-scripts/ml/evaluate_models.py
-scripts/ml/datasets/
-backend/src/ml/artifacts/
-package.json
-docs/ML-TRAINING.md
-```
-
-Determine whether the current workflow is actually reproducible and whether all required steps are documented.
-
----
-
-## Phase 33 — IMPLEMENT
-
-Ensure the documented retraining workflow is executable and coherent:
-
-```text
-train
-  ↓
-evaluate
-  ↓
-verify
-  ↓
-full tests
-  ↓
-release verification
-  ↓
-promote artifacts
-```
-
-Do not introduce automatic deployment.
-
-Do not introduce CI/CD infrastructure unless already part of the repository.
-
-Do not automatically commit model artifacts.
-
----
-
-## Phase 33 — Dataset Integrity
-
-Verify that retraining uses the intended datasets.
-
-For Match Model:
-
-* independent labels
-* positive pairs
-* hard negatives
-* soft negatives
-* grouped activity holdout
-
-For Anomaly Model:
-
-* normal baseline
-* controlled synthetic perturbations
-* normal-only fitting where required
-
-Do not alter the datasets merely to improve metrics.
-
----
-
-## Phase 33 — Retraining Reproducibility
+=========================================================
+19. BUILD / TEST / VALIDATE
+===========================
 
 Run:
 
-```bash
-npm run ml:train
-```
-
-then:
-
-```bash
-npm run ml:evaluate
-npm run ml:verify
-```
-
-Record actual results.
-
-If the artifact bytes are deterministic, report that.
-
-If artifacts differ, explain exactly why.
-
-Do not silently overwrite unexplained changes.
-
----
-
-## Phase 33 — Promotion Safety
-
-The retraining workflow must make it difficult to promote a bad artifact.
-
-At minimum, verify that:
-
-```text
-training
-≠ promotion
-```
-
-and promotion only occurs after:
-
-```text
-evaluation
-+
-artifact verification
-+
-tests
-+
-release verification
-```
-
-Do not build an unnecessary artifact registry.
-
-Do not introduce external ML infrastructure.
-
----
-
-## Phase 33 — Evaluate
-
-Run the full workflow:
-
-```bash
-npm run ml:train
-npm run ml:evaluate
-npm run ml:verify
 npm test
-npm run verify:release
-```
-
-Record exact results.
-
----
-
-## Phase 33 — EXIT CRITERIA
-
-* [ ] Retraining commands exist and work.
-* [ ] Evaluation follows training.
-* [ ] ML artifact verification follows evaluation.
-* [ ] Full tests follow verification.
-* [ ] Release verification follows tests.
-* [ ] Dataset integrity is preserved.
-* [ ] Grouped activity holdout remains intact.
-* [ ] Promotion requires passing verification.
-* [ ] No automatic deployment added.
-* [ ] No automatic git commit added.
-* [ ] Any artifact drift is understood.
-* [ ] Reproducibility is documented honestly.
-* [ ] No Phase 34+ functionality implemented prematurely.
-
----
-
-# PHASE 34 — PROHIBITED TECHNOLOGIES AUDIT
-
-## OBJECTIVE
-
-Perform a final architecture audit confirming that the ML subsystem remains intentionally lightweight and local-first.
-
-The following must remain ABSENT from the production architecture:
-
-```text
-Pinecone
-Chroma
-Qdrant
-Milvus
-PyTorch
-TensorFlow
-Keras
-LLM fine-tuning
-Flask
-FastAPI
-Python production server
-GPU/CUDA dependencies
-```
-
----
-
-## Phase 34 — AUDIT
-
-Search the repository for actual imports, dependencies, scripts, configuration, Docker requirements, and startup references.
-
-Do not simply search filenames.
-
-Inspect:
-
-```text
-package.json
-requirements.txt
-pyproject.toml
-render.yaml
-Dockerfile(s)
-backend source
-scripts/
-deployment config
-```
-
-where present.
-
-Distinguish:
-
-```text
-offline training tooling
-```
-
-from:
-
-```text
-production runtime
-```
-
-Python and NumPy may legitimately appear in offline ML tooling.
-
-Their existence alone is NOT a violation.
-
----
-
-## Phase 34 — IMPLEMENTATION
-
-Only remove something if it genuinely violates the prohibited-technology boundary.
-
-Do not delete unrelated libraries merely because a keyword happens to appear in documentation or tests.
-
-If the audit passes already, make no code changes.
-
-Optionally create a concise audit record if useful:
-
-```text
-docs/ML-TECHNOLOGY-AUDIT.md
-```
-
-Only do so if it provides durable value and does not duplicate existing documentation unnecessarily.
-
----
-
-## Phase 34 — Evaluate
-
-Run:
-
-```bash
+npm run build
+npm run demo:reset
+npm run demo:verify
 npm run ml:verify
-npm test
-npm run build:backend
-npm run build:frontend
-npm run verify:release
-```
 
----
-
-## Phase 34 — EXIT CRITERIA
-
-* [ ] No prohibited production technology is present.
-* [ ] No vector database.
-* [ ] No heavyweight ML framework.
-* [ ] No LLM fine-tuning.
-* [ ] No Python production server.
-* [ ] No GPU/CUDA dependency.
-* [ ] Offline Python/NumPy tooling is clearly separated from production.
-* [ ] Tests/build/release pass.
-* [ ] No Phase 35+ implementation beyond final certification artifacts.
-
----
-
-# PHASE 35 — FINAL ML DEFINITION OF DONE
-
-## OBJECTIVE
-
-This is the final closure phase.
-
-The task is to establish that the FieldLine ML subsystem satisfies its complete Definition of Done.
-
-Do NOT introduce a new ML capability.
-
-Do NOT continue feature development after this phase.
-
----
-
-# PHASE 35 — MASTER CHECKLIST
-
-Verify every item below against the ACTUAL repository.
-
-## Dataset
-
-* [ ] `match_dataset.jsonl` exists.
-* [ ] `anomaly_dataset.jsonl` exists.
-* [ ] Match dataset uses strict activity holdout.
-* [ ] Match labels are independently authored rather than generated from the deterministic matcher.
-
-## Training
-
-* [ ] Match training is from scratch using Python/NumPy.
-* [ ] Anomaly training/fitting is offline.
-* [ ] JSON artifacts are generated.
-
-## Native Production Inference
-
-* [ ] Match inference runs natively in TypeScript.
-* [ ] Anomaly inference runs natively in TypeScript.
-* [ ] Production does not require Python.
-
-## Match Model
-
-* [ ] Eight candidate-level features are used.
-* [ ] `candidate_rank` is not used.
-* [ ] Deterministic candidate generation remains intact.
-* [ ] Match Model acts as a second-stage reranker.
-* [ ] Exact-ID behavior remains deterministic.
-* [ ] Dual-threshold auto-confirm is enforced.
-* [ ] ML confidence alone cannot auto-confirm.
-
-## Anomaly Model
-
-* [ ] Anomaly inference occurs pre-review.
-* [ ] Five anomaly features remain canonical.
-* [ ] Standardized baseline distance is used.
-* [ ] `d95` is fitted/exported.
-* [ ] `means` are finite.
-* [ ] `stds` are finite and strictly positive.
-* [ ] Severity thresholds are valid.
-* [ ] `distanceThreshold` is absent.
-* [ ] Minor negative corrections can remain normal.
-* [ ] Anomaly results remain advisory.
-
-## Artifact Safety
-
-* [ ] Artifact schema is validated.
-* [ ] Feature order is validated.
-* [ ] Feature dimensions are validated.
-* [ ] Invalid numerical parameters fail.
-* [ ] Unsupported artifact versions fail.
-* [ ] No silent repair/defaulting of invalid learned parameters.
-
-## Persistence / API
-
-* [ ] Migration `0010` exists and is valid.
-* [ ] Advisory ML metadata remains separate from canonical truth.
-* [ ] `/api/ml/status` reports actual model state.
-* [ ] Role-specific advisory projection remains intact.
-
-## UI
-
-* [ ] Match confidence appears in existing review cards.
-* [ ] Elevated anomaly state appears before confirmation.
-* [ ] Activity detail warning is present where intended.
-* [ ] No misleading fraud/lie terminology is used.
-
-## Canonical Truth
-
-* [ ] `activity_progress` remains append-only.
-* [ ] ML inference cannot mutate it.
-* [ ] Only the approved canonical progress service/path can commit progress.
-* [ ] Human confirmation remains the review boundary.
-
-## Release Verification
-
-* [ ] `npm run ml:verify` passes.
-* [ ] `npm run verify:release` passes with ML verification integrated.
-
-## Runtime / Deployment
-
-* [ ] Node 22 production runtime.
-* [ ] No Python runtime in production.
-* [ ] Artifacts remain lightweight.
-* [ ] Native inference remains lightweight.
-
-## Training Workflow
-
-* [ ] `npm run ml:train` works.
-* [ ] `npm run ml:evaluate` works.
-* [ ] `npm run ml:verify` works after retraining.
-* [ ] Full tests pass.
-* [ ] Release verification passes.
-
----
-
-# PHASE 35 — FINAL MACHINE-CHECKABLE CERTIFICATION
-
-Create a final certification artifact if one does not already exist, for example:
-
-```text
-docs/ML-DEFINITION-OF-DONE.md
-```
-
-This should contain:
-
-* checklist item
-* verification method
-* actual status
-* evidence/command where useful
-* limitation/deviation where applicable
-
-Do not write “PASS” without evidence.
-
-Do not fabricate missing evidence.
-
----
-
-# PHASE 35 — FINAL REGRESSION
-
-Run the COMPLETE final suite:
-
-```bash
-npm run ml:verify
-npm test
-npm run build:backend
-npm run build:frontend
-npm run verify:release
-```
-
-Also run:
-
-```bash
-npm run ml:evaluate
-```
-
-only if this reflects the actual current trained artifact state and does not mutate canonical project state.
-
-Where retraining has already been performed in Phase 33, do not unnecessarily retrain again merely to produce another log.
-
----
-
-# PHASE 35 — FINAL GOLDEN CHECK
-
-Verify the three established REFINERY-U4 ML scenarios one final time where practical:
-
-### Scenario A
-
-```text
-Pump foundation piles completed to 65% at Area B crude pump bay
-```
-
-Expected architectural behavior:
-
-```text
-ACT-B02 is correctly surfaced as the leading candidate.
-```
-
-### Scenario B
-
-```text
-Crude pump foundation piling jumped to 98% complete today
-```
-
-Expected architectural behavior:
-
-```text
-elevated anomaly
-+
-review recommendation
-+
-canonical progress remains protected before confirmation
-```
-
-### Scenario C
-
-```text
-Crude pump foundation piles advanced to 68% complete today
-```
-
-Expected architectural behavior:
-
-```text
-normal / non-alert progression
-```
-
-Use actual production inference.
-
-Do not hard-code outputs.
-
----
-
-# FINAL SCIENTIFIC HONESTY CHECK
-
-Before declaring the subsystem complete, confirm that documentation does NOT overclaim:
-
-Do NOT state:
-
-```text
-100% production accuracy
-```
-
-when the evidence is only the held-out dataset.
-
-Do NOT state:
-
-```text
-fraud detection
-```
-
-for the Anomaly Model.
-
-Do NOT state:
-
-```text
-83% probability of truth
-```
-
-for a raw Match Model probability.
-
-Use accurate language such as:
-
-```text
-held-out evaluation performance
-learned match probability
-statistical anomaly score
-review-prioritization signal
-```
-
-Document dataset and calibration limitations honestly.
-
----
-
-# FINAL SCOPE LOCK
-
-After Phase 35:
-
-DO NOT:
-
-* add another model
-* tune thresholds without evidence
-* expand the feature set
-* redesign the deterministic matcher
-* introduce forecasting
-* introduce vector search
-* add cloud ML infrastructure
-* add a Python inference service
-* add a GPU
-* add LLM fine-tuning
-* redesign the frontend
-* alter canonical truth
-* start an unplanned “Phase 36 ML”
-
-The current ML implementation is considered CLOSED once the Definition of Done is satisfied.
-
----
-
-# FINAL REPORT
-
-Return one comprehensive certification report:
-
-# FIELDLINE ML FINAL CERTIFICATION
-
-## Phase 31 — Canonical Truth Boundary
-
-`COMPLETED` / `BLOCKED`
-
-Report:
-
-* all canonical write paths discovered
-* approved write pathway
-* ML mutation tests
-* human confirmation test
-* append-only result
-
-## Phase 32 — Semantic Versioning
-
-`COMPLETED` / `BLOCKED`
-
-Report:
-
-* Match version
-* Anomaly version
-* feature contract validation
-* unsupported-version test
-* mismatch rejection behavior
-
-## Phase 33 — Retraining Workflow
-
-`COMPLETED` / `BLOCKED`
-
-Report:
-
-* training commands
-* evaluation results
-* verification results
-* artifact reproducibility/drift
-* promotion safety
-
-## Phase 34 — Technology Audit
-
-`COMPLETED` / `BLOCKED`
-
-Report:
-
-* prohibited technologies checked
-* production vs offline dependency separation
-* any violations discovered
-* any removals made
-
-## Phase 35 — Final Definition of Done
-
-`COMPLETED` / `BLOCKED`
-
-Report:
-
-* checklist result
-* certification artifact
-* final evidence
-* remaining limitations
-
-# FINAL SYSTEM METRICS
-
-Report actual current values:
-
-* total test files
-* total tests
-* Match Top-1
-* Match Top-3
-* Match ROC-AUC
-* artifact sizes
-* Match inference benchmark if previously measured
-* Anomaly inference benchmark if previously measured
-* training runtime if previously measured
-
-Do not manufacture or recompute metrics merely to make them look better.
-
-# FINAL BUILD / RELEASE
-
-Report exact results for:
-
-```text
-npm run ml:verify
-npm test
-npm run build:backend
-npm run build:frontend
-npm run verify:release
-```
-
-# FINAL ARCHITECTURAL STATEMENT
-
-Explicitly state whether these remain true:
-
-```text
-ML prediction != canonical truth
-```
-
-```text
-ML is advisory
-```
-
-```text
-activity_progress remains protected
-```
-
-```text
-production inference is native TypeScript
-```
-
-```text
-Python is offline-only
-```
-
-```text
-deterministic candidate generation remains intact
-```
-
-```text
-dual-threshold auto-confirm remains intact
-```
-
-# FINAL SCOPE STATEMENT
-
-Explicitly confirm:
-
-> Phases 31–35 were the final planned ML phases and no unplanned ML functionality was introduced.
-
-If any criterion is genuinely unmet, report `BLOCKED` for the relevant phase rather than disguising it as complete.
-
-Do not say “looks good”.
-
-Provide evidence.
+Also run all relevant focused tests.
+
+Then perform actual browser validation.
+
+Do NOT declare completion from unit tests alone.
+
+=========================================================
+20. FINAL ACCEPTANCE CRITERIA
+=============================
+
+The task is complete only when all are true:
+
+[ ] Worker can speak non-English / Banglish input.
+[ ] Gemini Live can respond naturally in the worker's language.
+[ ] Live transcript may remain in the worker's original language.
+[ ] Canonical Field Progress History text is English-only.
+[ ] Already-English statements remain unchanged.
+[ ] Identifiers, percentages, quantities, dates and locations are preserved exactly.
+[ ] Matching consumes canonical English text.
+[ ] Anomaly detection behavior is unchanged.
+[ ] No non-English progress update is silently persisted after normalization failure.
+[ ] Golden Demo voice flow works.
+[ ] Existing English Live Voice flow still works.
+[ ] Existing Match Model Golden Scenario still works.
+[ ] Existing Anomaly Model Golden Scenario still works.
+[ ] All tests pass.
+[ ] Build passes.
+[ ] demo:verify passes.
+[ ] ml:verify passes.
+
+At the end report:
+
+* exact root cause
+* files changed
+* normalization service design
+* exact integration point
+* whether a database migration was required
+* tests added
+* browser verification
+* before/after example:
+  "PR-B07 complete hoye geche"
+  →
+  "PR-B07 is complete."
+* confirmation that English input is left unchanged
+* confirmation that the live assistant can still respond in the worker's language
+* confirmation that no ML behavior was altered

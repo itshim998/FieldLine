@@ -28,6 +28,10 @@ import {
   fieldProgressExtractionService as defaultExtractionService
 } from '../services/field-progress-extraction.service.js';
 import {
+  FieldProgressNormalizationService,
+  fieldProgressNormalizationService as defaultNormalizationService
+} from '../services/field-progress-normalization.service.js';
+import {
   ProgressUpdateService,
   progressUpdateService as defaultProgressUpdateService
 } from '../../services/progress-update.service.js';
@@ -67,6 +71,7 @@ export interface LiveToolHandlerDependencies {
   snapshotService?: ProgressSnapshotService;
   intelligenceService?: ProjectIntelligenceService;
   extractionService?: FieldProgressExtractionService;
+  normalizationService?: FieldProgressNormalizationService;
   progressUpdateService?: ProgressUpdateService;
   matchingService?: ActivityMatchingService;
   progressService?: ProgressService;
@@ -81,6 +86,7 @@ export class LiveToolHandlers {
   private snapshotService: ProgressSnapshotService;
   private intelligenceService: ProjectIntelligenceService;
   private extractionService: FieldProgressExtractionService;
+  private normalizationService: FieldProgressNormalizationService;
   private progressUpdateService: ProgressUpdateService;
   private matchingService: ActivityMatchingService;
   private progressService: ProgressService;
@@ -94,6 +100,7 @@ export class LiveToolHandlers {
     this.snapshotService = deps.snapshotService || defaultSnapshotService;
     this.intelligenceService = deps.intelligenceService || defaultIntelligenceService;
     this.extractionService = deps.extractionService || defaultExtractionService;
+    this.normalizationService = deps.normalizationService || defaultNormalizationService;
     this.progressUpdateService = deps.progressUpdateService || defaultProgressUpdateService;
     this.matchingService = deps.matchingService || defaultMatchingService;
     this.progressService = deps.progressService || defaultProgressService;
@@ -433,12 +440,48 @@ export class LiveToolHandlers {
   ): Promise<void> {
     const today = getTodayDateString();
 
+    logger.debug(`LiveTool [processProgressStatementAsync]: Step 0 - Normalizing statement to English...`);
+    let normalized;
+    try {
+      normalized = await this.normalizationService.normalizeToEnglish(rawStatement);
+    } catch (normErr: any) {
+      logger.error(
+        `LiveTool [processProgressStatementAsync]: Normalization failed for statement "${rawStatement}": ${normErr.message}`,
+        normErr
+      );
+      const failureMsg = `System Event: Progress update normalization failed. Verbally inform the worker: 'I could not safely normalize that progress report into English. Please try stating it again.'`;
+      if (context?.session) {
+        context.session.dispatchVerbalConfirmation(failureMsg);
+        context.session.sendToClient({
+          type: 'progress_normalization_failed',
+          rawStatement,
+          message: 'Could not safely normalize report to English. Please retry.'
+        });
+      } else if (context?.gateway) {
+        const projectSessions = context.gateway.getSessionsForProject(projectId);
+        for (const s of projectSessions) {
+          s.dispatchVerbalConfirmation(failureMsg);
+          s.sendToClient({
+            type: 'progress_normalization_failed',
+            rawStatement,
+            message: 'Could not safely normalize report to English. Please retry.'
+          });
+        }
+      }
+      return;
+    }
+
+    const canonicalEnglishStatement = normalized.englishText;
+    logger.info(
+      `LiveTool [processProgressStatementAsync]: Statement normalized [isEnglish=${normalized.isEnglish}, detected=${normalized.detectedLanguage}]: "${rawStatement}" -> "${canonicalEnglishStatement}"`
+    );
+
     logger.debug(`LiveTool [processProgressStatementAsync]: Step 1 - Extracting structured facts via Groq...`);
     // 1. Asynchronously extract structured facts using Groq
-    const extraction = await this.extractionService.extractFromReport(rawStatement);
+    const extraction = await this.extractionService.extractFromReport(canonicalEnglishStatement);
 
     if (!extraction || !Array.isArray(extraction.items) || extraction.items.length === 0) {
-      logger.warn(`LiveTool [processProgressStatementAsync]: No structured items extracted from "${rawStatement}".`);
+      logger.warn(`LiveTool [processProgressStatementAsync]: No structured items extracted from "${canonicalEnglishStatement}".`);
       return;
     }
 
@@ -447,7 +490,7 @@ export class LiveToolHandlers {
     const updateRecord = this.progressUpdateService.createManualUpdate({
       projectId,
       reportDate: today,
-      rawText: rawStatement,
+      rawText: canonicalEnglishStatement,
       sourceType: 'voice'
     });
 
@@ -479,13 +522,13 @@ export class LiveToolHandlers {
         isConfirmed = matchCandidate.status === 'confirmed';
       } else {
         // Fallback to DeterministicActivityResolver if matching threshold was missed
-        let resolved = this.activityResolver.resolve(projectId, item.reference || rawStatement);
+        let resolved = this.activityResolver.resolve(projectId, item.reference || canonicalEnglishStatement);
         if (resolved.status !== 'resolved' && item.location) {
           const locQuery = `${item.location} ${item.reference || ''}`.trim();
           resolved = this.activityResolver.resolve(projectId, locQuery);
         }
-        if (resolved.status !== 'resolved' && rawStatement) {
-          resolved = this.activityResolver.resolve(projectId, rawStatement);
+        if (resolved.status !== 'resolved' && canonicalEnglishStatement) {
+          resolved = this.activityResolver.resolve(projectId, canonicalEnglishStatement);
         }
         if (resolved.status === 'resolved' && resolved.activity) {
           const fallbackMatch = this.activityMatchRepo.create({
