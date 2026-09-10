@@ -238,7 +238,7 @@ export function WorkerCockpitView({
       }
 
       setReportSuccess(
-        `Report successfully logged for ${createdUpdate.reporterName || 'Crew'} on ${createdUpdate.reportDate}. Linked to schedule matching pipeline.`
+        `Report successfully logged for ${createdUpdate.reporterName || 'Crew'} on ${createdUpdate.reportDate}. Linked and matched against schedule activities.`
       );
       setRawText('');
       setEvidenceFile(null);

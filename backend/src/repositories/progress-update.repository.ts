@@ -73,11 +73,12 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
     const sourceType = input.sourceType || 'manual';
     const status = input.status || 'received';
 
+    const nowIso = new Date().toISOString();
     const insertUpdateStmt = db.prepare(`
       INSERT INTO progress_updates (
-        id, project_id, report_date, reporter_name, reporter_role, source_type, raw_text, status
+        id, project_id, report_date, reporter_name, reporter_role, source_type, raw_text, status, created_at, updated_at
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -98,7 +99,9 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
         input.reporterRole ?? null,
         sourceType,
         input.rawText,
-        status
+        status,
+        nowIso,
+        nowIso
       );
 
       const eventId = crypto.randomUUID();
@@ -332,7 +335,7 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       const stmt = db.prepare(`
         SELECT * FROM progress_updates
         WHERE project_id = ? AND id IN (${placeholders})
-        ORDER BY report_date DESC, created_at DESC, id DESC
+        ORDER BY created_at DESC, rowid DESC
       `);
       const rows = stmt.all(projectId, ...ids) as ProgressUpdateDbRow[];
       return rows.map(mapRowToProgressUpdate);
@@ -349,7 +352,7 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       const stmt = db.prepare(`
         SELECT * FROM progress_updates 
         WHERE project_id = ? 
-        ORDER BY report_date DESC, created_at DESC, id DESC
+        ORDER BY created_at DESC, rowid DESC
       `);
       const rows = stmt.all(projectId) as ProgressUpdateDbRow[];
       return rows.map(mapRowToProgressUpdate);

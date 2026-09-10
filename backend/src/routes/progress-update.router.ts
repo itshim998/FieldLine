@@ -19,12 +19,12 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
       params: progressUpdateProjectIdParamSchema,
       body: createProgressUpdateSchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
         const { reportDate, rawText, reporterName, reporterRole } = req.body;
 
-        const progressUpdate = service.createManualUpdate({
+        const result = await service.createAndProcessManualUpdate({
           projectId,
           reportDate,
           rawText,
@@ -32,7 +32,10 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
           reporterRole
         });
 
-        res.status(201).json({ progressUpdate });
+        res.status(201).json({
+          progressUpdate: result.progressUpdate,
+          matches: result.matches
+        });
       } catch (error) {
         next(error);
       }

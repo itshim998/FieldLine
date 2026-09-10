@@ -6,8 +6,26 @@ import {
   ProjectRepository,
   projectRepository as defaultProjectRepo
 } from '../repositories/project.repository.js';
-import { ProgressUpdate, CreateProgressUpdateInput, ProgressUpdateSourceType } from '../models/domain.types.js';
+import {
+  ActivityMatchRepository,
+  activityMatchRepository as defaultActivityMatchRepo
+} from '../repositories/activity-match.repository.js';
+import {
+  FieldProgressExtractionService,
+  fieldProgressExtractionService as defaultExtractionService
+} from '../ai/services/field-progress-extraction.service.js';
+import {
+  ActivityMatchingService,
+  activityMatchingService as defaultMatchingService
+} from './matching/activity-matching.service.js';
+import {
+  ProgressUpdate,
+  CreateProgressUpdateInput,
+  ProgressUpdateSourceType,
+  ActivityMatch
+} from '../models/domain.types.js';
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
+import { logger } from '../config/logger.js';
 
 export type ProgressUpdateEntity = ProgressUpdate;
 
@@ -22,6 +40,10 @@ export interface CreateManualUpdateInput {
 
 export interface ProgressUpdateService {
   createManualUpdate(input: CreateManualUpdateInput): ProgressUpdateEntity;
+  createAndProcessManualUpdate(input: CreateManualUpdateInput): Promise<{
+    progressUpdate: ProgressUpdateEntity;
+    matches: ActivityMatch[];
+  }>;
   listProjectUpdates(projectId: string): ProgressUpdateEntity[];
   getProjectUpdate(projectId: string, updateId: string): ProgressUpdateEntity;
 }
@@ -29,13 +51,62 @@ export interface ProgressUpdateService {
 export class DefaultProgressUpdateService implements ProgressUpdateService {
   private progressUpdateRepo: ProgressUpdateRepository;
   private projectRepo: ProjectRepository;
+  private activityMatchRepo: ActivityMatchRepository;
+  private extractionService: FieldProgressExtractionService;
+  private matchingService: ActivityMatchingService;
 
   constructor(
     progressUpdateRepo: ProgressUpdateRepository = defaultProgressUpdateRepo,
-    projectRepo: ProjectRepository = defaultProjectRepo
+    projectRepo: ProjectRepository = defaultProjectRepo,
+    activityMatchRepo: ActivityMatchRepository = defaultActivityMatchRepo,
+    extractionService: FieldProgressExtractionService = defaultExtractionService,
+    matchingService: ActivityMatchingService = defaultMatchingService
   ) {
     this.progressUpdateRepo = progressUpdateRepo;
     this.projectRepo = projectRepo;
+    this.activityMatchRepo = activityMatchRepo;
+    this.extractionService = extractionService;
+    this.matchingService = matchingService;
+  }
+
+  async createAndProcessManualUpdate(input: CreateManualUpdateInput): Promise<{
+    progressUpdate: ProgressUpdateEntity;
+    matches: ActivityMatch[];
+  }> {
+    // 1. Persist progress report record
+    const progressRecord = this.createManualUpdate(input);
+
+    let matches: ActivityMatch[] = [];
+
+    // 2. Extract structured field facts and execute activity matching
+    try {
+      const extraction = await this.extractionService.extractFromReport(input.rawText);
+
+      if (extraction && Array.isArray(extraction.items) && extraction.items.length > 0) {
+        await this.matchingService.matchProgressUpdate(
+          input.projectId,
+          progressRecord.id,
+          extraction,
+          {
+            persist: true,
+            asOfDate: input.reportDate
+          }
+        );
+      }
+    } catch (err: unknown) {
+      logger.error(
+        `Failed to run extraction/matching pipeline for progress report '${progressRecord.id}': ${err instanceof Error ? err.message : String(err)}`,
+        err
+      );
+    }
+
+    // 3. Query all persisted matches for this report
+    matches = this.activityMatchRepo.listByProgressUpdateId(progressRecord.id, input.projectId);
+
+    return {
+      progressUpdate: progressRecord,
+      matches
+    };
   }
 
   createManualUpdate(input: CreateManualUpdateInput): ProgressUpdateEntity {

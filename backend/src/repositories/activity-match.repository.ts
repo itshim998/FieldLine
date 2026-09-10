@@ -629,7 +629,7 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
 
     const deleteStmt = db.prepare(`
       DELETE FROM activity_matches
-      WHERE progress_update_id = ? AND project_id = ? AND status = 'suggested'
+      WHERE progress_update_id = ? AND project_id = ? AND (status = 'suggested' OR reviewed_by = 'system')
     `);
 
     const insertMatchStmt = db.prepare(`
@@ -654,11 +654,23 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
     const insertedIds: string[] = [];
 
     const runTx = db.transaction(() => {
-      // 1. Clean up only suggested matches for this update
+      // 1. Clean up only suggested or system-confirmed matches for this update
       deleteStmt.run(input.progressUpdateId, input.projectId);
+
+      // Check existing confirmed activities to prevent duplicate confirmed decisions
+      const existingConfirmed = db.prepare(`
+        SELECT activity_id FROM activity_matches
+        WHERE progress_update_id = ? AND project_id = ? AND status = 'confirmed'
+      `).all(input.progressUpdateId, input.projectId) as Array<{ activity_id: string }>;
+      const existingConfirmedActivityIds = new Set(existingConfirmed.map((r) => r.activity_id));
 
       // 2. Insert new candidate matches
       for (const m of input.matches) {
+        if (m.status === 'confirmed' && existingConfirmedActivityIds.has(m.activityId)) {
+          // Do not duplicate already confirmed decisions for this activity
+          continue;
+        }
+
         const id = m.id || crypto.randomUUID();
         insertMatchStmt.run(
           id,
@@ -683,7 +695,7 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         insertedIds.push(id);
       }
 
-      // 3. Insert audit events
+      // 3. Insert audit events for successfully inserted matches
       for (const evt of input.events) {
         const eventId = evt.id || crypto.randomUUID();
         insertEventStmt.run(
