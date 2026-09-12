@@ -4,7 +4,7 @@
   "description": "Intelligent Data Capture & Schedule-Linking Layer for Infrastructure Project Management",
   "private": true,
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22 <23"
   },
   "type": "module",
   "scripts": {
@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "tsc -p tsconfig.backend.json && tsx scripts/copy-ml-artifacts.ts",
-    "build:frontend": "vite build frontend --config frontend/vite.config.ts",
+    "build:frontend": "vite build frontend --config frontend/vite.config.ts frontend",
     "setup": "tsx scripts/setup.ts",
     "demo:reset": "tsx scripts/demo-reset.ts",
     "demo:verify": "tsx scripts/demo-verify.ts",
