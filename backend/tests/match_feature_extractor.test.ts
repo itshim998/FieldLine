@@ -29,7 +29,7 @@ describe('Match Feature Extractor (Phase 1 & Phase 3)', () => {
 
     expect(keys).toHaveLength(8);
     expect(keys).toEqual(expect.arrayContaining([...MATCH_FEATURE_NAMES]));
-    expect((features as Record<string, unknown>).candidate_rank).toBeUndefined();
+    expect((features as unknown as Record<string, unknown>).candidate_rank).toBeUndefined();
   });
 
   it('should compute high name similarity for overlapping terms', () => {

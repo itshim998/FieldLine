@@ -58,7 +58,9 @@ export function createAssistantRouter(
 
         const response = await service.answerQuestion(projectId, body.question, {
           asOfDate: body.asOfDate,
-          role
+          role,
+          userName: req.session?.displayName || (role === 'worker' ? 'Refinery Operations Crew' : undefined),
+          userRole: role === 'worker' ? 'Field Operations Crew' : 'Field Engineer'
         });
 
         res.status(200).json(response);

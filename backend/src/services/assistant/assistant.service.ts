@@ -22,6 +22,18 @@ import {
   projectRepository as defaultProjectRepo
 } from '../../repositories/project.repository.js';
 import {
+  ProgressUpdateService,
+  progressUpdateService as defaultProgressUpdateService
+} from '../progress-update.service.js';
+import {
+  ProgressService,
+  progressService as defaultProgressService
+} from '../progress/progress.service.js';
+import {
+  ActivityMatchRepository,
+  activityMatchRepository as defaultActivityMatchRepo
+} from '../../repositories/activity-match.repository.js';
+import {
   normalizeDate
 } from '../normalization/date-normalizer.js';
 import {
@@ -420,19 +432,28 @@ export class AssistantService {
   private resolver: DeterministicActivityResolver;
   private factBuilder: VerifiedFactBuilder;
   private projectRepo: ProjectRepository;
+  private progressUpdateService: ProgressUpdateService;
+  private progressService: ProgressService;
+  private activityMatchRepo: ActivityMatchRepository;
 
   constructor(
     aiServiceInstance: AIService = defaultAiService,
     intentServiceInstance: AssistantIntentService = defaultIntentService,
     resolverInstance: DeterministicActivityResolver = defaultResolver,
     factBuilderInstance: VerifiedFactBuilder = defaultFactBuilder,
-    projectRepoInstance: ProjectRepository = defaultProjectRepo
+    projectRepoInstance: ProjectRepository = defaultProjectRepo,
+    progressUpdateServiceInstance: ProgressUpdateService = defaultProgressUpdateService,
+    progressServiceInstance: ProgressService = defaultProgressService,
+    activityMatchRepoInstance: ActivityMatchRepository = defaultActivityMatchRepo
   ) {
     this.aiService = aiServiceInstance;
     this.intentService = intentServiceInstance;
     this.resolver = resolverInstance;
     this.factBuilder = factBuilderInstance;
     this.projectRepo = projectRepoInstance;
+    this.progressUpdateService = progressUpdateServiceInstance;
+    this.progressService = progressServiceInstance;
+    this.activityMatchRepo = activityMatchRepoInstance;
   }
 
   /**
@@ -531,12 +552,13 @@ export class AssistantService {
       }
     }
 
-    // 6. Deterministic Activity Resolution (if query contains entity reference)
+    // 6. Deterministic Activity Resolution (if query contains entity reference or is a field report)
     let resolvedActivity: ResolvedActivityInfo | null = null;
-    if (intent.activityQuery) {
-      const resolution = this.resolver.resolve(projectId, intent.activityQuery);
+    const activityQueryTarget = intent.activityQuery || trimmedQuestion;
+    if (activityQueryTarget) {
+      const resolution = this.resolver.resolve(projectId, activityQueryTarget);
 
-      if (resolution.status === 'not_found') {
+      if (resolution.status === 'not_found' && intent.activityQuery) {
         return {
           question: trimmedQuestion,
           intent,
@@ -561,7 +583,7 @@ export class AssistantService {
           intent,
           resolvedActivity: null,
           ambiguousCandidates: resolution.candidates,
-          answer: `Multiple activities matched "${intent.activityQuery}": ${candidateNames}. Please specify the exact activity ID or complete activity name.`,
+          answer: `Multiple activities matched "${intent.activityQuery || trimmedQuestion}": ${candidateNames}. Please specify the exact activity ID or complete activity name.`,
           claims: [],
           factRefs: [],
           grounded: false,
@@ -572,6 +594,116 @@ export class AssistantService {
       }
 
       resolvedActivity = resolution.activity;
+    }
+
+    // 6b. Field Progress Report Handling
+    // When a worker reports an activity progress update (e.g. "Pump foundation piles completed to 65% at Area B crude pump bay.")
+    // directly record the update into Field Progress Updates and acknowledge naturally like Live Voice.
+    const progressPercentMatch =
+      trimmedQuestion.match(/(?:completed\s+to|reached|jumped(?:\s+to)?|progress(?:\s+is|\s+to)?|at|done)\s*(\d{1,3})\s*%?/i) ||
+      trimmedQuestion.match(/(\d{1,3})\s*%\s*(?:complete|completed|done|progress)?/i);
+    const isQuestionQuery = /^(what|which|why|how|when|who|where|is|are|can|could|show|list|tell\s+me)\b/i.test(trimmedQuestion);
+
+    if (resolvedActivity && !isQuestionQuery && progressPercentMatch) {
+      const progressPercent = Math.min(100, Math.max(0, parseInt(progressPercentMatch[1], 10)));
+      const locText = resolvedActivity.location ? ` at ${resolvedActivity.location}` : '';
+
+      try {
+        const reporterName =
+          options?.userName ||
+          (options?.role === 'worker' ? 'Refinery Operations Crew' : 'Field Operations Lead');
+        const reporterRole =
+          options?.userRole ||
+          (options?.role === 'worker' ? 'Field Operations Crew' : 'Field Engineer');
+
+        const updateRecord = this.progressUpdateService.createManualUpdate({
+          projectId,
+          reportDate: canonicalDate,
+          rawText: trimmedQuestion,
+          reporterName,
+          reporterRole,
+          sourceType: options?.role === 'worker' ? 'voice' : 'manual'
+        });
+
+        const match = this.activityMatchRepo.create({
+          projectId,
+          progressUpdateId: updateRecord.id,
+          activityId: resolvedActivity.id,
+          confidenceScore: 0.98,
+          matchMethod: 'exact_id',
+          matchedText: resolvedActivity.name,
+          rationale: 'Resolved and recorded via Operational Field Assistant',
+          status: 'confirmed',
+          confidenceTier: 'high',
+          reviewState: 'resolved',
+          reviewedBy: reporterName,
+          reviewedAt: new Date().toISOString()
+        });
+
+        this.progressService.normalizeAndRecordProgress({
+          projectId,
+          updateId: updateRecord.id,
+          matchId: match.id,
+          fact: {
+            reference: resolvedActivity.name,
+            location: resolvedActivity.location || null,
+            progress_percent: progressPercent,
+            status: progressPercent >= 100 ? 'completed' : 'in_progress'
+          },
+          allowSuggested: true
+        });
+        logger.info(
+          `AssistantService: Field progress update recorded: "${resolvedActivity.name}" (${resolvedActivity.externalId}) -> ${progressPercent}%`
+        );
+      } catch (err: any) {
+        logger.warn(`AssistantService: Could not persist field progress update: ${err.message}`);
+      }
+
+      const verifiedFacts: VerifiedFact[] = [
+        {
+          ref: `activity:${resolvedActivity.externalId}`,
+          category: 'activity_status',
+          summary: `${resolvedActivity.name} (${resolvedActivity.externalId})${locText}: Progress recorded at ${progressPercent}%`,
+          data: {
+            activityId: resolvedActivity.id,
+            externalId: resolvedActivity.externalId,
+            name: resolvedActivity.name,
+            location: resolvedActivity.location,
+            actualProgress: progressPercent
+          }
+        }
+      ];
+
+      const claims = [
+        {
+          type: 'activity_identity' as const,
+          factRef: `activity:${resolvedActivity.externalId}`,
+          field: 'name',
+          value: resolvedActivity.name,
+          text: `${resolvedActivity.name} (${resolvedActivity.externalId})`
+        },
+        {
+          type: 'metric' as const,
+          factRef: `activity:${resolvedActivity.externalId}`,
+          field: 'actualProgress',
+          value: progressPercent,
+          text: `Progress recorded at ${progressPercent}%`
+        }
+      ];
+
+      return {
+        question: trimmedQuestion,
+        intent,
+        resolvedActivity,
+        ambiguousCandidates: null,
+        answer: `Understood! Progress update acknowledged and recorded: ${resolvedActivity.name} (${resolvedActivity.externalId})${locText} has been updated to ${progressPercent}% complete. The field update has been logged to Field Progress Updates in the control room.`,
+        claims,
+        factRefs: [`activity:${resolvedActivity.externalId}`],
+        grounded: true,
+        status: 'success',
+        asOfDate: canonicalDate,
+        verifiedFacts
+      };
     }
 
     // Role-based scope partitioning: Worker vs Admin

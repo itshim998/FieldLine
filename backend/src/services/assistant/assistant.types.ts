@@ -30,6 +30,8 @@ export interface ActivityResolutionResult {
 export interface AssistantQueryOptions {
   asOfDate?: string;
   role?: 'worker' | 'admin';
+  userName?: string;
+  userRole?: string;
 }
 
 export type AssistantResponseStatus =

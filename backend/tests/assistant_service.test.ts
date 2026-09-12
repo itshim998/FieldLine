@@ -57,6 +57,23 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
       baselineProgress: 0,
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z'
+    },
+    {
+      id: 'act-b02',
+      projectId,
+      scheduleId: 'sch-1',
+      externalId: 'ACT-B02',
+      name: 'Crude Pump Foundation Piling Works',
+      description: null,
+      wbsCode: 'WBS-02.02',
+      location: 'Area B',
+      plannedStart: '2026-08-10',
+      plannedFinish: '2026-08-24',
+      plannedQuantity: 180,
+      unit: 'piles',
+      baselineProgress: 0,
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z'
     }
   ];
 
@@ -108,6 +125,16 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
         plannedFinish: '2026-08-15',
         actualProgress: 60,
         progressVariance: -40
+      },
+      {
+        activityId: 'act-b02',
+        externalId: 'ACT-B02',
+        name: 'Crude Pump Foundation Piling Works',
+        classification: 'AT_RISK' as const,
+        reasons: [{ code: 'STRONG_NEGATIVE_VARIANCE' as const, message: 'Delayed progress' }],
+        plannedFinish: '2026-08-24',
+        actualProgress: 65,
+        progressVariance: -10
       }
     ],
     completedToday: [
@@ -390,5 +417,49 @@ describe('AssistantService End-to-End Test Suite (Pass 18)', () => {
     expect(res.grounded).toBe(false);
     expect(res.answer).toContain('FieldLine Assistant');
     expect(fakeAIService.extractStructured).toHaveBeenCalled();
+  });
+
+  it('Query 7: "Pump foundation piles completed to 65% at Area B crude pump bay." -> resolves ACT-B02 deterministically', async () => {
+    const fakeIntentService = {
+      interpret: vi.fn().mockResolvedValue({
+        intent: 'at_risk',
+        activityQuery: 'Pump foundation piles',
+        explicitDate: null
+      })
+    } as unknown as AssistantIntentService;
+
+    const fakeAIService: AIService = {
+      generateText: vi.fn(),
+      extractStructured: vi.fn().mockResolvedValue({
+        claims: [
+          {
+            type: 'activity_identity',
+            factRef: 'at_risk:ACT-B02',
+            field: 'actualProgress',
+            value: 65,
+            text: 'Crude Pump Foundation Piling Works (ACT-B02) is currently at 65% progress.'
+          }
+        ]
+      })
+    };
+
+    const service = new AssistantService(
+      fakeAIService,
+      fakeIntentService,
+      resolver,
+      factBuilder,
+      fakeProjectRepo
+    );
+
+    const res = await service.answerQuestion(
+      projectId,
+      'Pump foundation piles completed to 65% at Area B crude pump bay.'
+    );
+    expect(res.intent.intent).toBe('at_risk');
+    expect(res.resolvedActivity?.externalId).toBe('ACT-B02');
+    expect(res.resolvedActivity?.name).toBe('Crude Pump Foundation Piling Works');
+    expect(res.resolvedActivity?.location).toBe('Area B');
+    expect(res.grounded).toBe(true);
+    expect(res.status).toBe('success');
   });
 });

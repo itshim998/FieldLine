@@ -307,6 +307,10 @@ export function WorkerCockpitView({
       }
 
       setAssistantResponse(data);
+      if (data.status === 'success' && data.resolvedActivity) {
+        fetchRecentUpdates();
+        fetchActivities();
+      }
     } catch (err: any) {
       setAssistantError(err.message || 'Assistant service unavailable');
     } finally {
