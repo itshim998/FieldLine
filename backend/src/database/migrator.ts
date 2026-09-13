@@ -9,6 +9,7 @@ import * as migration0007 from './migrations/0007_match_review_tiers.js';
 import * as migration0008 from './migrations/0008_project_accounts.js';
 import * as migration0009 from './migrations/0009_operational_blockers.js';
 import * as migration0010 from './migrations/0010_ml_advisory_fields.js';
+import * as migration0011 from './migrations/0011_notification_outbox.js';
 
 export interface Migration {
   name: string;
@@ -30,7 +31,8 @@ export const MIGRATIONS: Migration[] = [
   { name: migration0007.name, up: migration0007.up },
   { name: migration0008.name, up: migration0008.up },
   { name: migration0009.name, up: migration0009.up },
-  { name: migration0010.name, up: migration0010.up }
+  { name: migration0010.name, up: migration0010.up },
+  { name: migration0011.name, up: migration0011.up }
 ];
 
 /**

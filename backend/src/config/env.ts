@@ -120,7 +120,10 @@ export const envSchema = z.object({
   }, z.boolean()).default(false),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().min(1).default('FieldLine Alerts <onboarding@resend.dev>'),
-  ANOMALY_ALERT_RECIPIENTS: z.string().optional()
+  ANOMALY_ALERT_RECIPIENTS: z.string().optional(),
+  NOTIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  NOTIFICATION_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
+  NOTIFICATION_LEASE_TIMEOUT_MS: z.coerce.number().int().positive().default(300000)
 }).passthrough().transform((data) => {
   const { keys: groqKeys } = extractGroqApiKeys(data as Record<string, string | undefined>);
   const { keys: geminiKeys } = extractGeminiApiKeys(data as Record<string, string | undefined>);

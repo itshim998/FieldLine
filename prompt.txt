@@ -1,156 +1,870 @@
-You are now implementing **Phase 3 — Free HTTP Email Delivery** for FieldLine.
+You are now implementing **Phase 4 — Notification Persistence, Idempotency & Retry Reliability** for FieldLine.
 
-The objective is to add a real, free, HTTP-based email delivery channel for the anomaly alerts produced by Phase 2.
+Phase 1 and Phase 2 established anomaly detection and channel-neutral anomaly explanation.
 
-The intended architecture is:
+Phase 3 established immediate HTTP email delivery through Resend.
+
+Phase 4 must now transform that into a **durable, idempotent, retryable notification system** without redesigning the anomaly or email architecture.
+
+The core principle remains:
 
 ```text
-Worker Progress Report
-        ↓
-Phase 1 — Anomaly Detection
-        ↓
-Persisted anomaly/activity match
-        ↓
-Phase 2 — AnomalyAlertMessage
-        ↓
-Phase 3 — Email Delivery
-        ↓
-HTTPS
-        ↓
-Resend
-        ↓
-Administrator Email
+ML detects.
+Groq explains.
+Notification system records intent.
+Delivery adapters deliver.
 ```
 
-The architectural rule remains:
-
-**ML detects. Groq explains. Email delivers.**
-
-Do not blur these responsibilities.
-
 ---
 
-# IMPORTANT REPOSITORY-STATE INSTRUCTION
+# 0. BEFORE IMPLEMENTATION: AUDIT THE ACTUAL CODE
 
-Before changing anything:
+Do not rely only on previous walkthroughs.
 
-1. Inspect the current GitHub `main` baseline.
-2. Inspect the actual local workspace, especially the Phase 1 and Phase 2 implementations that were recently added.
-3. Treat the actual current local implementation as authoritative for Phase 1/2 behavior.
-4. Do not assume that GitHub `main` already contains Phase 1 or Phase 2 merely because they are described in previous walkthroughs.
-5. Do not redesign Phase 1 or Phase 2.
-6. Reuse the actual Phase 2 `AnomalyAlertMessage` contract that exists in the workspace.
+Inspect the actual current local workspace and GitHub `main` baseline.
 
-You are performing a Phase 3 addition around the existing architecture, not rebuilding the notification system from scratch.
+Specifically inspect:
 
----
-
-# 1. FIRST: AUDIT THE CURRENT ARCHITECTURE
-
-Inspect at minimum:
-
-* actual Phase 1 anomaly evaluation service/result types
-* actual Phase 2 anomaly message types
-* actual Phase 2 message generator
-* Phase 2 adapter (`toAnomalyMessageInput` or equivalent)
-* current worker progress-report paths
-* activity-match persistence
+* current Phase 1 anomaly evaluation implementation
+* current Phase 2 `AnomalyAlertMessage` implementation
+* current Phase 3 notification orchestration
+* current Phase 3 email delivery adapter
+* activity match persistence
 * progress persistence
-* existing service barrel exports
-* `backend/src/config/env.ts`
-* `package.json`
-* existing logging/redaction conventions
-* `render.yaml`
-* existing test architecture
-* existing `ChatGPT_plan.md`
+* SQLite migration system
+* existing `processing_jobs` table/repository
+* existing `WorkerRunner`
+* stale job recovery
+* `project_events`
+* current transaction boundaries
+* current test patterns
+* `ChatGPT_plan.md`
 
-Determine the real point at which a completed anomaly has:
+Treat the actual local Phase 1–3 code as authoritative.
 
-1. been evaluated,
-2. been persisted,
-3. produced an `AnomalyAlertMessage`.
-
-Phase 3 email delivery must attach to that completed flow.
-
-Do not attach email directly to `AnomalyModelService.predict()`.
+Do not blindly implement against an older remote `main` snapshot if local Phase 1–3 work has not yet been pushed.
 
 ---
 
-# 2. USE RESEND OVER HTTPS
+# 1. CORE OBJECTIVE
 
-Implement email delivery using the Resend Email API over HTTPS.
-
-Do NOT use:
-
-* SMTP
-* Nodemailer
-* Gmail SMTP
-* a local mail server
-* a background email daemon
-
-The current deployment is a Render Free Node web service, so SMTP is specifically unsuitable.
-
-Prefer native Node 22 `fetch()` rather than introducing the Resend SDK unless the existing repository architecture provides a strong reason otherwise.
-
-Keep the dependency footprint small.
-
----
-
-# 3. CREATE A CLEAN EMAIL DELIVERY ABSTRACTION
-
-Add a small, repository-consistent abstraction equivalent to:
-
-```ts
-interface EmailDeliveryService {
-  sendAnomalyAlert(
-    message: AnomalyAlertMessage
-  ): Promise<EmailDeliveryResult>;
-}
-```
-
-The exact names and directory structure may follow existing FieldLine conventions.
-
-The important rule is:
-
-**Business/application services must not know Resend's HTTP details.**
-
-Keep Resend-specific behavior behind an adapter such as:
+Change the notification model from:
 
 ```text
-ResendEmailDeliveryService
+anomaly
+  ↓
+generate message
+  ↓
+send email immediately
 ```
 
-or an equivalent name.
+to:
 
-The rest of FieldLine should depend on the abstraction, not directly on Resend.
+```text
+anomaly
+  ↓
+persist anomaly
+  ↓
+atomically create notification intent
+  ↓
+notification worker
+  ↓
+generate/reuse Phase 2 message
+  ↓
+deliver via email adapter
+  ↓
+success / retry / permanent failure
+```
+
+The important distinction is:
+
+**Phase 4 persists the intent to notify; the delivery adapter performs the external side effect.**
 
 ---
 
-# 4. ADD EMAIL CONFIGURATION
+# 2. DO NOT REUSE `processing_jobs` UNLESS THE AUDIT PROVES IT IS CLEARLY APPROPRIATE
 
-Extend the existing Zod-based environment configuration.
-
-Use explicit variables equivalent to:
+The current repository already has:
 
 ```text
-EMAIL_ENABLED
-RESEND_API_KEY
-EMAIL_FROM
-ANOMALY_ALERT_RECIPIENTS
+processing_jobs
 ```
 
-Choose exact names consistent with the repository conventions if necessary.
+but it is currently explicitly designed for asynchronous processing jobs and its schema restricts `job_type` to:
 
-Requirements:
+```text
+document_ingestion
+```
 
-* API key must never be hard-coded.
-* Sender must be configuration-driven.
-* Recipients must be configuration-driven.
-* Recipients must NOT come from the worker's report.
-* Support multiple recipients in a clear configuration format.
-* Email delivery must be disableable.
+with:
 
-The default development/test behavior should remain safe and offline-capable.
+```text
+queued → processing → completed | failed
+```
+
+and generic job fields.
+
+Do not automatically overload this table for notification delivery.
+
+Prefer a dedicated:
+
+```text
+notification_outbox
+```
+
+unless the actual current architecture makes a unified job model materially cleaner without weakening notification semantics.
+
+The notification system requires concepts such as:
+
+* notification event identity
+* channel
+* idempotency key
+* next retry time
+* delivery status
+* provider message ID
+* retryable vs permanent failure
+* immutable payload snapshot
+
+Do not distort the existing document-processing job model merely to avoid creating a table.
+
+---
+
+# 3. ADD A DEDICATED NOTIFICATION OUTBOX
+
+Create a migration for a dedicated `notification_outbox` table or an equivalent repository-consistent structure.
+
+The table should contain enough state to support:
+
+```text
+pending / processing / retry_wait / delivered / failed
+```
+
+and should conceptually include:
+
+```text
+id
+project_id
+activity_match_id
+
+notification_type
+channel
+
+status
+
+payload_json
+idempotency_key
+
+attempt_count
+max_attempts
+
+next_attempt_at
+locked_at
+last_attempt_at
+delivered_at
+
+provider_message_id
+
+last_error_code
+last_error_summary
+
+created_at
+updated_at
+```
+
+Use exact names consistent with repository conventions.
+
+Do not store secrets.
+
+Do not store unnecessary provider payloads if the channel-neutral alert payload is sufficient.
+
+---
+
+# 4. ATOMICALLY CREATE THE OUTBOX WITH THE ANOMALY RECORD
+
+This is a mandatory invariant.
+
+The transaction should conceptually be:
+
+```text
+BEGIN
+    persist anomaly/activity match
+    create notification_outbox row
+COMMIT
+```
+
+Then, only after commit:
+
+```text
+notification worker → external delivery
+```
+
+Never perform the Resend HTTP request inside the SQLite transaction.
+
+The objective is to eliminate this failure mode:
+
+```text
+anomaly committed
+server crashes
+notification intent never recorded
+```
+
+The outbox row must be created as part of the same successful persistence unit as the anomaly when the anomaly qualifies for notification.
+
+---
+
+# 5. DO NOT CREATE NOTIFICATIONS FOR NORMAL/COLD-START
+
+Preserve the existing Phase 1/2 policy:
+
+```text
+normal → no notification
+cold start → no notification
+```
+
+Only eligible anomaly severities should create an outbox record.
+
+Do not create a pending notification and later decide it was unnecessary.
+
+---
+
+# 6. ENFORCE LOGICAL IDEMPOTENCY IN SQLITE
+
+The same anomaly event must not create multiple logical notification records for the same channel.
+
+Define a deterministic identity conceptually equivalent to:
+
+```text
+anomaly-alert:<activityMatchId>:email
+```
+
+or another repository-appropriate event key.
+
+Prefer a database uniqueness constraint/index protecting the logical event.
+
+For example, conceptually:
+
+```text
+(project_id, activity_match_id, notification_type, channel)
+```
+
+must be unique where appropriate.
+
+Do not rely solely on Resend idempotency.
+
+The application itself should know:
+
+> "This anomaly already has an email notification intent."
+
+---
+
+# 7. PRESERVE A SNAPSHOT OF THE PHASE 2 MESSAGE PAYLOAD
+
+Do NOT make notification retries call Groq again.
+
+The preferred lifecycle is:
+
+```text
+anomaly persisted
+    ↓
+create notification intent
+    ↓
+generate Phase 2 AnomalyAlertMessage exactly once
+    ↓
+store immutable message/payload snapshot
+    ↓
+email delivery
+```
+
+or, if the current Phase 3 architecture already generates the message before the outbox transaction, ensure the equivalent immutable payload is captured in the outbox.
+
+The crucial invariant is:
+
+```text
+One notification event
+    ↓
+One message snapshot
+    ↓
+All delivery retries reuse that exact payload
+```
+
+This is important both for consistency and for Resend idempotency.
+
+Do not regenerate natural-language content on every retry.
+
+---
+
+# 8. PRESERVE SERVER-OWNED ANOMALY FACTS
+
+The outbox snapshot must retain the trusted values from Phase 1/2.
+
+Do not derive any of these from generated prose:
+
+* anomaly score
+* severity
+* activity identity
+* project identity
+* progress values
+* reporter
+* anomaly reasons
+
+Groq remains a language generator only.
+
+---
+
+# 9. CREATE A NOTIFICATION WORKER
+
+Use the existing repository's in-process worker philosophy.
+
+Do NOT introduce:
+
+* Redis
+* BullMQ
+* Kafka
+* RabbitMQ
+* external queue services
+* cloud functions
+* paid infrastructure
+
+The existing repository already has an in-process worker and stale-job-recovery pattern.
+
+Reuse that design philosophy.
+
+Choose the cleanest implementation after inspecting the actual current worker architecture.
+
+A dedicated lightweight `NotificationWorker` is acceptable and may be preferable if sharing the current document worker would make the code confusing or cause notification starvation.
+
+The worker must support:
+
+```text
+claim next eligible notification
+        ↓
+process
+        ↓
+finish / schedule retry
+```
+
+---
+
+# 10. SAFE CLAIMING / LEASE SEMANTICS
+
+A notification must be atomically claimed before delivery.
+
+The worker should transition:
+
+```text
+pending/retry_wait
+        ↓
+processing
+```
+
+and set:
+
+```text
+locked_at
+```
+
+or an equivalent lease timestamp.
+
+Another worker must not simultaneously claim the same row.
+
+Follow the existing `JobRepository.claimNextQueued()` transactional pattern where appropriate.
+
+---
+
+# 11. RECOVER STALE NOTIFICATIONS
+
+If the process crashes after claiming:
+
+```text
+processing
+```
+
+but before completion:
+
+```text
+locked_at = old
+```
+
+the next worker startup/poll should be able to identify the stale lease and return the notification to a retryable state.
+
+Use a bounded lease timeout.
+
+Do not create an infinite retry loop.
+
+---
+
+# 12. RETRY CLASSIFICATION
+
+Classify delivery errors into two categories.
+
+### Retryable
+
+At minimum consider:
+
+```text
+HTTP 429
+HTTP 500
+HTTP 502
+HTTP 503
+HTTP 504
+network failures
+connection reset
+timeout
+temporary provider failures
+```
+
+### Permanent
+
+At minimum consider:
+
+```text
+HTTP 400
+HTTP 401
+HTTP 403
+invalid request
+invalid sender
+invalid recipient
+missing/invalid configuration
+```
+
+Do not retry permanent configuration/authentication failures indefinitely.
+
+Use the actual Resend response semantics already present in the Phase 3 adapter.
+
+---
+
+# 13. RETRY BACKOFF
+
+Implement a bounded backoff policy.
+
+A simple sequence such as:
+
+```text
+attempt 1 → short delay
+attempt 2 → longer delay
+attempt 3 → longer again
+...
+```
+
+is sufficient.
+
+For example:
+
+```text
+1m
+5m
+15m
+30m
+```
+
+The exact values may follow repository conventions, but must be:
+
+* bounded
+* non-zero
+* increasing
+* testable
+* capped
+
+Add small jitter if useful and simple.
+
+Do not busy-loop.
+
+---
+
+# 14. MAXIMUM ATTEMPTS
+
+Set an explicit maximum number of delivery attempts.
+
+After the limit:
+
+```text
+status = failed
+```
+
+with a machine-readable error code and human-readable sanitized summary.
+
+Do not retry forever.
+
+The exact limit can be chosen after inspecting current configuration conventions.
+
+Prefer configuration or a clearly documented constant over scattering the value through worker code.
+
+---
+
+# 15. RESEND IDEMPOTENCY
+
+Preserve the Phase 3 Resend idempotency-key behavior.
+
+The key must remain deterministic for the same notification event.
+
+Resend's API supports idempotency keys and uses them to suppress duplicate processing of the same email request. Its documentation also states that retries using the same idempotency key should use the same payload; otherwise the provider can reject the request as an invalid idempotent request.
+
+Therefore:
+
+```text
+same notification
+    ↓
+same idempotency key
+    ↓
+same email payload
+```
+
+must remain true across retries.
+
+Do not generate a new random key per retry.
+
+---
+
+# 16. HANDLE THE "CRASH AFTER SEND, BEFORE DB UPDATE" CASE
+
+This is a critical failure scenario.
+
+Example:
+
+```text
+worker
+  ↓
+Resend accepts email
+  ↓
+process crashes
+  ↓
+notification row still says processing
+```
+
+When the stale row is retried, FieldLine may make the same request again.
+
+This is exactly where the deterministic Resend idempotency key protects against duplicate delivery.
+
+The architecture must explicitly account for this scenario.
+
+Add a behavioral test for it where practical.
+
+---
+
+# 17. RECORD DELIVERY RESULT
+
+On successful delivery, store:
+
+```text
+status = delivered
+delivered_at
+provider_message_id
+attempt_count
+updated_at
+```
+
+Use the actual provider message ID returned by Resend.
+
+On retryable failure:
+
+```text
+status = retry_wait
+next_attempt_at
+last_error_code
+last_error_summary
+attempt_count
+```
+
+On permanent failure:
+
+```text
+status = failed
+last_error_code
+last_error_summary
+attempt_count
+```
+
+Never store API secrets.
+
+---
+
+# 18. NOTIFICATION OBSERVABILITY
+
+Use the existing `project_events` audit architecture where it materially helps.
+
+Useful event types may include:
+
+```text
+notification_created
+notification_delivery_succeeded
+notification_retry_scheduled
+notification_delivery_failed
+```
+
+Do not emit events for every polling cycle.
+
+Keep audit events tied to meaningful state transitions.
+
+---
+
+# 19. PRESERVE EMAIL FAILURE INDEPENDENCE
+
+This invariant remains mandatory:
+
+```text
+anomaly persistence succeeds
++
+notification delivery fails
+=
+anomaly remains valid
+```
+
+The worker must never:
+
+* delete the anomaly
+* undo canonical progress
+* modify the activity match to hide the failure
+* roll back anomaly persistence because email failed
+
+The notification system is downstream of the anomaly truth.
+
+---
+
+# 20. DO NOT REINTRODUCE SYNCHRONOUS RESEND DELIVERY INTO THE REPORT TRANSACTION
+
+Phase 3 may still have synchronous invocation depending on the actual current implementation.
+
+Phase 4 must transition the durable notification system toward:
+
+```text
+request
+  ↓
+database transaction
+  ↓
+outbox row
+  ↓
+commit
+  ↓
+notification worker
+  ↓
+Resend
+```
+
+The external API call should not be required for the worker's database commit.
+
+Do not hold SQLite locks while waiting for Resend.
+
+---
+
+# 21. DO NOT ALTER EXISTING PROCESSING JOB SEMANTICS UNLESS NECESSARY
+
+The current document-ingestion job system already has:
+
+* queue state
+* claim state
+* attempt count
+* stale job recovery
+
+Do not break it.
+
+The existing `processing_jobs` behavior must remain green.
+
+If you choose to extend it for notifications, first prove that the resulting abstraction is cleaner than a dedicated notification outbox. Otherwise use the dedicated outbox.
+
+---
+
+# 22. TESTING
+
+Add focused tests for:
+
+### Outbox persistence
+
+```text
+eligible anomaly → exactly one notification row
+normal anomaly → zero notification rows
+duplicate processing → one logical notification
+```
+
+### Atomicity
+
+Simulate persistence failure and verify the outbox is not left orphaned without its anomaly.
+
+Simulate outbox insertion failure and verify the transaction rolls back consistently.
+
+### Claiming
+
+Two worker attempts must not successfully claim the same notification simultaneously.
+
+### Retry logic
+
+Verify:
+
+```text
+429 → retry_wait
+503 → retry_wait
+timeout → retry_wait
+400 → failed
+401 → failed
+```
+
+### Backoff
+
+Verify `next_attempt_at` increases according to policy.
+
+### Max attempts
+
+Verify the notification becomes permanently failed after the configured limit.
+
+### Success
+
+Verify:
+
+```text
+delivered
+provider_message_id recorded
+delivered_at recorded
+```
+
+### Retry idempotency
+
+Verify retries reuse:
+
+```text
+same notification id
+same idempotency key
+same payload
+```
+
+### Crash-after-send scenario
+
+Simulate:
+
+```text
+provider success
+DB success update interrupted
+stale recovery
+retry
+```
+
+and verify the provider request uses the same idempotency identity.
+
+### Groq call count
+
+Verify that retrying email delivery does NOT call Groq again.
+
+### Failure independence
+
+Verify Resend failures never remove or alter the anomaly record.
+
+---
+
+# 23. INTUITIVE / BEHAVIORAL EVALUATION
+
+Do not stop at unit tests.
+
+Run realistic lifecycle scenarios.
+
+### Scenario A — successful anomaly notification
+
+```text
+HIGH anomaly
+→ outbox created
+→ worker claims
+→ Groq message created once
+→ Resend success
+→ delivered
+```
+
+### Scenario B — temporary outage
+
+```text
+HIGH anomaly
+→ outbox created
+→ Resend 503
+→ retry_wait
+→ later success
+→ delivered
+```
+
+### Scenario C — permanent configuration error
+
+```text
+HIGH anomaly
+→ Resend 401
+→ failed
+→ no infinite retry
+```
+
+### Scenario D — duplicate trigger
+
+Invoke the anomaly notification path twice for the same activity match.
+
+Expected:
+
+```text
+one logical notification
+```
+
+### Scenario E — crash after external send
+
+Verify deterministic idempotency prevents duplicate logical email delivery.
+
+### Scenario F — application restart during processing
+
+Verify stale `processing` notification can be reclaimed safely.
+
+### Scenario G — message stability
+
+Verify that retrying a notification does not produce a new Groq message.
+
+### Scenario H — normal report
+
+Expected:
+
+```text
+no notification outbox row
+no Groq anomaly-message generation
+no email
+```
+
+---
+
+# 24. RENDER / DEPLOYMENT REALITY
+
+The current deployment uses Render Free and SQLite.
+
+Do not pretend this makes SQLite persistent across every deploy/restart/spindown.
+
+Render documents that the Free filesystem is ephemeral.
+
+Therefore the final documentation should state honestly:
+
+```text
+Phase 4 provides durable notification state within the current SQLite deployment architecture,
+plus crash/retry/idempotency handling while the database persists.
+Cross-redeploy durability on Render Free remains an infrastructure limitation.
+```
+
+Do not add paid infrastructure merely to solve this.
+
+---
+
+# 25. SECURITY
+
+Verify:
+
+* no Resend API key in database
+* no API key in outbox payload
+* no Authorization header persisted
+* no secret in logs
+* email payload contains only intended notification information
+* recipient addresses remain configuration-driven
+* worker reports cannot choose notification recipients
+
+---
+
+# 26. GOLDEN DEMO PRESERVATION
+
+The following workflows must remain functional:
+
+```bash
+npm test
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+```
+
+The test/demo environment must not require real Resend credentials.
 
 Prefer:
 
@@ -158,682 +872,62 @@ Prefer:
 EMAIL_ENABLED=false
 ```
 
-when not explicitly configured.
+for offline runs.
 
-Do not make the existing golden demo depend on Resend credentials.
-
----
-
-# 5. DO NOT BREAK THE EXISTING MOCK/OFFLINE WORKFLOW
-
-FieldLine already values deterministic offline operation.
-
-Therefore:
-
-```text
-EMAIL_ENABLED=false
-```
-
-must result in:
-
-* no HTTP request
-* no Resend dependency
-* no test failure
-* no change to existing anomaly behavior
-
-The existing demo/test workflow must remain usable without an email account.
+When email delivery is disabled, the outbox/worker architecture should still remain testable using mocks without making external HTTP requests.
 
 ---
 
-# 6. BUILD A DETERMINISTIC EMAIL RENDERER
+# 27. FINAL VERIFICATION
 
-Phase 2 already produces the channel-neutral:
-
-```text
-AnomalyAlertMessage
-```
-
-Use that as the source.
-
-Do NOT ask Groq to generate HTML.
-
-Do NOT introduce another AI call.
-
-Create deterministic rendering for:
-
-### HTML
-
-Include, where available:
-
-* FieldLine alert heading
-* severity
-* title
-* summary
-* details
-* recommended action
-* project
-* activity
-* activity external ID
-* observation date
-* previous canonical progress
-* reported progress
-* anomaly score
-* reporter
-* location
-
-Use the server-owned values from `AnomalyAlertMessage`.
-
-### Plain text
-
-Produce the same operational information as a readable plaintext email.
-
-Resend supports both `html` and `text`; use both.
-
----
-
-# 7. HTML SAFETY
-
-Every dynamic value inserted into HTML must be properly HTML-escaped.
-
-Treat these as untrusted/dynamic content:
-
-* project name
-* activity name
-* location
-* reporter name
-* title
-* summary
-* details
-* recommended action
-* full message
-* IDs and other dynamic fields
-
-Do not interpolate dynamic strings directly into HTML without escaping.
-
-Add tests specifically proving that HTML-sensitive input does not create markup.
-
----
-
-# 8. PRESERVE SERVER OWNERSHIP OF ANOMALY FACTS
-
-The final email must preserve the Phase 2 trust model.
-
-Groq-generated fields:
-
-```text
-title
-summary
-details
-recommendedAction
-fullMessage
-```
-
-Server/Phase 1-owned facts:
-
-```text
-severity
-anomalyScore
-anomalyReasons
-projectName
-activityExternalId
-activityName
-activityLocation
-reportDate
-reporterName
-previousPercent
-reportedPercent
-activityMatchId
-```
-
-The email renderer must use the authoritative server-owned values.
-
-Do not derive severity from prose.
-
-Do not derive anomaly score from prose.
-
-Do not let the email layer recalculate anything.
-
----
-
-# 9. TRIGGER EMAIL ONLY AFTER PERSISTENCE
-
-The intended sequence is:
-
-```text
-Anomaly detected
-      ↓
-Activity match / anomaly record persisted
-      ↓
-Persistence succeeds
-      ↓
-Phase 2 AnomalyAlertMessage available
-      ↓
-Phase 3 email delivery
-```
-
-Never send the email merely because anomaly inference returned `high`.
-
-The dashboard/database remains the source of truth.
-
-Email is only a delivery mechanism.
-
-Inspect all relevant current report paths and ensure the completed Phase 1/2 anomaly flow is handled consistently.
-
-Do not accidentally implement email for only one worker-report path.
-
----
-
-# 10. ANOMALY AND EMAIL FAILURE MUST BE INDEPENDENT
-
-This invariant is mandatory:
-
-```text
-Anomaly persistence success
-        +
-Resend failure
-        =
-anomaly remains valid
-```
-
-For example:
-
-```text
-Phase 1 → HIGH anomaly
-Phase 2 → message generated
-Phase 3 → Resend returns HTTP 503
-```
-
-Expected behavior:
-
-* anomaly remains persisted
-* dashboard remains correct
-* email failure is logged as a delivery failure
-* the original worker operation must not be rolled back solely because email failed
-
-Do NOT:
-
-* delete the anomaly
-* undo the progress record
-* mark the anomaly false
-* throw an error that causes the whole worker report transaction to fail
-
-unless the existing application architecture absolutely requires surfacing a non-fatal delivery result. In that case, preserve the anomaly and clearly separate the delivery status.
-
----
-
-# 11. NO BACKGROUND EMAIL WORKER
-
-Do not create a new queue or background process for Phase 3.
-
-Do not add:
-
-* email worker
-* cron
-* retry daemon
-* scheduled job
-* Redis queue
-* BullMQ
-* external queue
-
-The current architecture is compatible with an immediate synchronous HTTP delivery attempt.
-
-Use:
-
-```text
-report request
- ↓
-anomaly processing
- ↓
-persist
- ↓
-email HTTP request
- ↓
-respond
-```
-
-Phase 4 will address durable notification state and retry/idempotency strategy more comprehensively.
-
----
-
-# 12. USE RESEND IDEMPOTENCY
-
-Resend supports `Idempotency-Key`.
-
-Use a deterministic idempotency key based on the originating anomaly identity, preferably using the actual Phase 2 correlation field such as `activityMatchId` plus an explicit notification purpose.
-
-Do not invent random keys for every retry.
-
-The objective is to reduce duplicate sends for the same anomaly event.
-
-Inspect the actual Phase 2 correlation model before deciding the exact key format.
-
----
-
-# 13. HANDLE HTTP ERRORS ROBUSTLY
-
-The delivery adapter must handle at least:
-
-* successful 2xx response
-* 400 validation errors
-* 401/403 authentication/authorization errors
-* 429 rate limiting
-* 500/502/503 server failures
-* network failures
-* connection timeout
-* invalid/malformed response body
-
-Use an explicit request timeout.
-
-Prefer `AbortController` or another standard Node mechanism.
-
-Do not hang the worker request indefinitely waiting for Resend.
-
----
-
-# 14. NEVER LEAK SECRETS
-
-Follow the repository's existing logging/redaction conventions.
-
-The following must never appear in logs or thrown error messages:
-
-* `RESEND_API_KEY`
-* `Authorization: Bearer <key>`
-* raw secret values
-
-A Resend error should be summarized safely.
-
-For example:
-
-```text
-Resend email delivery failed: HTTP 503
-```
-
-is fine.
-
-Dumping the entire request headers object is not.
-
-Add a regression test for secret redaction where appropriate.
-
----
-
-# 15. RETURN A STRUCTURED DELIVERY RESULT
-
-Use a small result type conceptually equivalent to:
-
-```ts
-{
-  sent: boolean;
-  provider: 'resend';
-  providerMessageId?: string;
-  errorCode?: string;
-}
-```
-
-Adapt the exact naming to repository conventions.
-
-Do not persist this result yet.
-
-Phase 4 will introduce notification state/persistence.
-
----
-
-# 16. TEST THE ACTUAL HTTP CONTRACT
-
-Do not merely mock `EmailDeliveryService.sendAnomalyAlert()`.
-
-Mock the underlying `fetch()` call and verify the actual outgoing HTTP contract.
-
-Test:
-
-```text
-POST https://api.resend.com/emails
-Authorization: Bearer ...
-Content-Type: application/json
-```
-
-with a payload containing:
-
-```text
-from
-to
-subject
-html
-text
-```
-
-and, when appropriate:
-
-```text
-Idempotency-Key
-```
-
-Validate that the exact values are derived from trusted server-side data.
-
----
-
-# 17. TEST EMAIL DISABLED MODE
-
-Add a test proving:
-
-```text
-EMAIL_ENABLED=false
-```
-
-causes:
-
-* no network request
-* successful no-op delivery result
-* no exception
-* anomaly pipeline continues normally
-
-This is essential for offline tests and demo reproducibility.
-
----
-
-# 18. ADD END-TO-END ANOMALY → EMAIL COVERAGE
-
-Add at least one integration-level behavioral test equivalent to:
-
-```text
-worker progress report
-    ↓
-Phase 1 anomaly evaluation
-    ↓
-activity match persistence
-    ↓
-Phase 2 message generation
-    ↓
-Phase 3 email rendering
-    ↓
-mocked Resend HTTP request
-```
-
-Verify that the email contains the correct:
-
-* activity
-* project
-* reported progress
-* anomaly score
-* severity
-* recommended action
-
-Also verify:
-
-```text
-Resend failure
-    ↓
-anomaly still persists
-```
-
-This test is more important than a large number of isolated mocks.
-
----
-
-# 19. TEST ALL IMPORTANT REPORT PATHS
-
-Inspect the actual worker/report architecture.
-
-Make sure Phase 3 is connected after Phase 2 for every relevant anomaly-producing worker-report path, including direct activity selection and free-form/AI-assisted reports where applicable.
-
-Do not only wire it to the most obvious HTTP endpoint.
-
-Use the current local Phase 1/2 implementation to determine the correct common integration point.
-
-Avoid duplicated email-trigger code in multiple workers whenever a clean common service boundary exists.
-
----
-
-# 20. DO NOT TOUCH WHATSAPP
-
-Phase 3 is email only.
-
-Do not add:
-
-* WhatsApp SDK
-* WhatsApp API client
-* WhatsApp Web automation
-* QR session management
-* WhatsApp environment variables
-* WhatsApp delivery interfaces beyond whatever minimal generic abstraction already exists
-
-WhatsApp remains Phase 5.
-
----
-
-# 21. DO NOT ADD NOTIFICATION PERSISTENCE
-
-Do not add:
-
-* notifications table
-* delivery attempts table
-* notification status records
-* sent_at fields
-* retry counters
-* dead-letter queue
-* durable delivery state
-
-Those belong to Phase 4.
-
-The only existing persistence we should rely on is the anomaly/activity match state already established by FieldLine.
-
----
-
-# 22. KEEP THE GOLDEN DEMO INTACT
-
-Do not alter:
-
-```text
-npm run demo:reset
-npm run demo:verify
-npm run verify:release
-npm test
-```
-
-in a way that makes them require Resend.
-
-Do not add network access to existing unit tests unless explicitly isolated inside new email-specific tests.
-
-The default test/demo behavior must remain deterministic and offline-capable.
-
----
-
-# 23. REVIEW CURRENT RENDER CONFIGURATION
-
-The current `render.yaml` on `main` still contains:
-
-```yaml
-AI_PROVIDER: gemini
-GEMINI_API_KEY:
-```
-
-Do not silently redesign the AI provider configuration as part of Phase 3.
-
-However, inspect the local Phase 2 implementation and explicitly identify whether the eventual deployed alert path requires:
-
-```text
-AI_PROVIDER=groq
-GROQ_API_KEY_01=...
-...
-```
-
-That is a deployment/configuration consideration, not an excuse to alter Phase 2 behavior unnecessarily.
-
-Also determine which email variables need to be configured in Render.
-
-Never put actual secrets into source control.
-
----
-
-# 24. BEHAVIORAL / INTUITIVE EVALUATION
-
-In addition to automated tests, run realistic examples.
-
-At minimum evaluate:
-
-### Case A — HIGH anomaly
-
-Example:
-
-```text
-Refinery Construction
-Piping Installation — Area B
-41% → 82%
-anomaly score 0.91
-severity high
-```
-
-Verify that the received email would make an administrator immediately understand:
-
-1. which activity is affected,
-2. what changed,
-3. why the system flagged it,
-4. what action should be taken.
-
-### Case B — REVIEW anomaly
-
-Verify lower urgency than HIGH without weakening actionability.
-
-### Case C — exact activity match + high anomaly
-
-Verify the email never suggests that activity matching itself is questionable.
-
-### Case D — no previous canonical progress
-
-Verify the email does NOT invent a prior percentage.
-
-### Case E — missing reporter/location
-
-Verify the email remains professional and does not invent values.
-
-### Case F — Resend outage
-
-Verify anomaly remains valid and the delivery failure is isolated.
-
-### Case G — HTML escaping
-
-Use an activity/report field containing HTML-like text and verify it appears as text, not markup.
-
----
-
-# 25. RUN VERIFICATION
-
-At minimum, run:
+Run:
 
 ```bash
-npx vitest run backend/tests/<new-email-tests>
+npx vitest run <new notification/outbox tests>
+npx vitest run <relevant Phase 1/2/3 regression tests>
 npx tsc -p tsconfig.backend.json --noEmit
 npm test
 ```
 
-Also run the relevant Phase 1/2 tests that exercise the anomaly-to-message pipeline.
+Also run the realistic behavioral lifecycle evaluation.
 
-Run the actual behavioral/example evaluation you add.
-
-Do not report a test as passing unless you actually ran it.
-
-Report exact counts.
+Do not claim success for commands not actually executed.
 
 ---
 
-# 26. FINAL REPORT
+# 28. DEFINITION OF DONE
 
-When complete, provide:
-
-## A. Architecture added
-
-Show:
+Phase 4 is complete only when all of these are true:
 
 ```text
-Phase 1
-   ↓
-Phase 2
-   ↓
-Phase 3 Email Delivery
-   ↓
-Resend
-```
-
-and identify the exact files/classes created or changed.
-
-## B. Configuration
-
-Show the exact environment variable names required, without exposing any secrets.
-
-## C. Integration point
-
-Explain exactly where the email send is triggered and why it occurs after anomaly persistence.
-
-## D. Failure semantics
-
-Explain what happens when:
-
-* Resend succeeds
-* Resend fails
-* email is disabled
-* configuration is missing
-* Resend times out
-
-## E. Security
-
-Explain:
-
-* secret handling
-* HTML escaping
-* recipient control
-* server-owned anomaly metadata
-
-## F. Tests
-
-Report exact commands and actual pass/fail counts.
-
-## G. Behavioral evaluation
-
-Show representative emails/results and evaluate:
-
-* factuality
-* clarity
-* actionability
-* non-accusatory language
-* preservation of anomaly score/severity
-* graceful missing-data handling
-
-## H. Remaining limitations
-
-Be honest about anything that Phase 4 still needs to solve, especially durable notification state, retries, and stronger cross-request idempotency.
-
----
-
-# Definition of Done
-
-Phase 3 is complete only when:
-
-```text
-✓ Resend HTTP delivery works
-✓ SMTP is not used
-✓ Email sender/recipient are configuration-driven
-✓ API secret is server-side only
-✓ Email can be disabled
+✓ Dedicated notification outbox exists
+✓ Notification creation is atomic with anomaly persistence
+✓ Normal/cold-start produce no notification intent
+✓ Logical notification identity is deterministic
+✓ Duplicate triggers cannot create duplicate logical notifications
+✓ Phase 2 message is generated once per notification event
+✓ Notification retries reuse an immutable payload
+✓ Resend idempotency key remains stable
+✓ Notification claiming is concurrency-safe
+✓ Stale processing notifications can be recovered
+✓ Retryable provider failures are distinguished from permanent failures
+✓ Backoff is bounded and testable
+✓ Maximum attempts are enforced
+✓ Successful delivery records provider message ID
+✓ Permanent failure stops retrying
+✓ Delivery failure never invalidates anomaly truth
+✓ No external queue infrastructure is introduced
+✓ Existing document-processing jobs remain unaffected
 ✓ Golden demo remains offline-capable
-✓ HTML + plaintext are generated
-✓ HTML dynamic content is escaped
-✓ Phase 2 remains the source of generated prose
-✓ Server/Phase 1 remains the source of anomaly truth
-✓ Email is triggered only after anomaly persistence
-✓ Email failure cannot invalidate the anomaly
-✓ No background email worker is introduced
-✓ Resend idempotency is used appropriately
-✓ Timeout/error handling is implemented
-✓ Secrets are redacted
-✓ Actual fetch/HTTP contract is tested
-✓ Anomaly → email integration is tested
-✓ Relevant worker-report paths are covered
-✓ No WhatsApp implementation is added
-✓ No notification persistence is added
+✓ No WhatsApp implementation is introduced
 ✓ Full repository tests remain green
 ✓ TypeScript compilation is clean
-✓ Behavioral evaluation is complete
+✓ Behavioral lifecycle evaluation passes
+✓ Render Free SQLite durability limitation is documented honestly
 ```
 
-Implement the smallest clean solution that satisfies these requirements.
+Implement the smallest architecture that satisfies this definition of done.
 
-Preserve existing FieldLine architecture and conventions wherever they are sound. Do not perform unrelated refactors.
+Do not perform unrelated refactors.
+
+Preserve existing FieldLine conventions wherever they are already sound.

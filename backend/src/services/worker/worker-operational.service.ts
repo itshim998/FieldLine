@@ -41,8 +41,13 @@ import {
 import {
   AnomalyNotificationService,
   defaultAnomalyNotificationService,
-  isEligibleForAnomalyAlert
+  isEligibleForAnomalyAlert,
+  toAnomalyMessageInput
 } from '../anomaly/index.js';
+import {
+  NotificationOutboxRepository,
+  notificationOutboxRepository as defaultNotificationOutboxRepo
+} from '../../repositories/notification-outbox.repository.js';
 import { AnomalyPrediction } from '../../ml/types.js';
 import {
   ProgressSnapshotService,
@@ -105,6 +110,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   private anomalyEvaluationService: ProgressAnomalyEvaluationService;
   private activityProgressRepo: ActivityProgressRepository;
   private anomalyNotificationService: AnomalyNotificationService;
+  private notificationOutboxRepo: NotificationOutboxRepository;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -119,6 +125,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     anomalyEvaluationService?: ProgressAnomalyEvaluationService;
     activityProgressRepo?: ActivityProgressRepository;
     anomalyNotificationService?: AnomalyNotificationService;
+    notificationOutboxRepo?: NotificationOutboxRepository;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
@@ -135,6 +142,8 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
       dependencies?.activityProgressRepo || defaultActivityProgressRepo;
     this.anomalyNotificationService =
       dependencies?.anomalyNotificationService || defaultAnomalyNotificationService;
+    this.notificationOutboxRepo =
+      dependencies?.notificationOutboxRepo || defaultNotificationOutboxRepo;
   }
 
   getOperationalTasks(
@@ -376,54 +385,98 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
         });
       }
 
-      // 1. Create progress record with attribution
-      const updateRecord = this.progressUpdateRepo.create({
-        projectId,
-        reportDate,
-        rawText: descText,
-        reporterName,
-        reporterRole,
-        sourceType,
-        status: 'received'
-      });
+      const runTx = <T>(fn: () => T): T => {
+        if (typeof this.activityMatchRepo.runInTransaction === 'function') {
+          return this.activityMatchRepo.runInTransaction(fn);
+        }
+        if (this.notificationOutboxRepo && typeof this.notificationOutboxRepo.runInTransaction === 'function') {
+          return this.notificationOutboxRepo.runInTransaction(fn);
+        }
+        return fn();
+      };
 
-      // 2. Create auto-confirmed match record with anomaly advisory metadata
-      const match = this.activityMatchRepo.create({
-        projectId,
-        progressUpdateId: updateRecord.id,
-        activityId: activity.id,
-        confidenceScore: 1.0,
-        matchMethod: 'exact_id',
-        matchedText: activity.name,
-        rationale: 'Direct worker selection from operational cockpit',
-        status: 'confirmed',
-        confidenceTier: 'high',
-        reviewState: 'resolved',
-        reviewedBy: reporterName,
-        reviewedAt: new Date().toISOString(),
-        anomalyScore: anomaly?.anomalyScore ?? null,
-        anomalySeverity: anomaly?.severity ?? null,
-        anomalyReasonsJson:
-          anomaly?.reasons && anomaly.reasons.length > 0
-            ? JSON.stringify(anomaly.reasons)
-            : null
-      });
+      // Execute progress persistence AND outbox record creation atomically in a single SQLite transaction
+      const { updateRecord, match, recorded } = runTx(() => {
+        // 1. Create progress record with attribution
+        const updateRec = this.progressUpdateRepo.create({
+          projectId,
+          reportDate,
+          rawText: descText,
+          reporterName,
+          reporterRole,
+          sourceType,
+          status: 'received'
+        });
 
-      // 3. Normalize and record progress deterministically
-      const recorded = this.progressService.normalizeAndRecordProgress({
-        projectId,
-        updateId: updateRecord.id,
-        matchId: match.id,
-        fact: {
-          reference: activity.externalId,
-          location: activity.location || null,
-          progress_percent: input.progressPercent ?? null,
-          status: (input.progressPercent != null && input.progressPercent >= 100) ? 'completed' : 'in_progress'
-        },
-        actualQuantity: input.actualQuantity ?? null,
-        quantityUnit: input.quantityUnit || activity.unit || null,
-        asOfDate: reportDate,
-        allowSuggested: false
+        // 2. Create auto-confirmed match record with anomaly advisory metadata
+        const matchRec = this.activityMatchRepo.create({
+          projectId,
+          progressUpdateId: updateRec.id,
+          activityId: activity.id,
+          confidenceScore: 1.0,
+          matchMethod: 'exact_id',
+          matchedText: activity.name,
+          rationale: 'Direct worker selection from operational cockpit',
+          status: 'confirmed',
+          confidenceTier: 'high',
+          reviewState: 'resolved',
+          reviewedBy: reporterName,
+          reviewedAt: new Date().toISOString(),
+          anomalyScore: anomaly?.anomalyScore ?? null,
+          anomalySeverity: anomaly?.severity ?? null,
+          anomalyReasonsJson:
+            anomaly?.reasons && anomaly.reasons.length > 0
+              ? JSON.stringify(anomaly.reasons)
+              : null
+        });
+
+        // 3. Normalize and record progress deterministically
+        const rec = this.progressService.normalizeAndRecordProgress({
+          projectId,
+          updateId: updateRec.id,
+          matchId: matchRec.id,
+          fact: {
+            reference: activity.externalId,
+            location: activity.location || null,
+            progress_percent: input.progressPercent ?? null,
+            status: (input.progressPercent != null && input.progressPercent >= 100) ? 'completed' : 'in_progress'
+          },
+          actualQuantity: input.actualQuantity ?? null,
+          quantityUnit: input.quantityUnit || activity.unit || null,
+          asOfDate: reportDate,
+          allowSuggested: false
+        });
+
+        // 4. Phase 4: Atomically record notification intent if anomalous
+        if (anomaly && isEligibleForAnomalyAlert(anomaly) && reportedPercent !== null) {
+          const messageInput = toAnomalyMessageInput(anomaly, {
+            projectName: project.name,
+            activityExternalId: activity.externalId,
+            activityName: activity.name,
+            activityLocation: activity.location || null,
+            reportDate,
+            reporterName,
+            previousPercent,
+            reportedPercent,
+            activityMatchId: matchRec.id
+          });
+
+          if (messageInput) {
+            this.notificationOutboxRepo.create({
+              projectId,
+              activityMatchId: matchRec.id,
+              notificationType: 'anomaly_alert',
+              channel: 'email',
+              payload: {
+                messageInput,
+                message: null
+              },
+              idempotencyKey: `fieldline-anomaly-alert:${matchRec.id}`
+            });
+          }
+        }
+
+        return { updateRecord: updateRec, match: matchRec, recorded: rec };
       });
 
       logger.info(

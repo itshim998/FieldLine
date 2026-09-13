@@ -5,6 +5,8 @@ import { initDatabase, closeDatabase } from './database/db.js';
 import { projectRepository } from './repositories/project.repository.js';
 import { jobRepository } from './jobs/job.repository.js';
 import { workerRunner } from './jobs/worker-runner.js';
+import { notificationOutboxRepository } from './repositories/notification-outbox.repository.js';
+import { notificationWorkerRunner } from './jobs/notification-worker-runner.js';
 import { reconcileLegacyEvidenceHashes } from './services/evidence/legacy-hash-reconciler.js';
 import { seedGoldenDemo } from '../../demo/golden-demo-seeder.js';
 
@@ -44,9 +46,19 @@ async function startServer(): Promise<void> {
       console.log(`🔄 Recovered ${recoveredCount} stale processing jobs to queued state.`);
     }
 
-    // Start single in-process background worker
+    // Recover any abandoned/stale notification leases from a previous crash/restart
+    const recoveredNotifs = notificationOutboxRepository.requeueStaleProcessing(
+      env.NOTIFICATION_LEASE_TIMEOUT_MS ?? 5 * 60 * 1000
+    );
+    if (recoveredNotifs > 0) {
+      console.log(`🔄 Recovered ${recoveredNotifs} stale notification leases.`);
+    }
+
+    // Start in-process background workers
     workerRunner.start();
     console.log('👷 In-process background job worker started.');
+    notificationWorkerRunner.start();
+    console.log('📬 In-process anomaly notification worker started.');
 
     const app = createApp();
     const port = env.PORT;
@@ -76,10 +88,14 @@ async function startServer(): Promise<void> {
         console.log('🎙️ Live session WebSocket server closed cleanly.');
       });
 
-      // 2. Stop background worker and wait for current job to settle
+      // 2. Stop background workers and wait for current jobs to settle
       workerRunner.stop();
-      await workerRunner.waitForCurrentJob(5000);
-      console.log('👷 Background worker stopped cleanly.');
+      notificationWorkerRunner.stop();
+      await Promise.all([
+        workerRunner.waitForCurrentJob(5000),
+        notificationWorkerRunner.waitForCurrentProcessing(5000)
+      ]);
+      console.log('👷 Background workers stopped cleanly.');
 
       // 3. Close HTTP server
       server.close(() => {

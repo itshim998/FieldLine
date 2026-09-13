@@ -73,3 +73,9 @@ export {
 } from './operational-blocker.repository.js';
 export type { OperationalBlockerRepository } from './operational-blocker.repository.js';
 
+export {
+  SqliteNotificationOutboxRepository,
+  notificationOutboxRepository
+} from './notification-outbox.repository.js';
+export type { NotificationOutboxRepository } from './notification-outbox.repository.js';
+

@@ -60,3 +60,34 @@ export type {
   AnomalyNotificationServiceDependencies
 } from './anomaly-notification.service.js';
 
+export type {
+  NotificationOutboxStatus,
+  NotificationType,
+  NotificationChannel,
+  NotificationOutboxPayload,
+  NotificationOutboxItem,
+  CreateNotificationOutboxInput
+} from './notification-outbox.types.js';
+
+export {
+  isRetryableDeliveryError,
+  calculateBackoffDelayMs,
+  calculateNextAttemptAt,
+  RETRYABLE_ERROR_CODES,
+  PERMANENT_ERROR_CODES,
+  DEFAULT_BACKOFF_DELAYS_MS,
+  MAX_BACKOFF_DELAY_MS
+} from './retry-policy.js';
+
+export {
+  NotificationWorker,
+  notificationWorker
+} from './notification.worker.js';
+export type { NotificationWorkerDependencies } from './notification.worker.js';
+
+export {
+  NotificationWorkerRunner,
+  notificationWorkerRunner
+} from '../../jobs/notification-worker-runner.js';
+export type { NotificationWorkerRunnerOptions } from '../../jobs/notification-worker-runner.js';
+

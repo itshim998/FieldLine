@@ -27,8 +27,10 @@ import {
 import {
   AnomalyNotificationService,
   defaultAnomalyNotificationService,
-  isEligibleForAnomalyAlert
+  isEligibleForAnomalyAlert,
+  toAnomalyMessageInput
 } from '../anomaly/index.js';
+import type { CreateNotificationOutboxInput } from '../anomaly/notification-outbox.types.js';
 import { AnomalyPrediction } from '../../ml/types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
@@ -431,13 +433,50 @@ export class ActivityMatchingService {
       }
 
 
+      // Prepare notification outbox intents for eligible anomalies atomically
+      const notifications: CreateNotificationOutboxInput[] = [];
+      for (const r of matchResults) {
+        if (r.bestMatch && r.bestMatch.anomaly && isEligibleForAnomalyAlert(r.bestMatch.anomaly)) {
+          const act = this.activityRepo.getById(r.bestMatch.activityId);
+          const persistedMatch = toPersist.find((m) => m.activityId === r.bestMatch!.activityId);
+          if (persistedMatch && persistedMatch.id) {
+            const messageInput = toAnomalyMessageInput(r.bestMatch.anomaly, {
+              projectName: project.name,
+              activityExternalId: r.bestMatch.activityExternalId,
+              activityName: r.bestMatch.activityName,
+              activityLocation: act?.location || null,
+              reportDate: progressRecord.reportDate,
+              reporterName: progressRecord.reporterName,
+              previousPercent: r.bestMatch.previousPercent ?? null,
+              reportedPercent: r.fact.progress_percent ?? 0,
+              activityMatchId: persistedMatch.id
+            });
+
+            if (messageInput) {
+              notifications.push({
+                projectId,
+                activityMatchId: persistedMatch.id,
+                notificationType: 'anomaly_alert',
+                channel: 'email',
+                payload: {
+                  messageInput,
+                  message: null
+                },
+                idempotencyKey: `fieldline-anomaly-alert:${persistedMatch.id}`
+              });
+            }
+          }
+        }
+      }
+
       this.activityMatchRepo.persistMatchesAndEventsAtomically({
         projectId,
         progressUpdateId,
         matches: toPersist,
-        events
+        events,
+        notifications
       });
-      logger.debug(`ActivityMatchingService: Atomically persisted ${toPersist.length} matches and ${events.length} events for report ${progressUpdateId}`);
+      logger.debug(`ActivityMatchingService: Atomically persisted ${toPersist.length} matches, ${events.length} events, and ${notifications.length} notifications for report ${progressUpdateId}`);
 
       // Phase 3 Anomaly Notification: Trigger alerts for persisted matches with eligible anomalies
       for (const r of matchResults) {

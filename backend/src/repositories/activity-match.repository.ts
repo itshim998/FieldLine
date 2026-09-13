@@ -11,6 +11,7 @@ import {
   MatchReviewState
 } from '../models/domain.types.js';
 import { ConflictError, DatabaseError, NotFoundError, ValidationError } from '../errors/AppError.js';
+import type { CreateNotificationOutboxInput } from '../services/anomaly/notification-outbox.types.js';
 
 export interface UpdateMatchReviewInput {
   id: string;
@@ -59,6 +60,7 @@ export interface PersistMatchesAndEventsAtomicInput {
   progressUpdateId: string;
   matches: CreateActivityMatchInput[];
   events: CreateProjectEventInput[];
+  notifications?: CreateNotificationOutboxInput[];
 }
 
 export interface ActivityMatchRepository {
@@ -78,6 +80,7 @@ export interface ActivityMatchRepository {
   delete(id: string, projectId?: string): boolean;
   deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): number;
   deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number;
+  runInTransaction?<T>(fn: () => T): T;
 }
 
 interface ActivityMatchDbRow {
@@ -709,6 +712,39 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
           new Date().toISOString()
         );
       }
+
+      // 4. Insert notification outbox records atomically if provided
+      if (input.notifications && input.notifications.length > 0) {
+        const insertNotifStmt = db.prepare(`
+          INSERT INTO notification_outbox (
+            id, project_id, activity_match_id, notification_type, channel,
+            status, payload_json, idempotency_key, attempt_count, max_attempts
+          ) VALUES (
+            ?, ?, ?, ?, ?, 'pending', ?, ?, 0, ?
+          )
+        `);
+
+        for (const notif of input.notifications) {
+          const notifId = notif.id || crypto.randomUUID();
+          const channel = notif.channel || 'email';
+          const notifType = notif.notificationType || 'anomaly_alert';
+          const idempotencyKey =
+            notif.idempotencyKey || `fieldline-anomaly-alert:${notif.activityMatchId}`;
+          const maxAttempts = notif.maxAttempts ?? 5;
+          const payloadJson = JSON.stringify(notif.payload);
+
+          insertNotifStmt.run(
+            notifId,
+            notif.projectId,
+            notif.activityMatchId,
+            notifType,
+            channel,
+            payloadJson,
+            idempotencyKey,
+            maxAttempts
+          );
+        }
+      }
     });
 
     try {
@@ -971,6 +1007,11 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
         `Failed to delete suggested activity matches for progress report: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+  }
+
+  runInTransaction<T>(fn: () => T): T {
+    const db = this.getDb();
+    return db.transaction(fn)();
   }
 }
 

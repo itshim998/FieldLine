@@ -16,7 +16,8 @@ export const CORE_TABLES = [
   'activity_matches',
   'activity_progress',
   'project_events',
-  'project_accounts'
+  'project_accounts',
+  'notification_outbox'
 ] as const;
 
 export type CoreTableName = (typeof CORE_TABLES)[number];
