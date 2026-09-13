@@ -19,9 +19,12 @@ import { Activity, ActivityMatch, CreateActivityMatchInput, CreateProjectEventIn
 import { MatchModelService, defaultMatchModelService } from '../../ml/match/match-model.service.js';
 import { extractMatchFeatures } from '../../ml/match/match-feature-extractor.js';
 import { AnomalyModelService, defaultAnomalyModelService } from '../../ml/anomaly/anomaly-model.service.js';
-import { extractAnomalyFeatures } from '../../ml/anomaly/anomaly-feature-extractor.js';
-import { calculatePlannedProgress } from '../snapshot/progress-snapshot.calculator.js';
-import { COLD_START_ANOMALY_PREDICTION, AnomalyPrediction } from '../../ml/types.js';
+import {
+  ProgressAnomalyEvaluationService,
+  DefaultProgressAnomalyEvaluationService,
+  defaultProgressAnomalyEvaluationService
+} from '../anomaly/progress-anomaly-evaluation.service.js';
+import { AnomalyPrediction } from '../../ml/types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
@@ -49,6 +52,7 @@ export class ActivityMatchingService {
   private matchModelService: MatchModelService;
   private activityProgressRepo: ActivityProgressRepository;
   private anomalyModelService: AnomalyModelService;
+  private anomalyEvaluationService: ProgressAnomalyEvaluationService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -61,6 +65,7 @@ export class ActivityMatchingService {
     matchModelService?: MatchModelService;
     activityProgressRepo?: ActivityProgressRepository;
     anomalyModelService?: AnomalyModelService;
+    anomalyEvaluationService?: ProgressAnomalyEvaluationService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.progressUpdateRepo = dependencies?.progressUpdateRepo || defaultProgressUpdateRepo;
@@ -72,6 +77,13 @@ export class ActivityMatchingService {
     this.matchModelService = dependencies?.matchModelService || defaultMatchModelService;
     this.activityProgressRepo = dependencies?.activityProgressRepo || defaultActivityProgressRepo;
     this.anomalyModelService = dependencies?.anomalyModelService || defaultAnomalyModelService;
+    this.anomalyEvaluationService =
+      dependencies?.anomalyEvaluationService ||
+      new DefaultProgressAnomalyEvaluationService({
+        activityProgressRepo: this.activityProgressRepo,
+        activityRepo: this.activityRepo,
+        anomalyModelService: this.anomalyModelService
+      });
   }
 
   /**
@@ -178,39 +190,19 @@ export class ActivityMatchingService {
           }
         }
 
-        // Anomaly Model (Review-Prioritization Assistant - Phase 18)
+        // Anomaly Evaluation (Review-Prioritization Assistant - Phase 1 & Phase 18)
         // Evaluates candidates with non-null reported progress against prior canonical history
         let anomaly: AnomalyPrediction | undefined = undefined;
         if (fact.progress_percent !== null && fact.progress_percent !== undefined && act) {
-          const priorObservation = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
-            act.id,
+          const evalResult = this.anomalyEvaluationService.evaluateProgressAnomaly({
             projectId,
+            activityId: act.id,
+            activity: act,
+            reportedPercent: fact.progress_percent,
             reportDate
-          );
-
-          if (!priorObservation) {
-            // Safe cold start: no prior canonical observation exists
-            anomaly = { ...COLD_START_ANOMALY_PREDICTION };
-          } else {
-            const { plannedProgress } = calculatePlannedProgress(
-              act.plannedStart,
-              act.plannedFinish,
-              reportDate,
-              act.externalId || act.name
-            );
-
-            const anomalyFeatures = extractAnomalyFeatures({
-              reportedPercent: fact.progress_percent,
-              priorObservation,
-              plannedPercent: plannedProgress,
-              reportDate
-            });
-
-            if (anomalyFeatures && this.anomalyModelService.isAvailable()) {
-              anomaly = this.anomalyModelService.predict(anomalyFeatures);
-            } else {
-              anomaly = { ...COLD_START_ANOMALY_PREDICTION };
-            }
+          });
+          if (evalResult) {
+            anomaly = evalResult;
           }
         }
 

@@ -47,6 +47,10 @@ import {
   AssistantService,
   assistantService as defaultAssistantService
 } from '../../services/assistant/assistant.service.js';
+import {
+  ProgressAnomalyEvaluationService,
+  defaultProgressAnomalyEvaluationService
+} from '../../services/anomaly/progress-anomaly-evaluation.service.js';
 import { LiveFunctionCall } from './upstream-gemini-socket.js';
 
 export interface LiveToolExecutionContext {
@@ -76,6 +80,7 @@ export interface LiveToolHandlerDependencies {
   matchingService?: ActivityMatchingService;
   progressService?: ProgressService;
   assistantService?: AssistantService;
+  anomalyEvaluationService?: ProgressAnomalyEvaluationService;
 }
 
 export class LiveToolHandlers {
@@ -91,6 +96,7 @@ export class LiveToolHandlers {
   private matchingService: ActivityMatchingService;
   private progressService: ProgressService;
   private assistantService: AssistantService;
+  private anomalyEvaluationService: ProgressAnomalyEvaluationService;
 
   constructor(deps: LiveToolHandlerDependencies = {}) {
     this.activityRepo = deps.activityRepo || defaultLiveToolAdapterDeps.activityRepo;
@@ -105,6 +111,8 @@ export class LiveToolHandlers {
     this.matchingService = deps.matchingService || defaultMatchingService;
     this.progressService = deps.progressService || defaultProgressService;
     this.assistantService = deps.assistantService || defaultAssistantService;
+    this.anomalyEvaluationService =
+      deps.anomalyEvaluationService || defaultProgressAnomalyEvaluationService;
   }
 
   /**
@@ -531,6 +539,16 @@ export class LiveToolHandlers {
           resolved = this.activityResolver.resolve(projectId, canonicalEnglishStatement);
         }
         if (resolved.status === 'resolved' && resolved.activity) {
+          let anomaly = null;
+          if (item.progress_percent !== null && item.progress_percent !== undefined) {
+            anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+              projectId,
+              activityId: resolved.activity.id,
+              reportedPercent: item.progress_percent,
+              reportDate: updateRecord.reportDate
+            });
+          }
+
           const fallbackMatch = this.activityMatchRepo.create({
             projectId,
             progressUpdateId: updateRecord.id,
@@ -543,7 +561,13 @@ export class LiveToolHandlers {
             confidenceTier: 'high',
             reviewState: 'resolved',
             reviewedBy: 'system',
-            reviewedAt: new Date().toISOString()
+            reviewedAt: new Date().toISOString(),
+            anomalyScore: anomaly?.anomalyScore ?? null,
+            anomalySeverity: anomaly?.severity ?? null,
+            anomalyReasonsJson:
+              anomaly?.reasons && anomaly.reasons.length > 0
+                ? JSON.stringify(anomaly.reasons)
+                : null
           });
           matchedActivityId = fallbackMatch.activityId;
           matchedRecordId = fallbackMatch.id;

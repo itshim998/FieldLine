@@ -526,6 +526,47 @@ export class MockAIProvider implements AIProvider {
       return defaultFieldProgressPayload;
     }
 
+    // 4. Dynamic Anomaly Alert Payload
+    const defaultAnomalyPayload = {
+      title: '[FieldLine Alert] HIGH: Sample Activity (ACT-001) Progress Deviation',
+      summary: 'A reported progress update shows significant statistical deviation from baseline progression.',
+      details: 'Reported progress represents an unusually large progression jump compared with the learned baseline pattern.',
+      recommendedAction: 'Verify the reported progress and supporting field evidence before approving.',
+      fullMessage: '[FieldLine Alert] HIGH: Sample Activity (ACT-001) Progress Deviation\n\nA reported progress update shows significant statistical deviation from baseline progression.\n\nRecommended Action: Verify the reported progress and supporting field evidence before approving.'
+    };
+
+    if (_schema.safeParse(defaultAnomalyPayload).success && _prompt.includes('FieldLine Operational Anomaly Communication Assistant')) {
+      const actMatch = _prompt.match(/-\s*Activity Name:\s*([^\r\n]+)/);
+      const extMatch = _prompt.match(/-\s*Activity External ID:\s*([^\r\n]+)/);
+      const sevMatch = _prompt.match(/-\s*Anomaly Severity:\s*(HIGH|REVIEW)/i);
+      const repPctMatch = _prompt.match(/-\s*Reported Progress:\s*(\d+(?:\.\d+)?)%/);
+      const prevPctMatch = _prompt.match(/-\s*Previous Canonical Progress:\s*([^\r\n]+)/);
+      const scoreMatch = _prompt.match(/-\s*Anomaly Score:\s*(\d+(?:\.\d+)?)%/);
+
+      const actName = actMatch ? actMatch[1].trim() : 'Activity';
+      const extId = extMatch ? extMatch[1].trim() : 'ACT-001';
+      const sev = sevMatch ? sevMatch[1].trim().toUpperCase() : 'HIGH';
+      const repPct = repPctMatch ? `${repPctMatch[1]}%` : '82%';
+      const prevPct = prevPctMatch ? prevPctMatch[1].trim() : '41%';
+      const score = scoreMatch ? `${scoreMatch[1]}%` : '91%';
+
+      const title = `🚨 [FieldLine Alert] ${sev}: ${actName} (${extId}) Progress Deviation`;
+      const summary = `A progress update of ${repPct} for ${actName} has been flagged for ${sev === 'HIGH' ? 'immediate supervisor verification' : 'supervisor review'} due to significant statistical deviation.`;
+      const details = `Progress moved from ${prevPct} to ${repPct}. Statistical anomaly score is ${score}, indicating progression velocity substantially above baseline.`;
+      const recommendedAction = sev === 'HIGH'
+        ? 'Conduct an on-site physical inspection to verify actual installation progress and review supporting field documentation.'
+        : 'Review reported progress against recent field logs and verify completion status with the site supervisor.';
+      const fullMessage = [title, '', summary, '', 'Details:', details, '', 'Recommended Action:', recommendedAction].join('\n');
+
+      return {
+        title,
+        summary,
+        details,
+        recommendedAction,
+        fullMessage
+      };
+    }
+
     // Default valid generic mock extraction contract
     return {
       summary: 'Mock extracted summary of field progress',
@@ -537,3 +578,4 @@ export class MockAIProvider implements AIProvider {
     };
   }
 }
+

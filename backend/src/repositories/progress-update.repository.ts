@@ -185,9 +185,10 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
       INSERT INTO activity_matches (
         id, project_id, progress_update_id, evidence_id, activity_id,
         confidence_score, match_method, matched_text, rationale, status,
-        confidence_tier, review_state, reviewed_by, reviewed_at
+        confidence_tier, review_state, reviewed_by, reviewed_at,
+        ml_confidence, anomaly_score, anomaly_severity, anomaly_reasons_json
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
     `);
 
@@ -249,7 +250,11 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
           m.confidenceTier ?? null,
           m.reviewState ?? null,
           m.reviewedBy ?? null,
-          m.reviewedAt ?? null
+          m.reviewedAt ?? null,
+          m.mlConfidence ?? null,
+          m.anomalyScore ?? null,
+          m.anomalySeverity ?? null,
+          m.anomalyReasonsJson ?? null
         );
         insertedMatchIds.push(mId);
       }
@@ -276,24 +281,42 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
     if (insertedMatchIds.length > 0) {
       const placeholders = insertedMatchIds.map(() => '?').join(',');
       const rows = db.prepare(`SELECT * FROM activity_matches WHERE id IN (${placeholders}) ORDER BY confidence_score DESC`).all(...insertedMatchIds) as any[];
-      persistedMatches = rows.map((r: any) => ({
-        id: r.id,
-        projectId: r.project_id,
-        progressUpdateId: r.progress_update_id,
-        evidenceId: r.evidence_id,
-        activityId: r.activity_id,
-        confidenceScore: r.confidence_score,
-        matchMethod: r.match_method,
-        matchedText: r.matched_text,
-        rationale: r.rationale,
-        status: r.status,
-        confidenceTier: r.confidence_tier || null,
-        reviewState: r.review_state || null,
-        reviewedBy: r.reviewed_by,
-        reviewedAt: r.reviewed_at,
-        createdAt: r.created_at,
-        updatedAt: r.updated_at
-      }));
+      persistedMatches = rows.map((r: any) => {
+        let anomalyReasons: string[] | null = null;
+        if (r.anomaly_reasons_json) {
+          try {
+            const parsed = JSON.parse(r.anomaly_reasons_json);
+            if (Array.isArray(parsed)) {
+              anomalyReasons = parsed;
+            }
+          } catch {
+            anomalyReasons = null;
+          }
+        }
+        return {
+          id: r.id,
+          projectId: r.project_id,
+          progressUpdateId: r.progress_update_id,
+          evidenceId: r.evidence_id,
+          activityId: r.activity_id,
+          confidenceScore: r.confidence_score,
+          matchMethod: r.match_method,
+          matchedText: r.matched_text,
+          rationale: r.rationale,
+          status: r.status,
+          confidenceTier: r.confidence_tier || null,
+          reviewState: r.review_state || null,
+          reviewedBy: r.reviewed_by,
+          reviewedAt: r.reviewed_at,
+          mlConfidence: r.ml_confidence !== undefined && r.ml_confidence !== null ? r.ml_confidence : null,
+          anomalyScore: r.anomaly_score !== undefined && r.anomaly_score !== null ? r.anomaly_score : null,
+          anomalySeverity: r.anomaly_severity || null,
+          anomalyReasonsJson: r.anomaly_reasons_json || null,
+          anomalyReasons,
+          createdAt: r.created_at,
+          updatedAt: r.updated_at
+        };
+      });
     }
 
     return {

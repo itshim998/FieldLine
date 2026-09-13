@@ -1,539 +1,562 @@
-# FIELDLINE — TEXT ASSISTANT ACTIVITY RESOLUTION FIX
+You have completed Phase 2 of FieldLine: **Groq Anomaly-Message Generator**.
 
-Repository:
-itshim998/FieldLine
+I reviewed your Phase 2 walkthrough. The overall architecture is correct and should be preserved. Do **not** redesign Phase 2 or broaden its scope into Phase 3/4/5.
 
-Current main branch:
-3f7d9a8206d1ca4d29f9164395b0cde6745a7d5c
+Your task now is to perform a **corrective hardening pass** and bring Phase 2 to a production-quality **10/10 implementation** while preserving the existing architecture and behavior.
 
-Previous relevant ML commit:
-47295665adba286add44410cf9df926e9c818b96
+## Primary objective
 
-# CURRENT ISSUE
+Make Phase 2 a strict, trustworthy communication layer:
 
-The Worker/Admin "Operational Field Assistant" currently fails to resolve a valid natural-language activity query.
+**Phase 1 detects the anomaly → Phase 2 explains trusted facts → later phases deliver it.**
 
-Exact user query:
+The LLM must NEVER become the source of truth for anomaly detection, severity, score, activity identity, or evidence.
 
-"Pump foundation piles completed to 65% at Area B crude pump bay."
+---
 
-Current UI result:
+# 1. FIRST: inspect the ACTUAL implementation
 
-"No activity matching "Pump foundation piles" was found in project "Refinery Expansion — Unit 4"."
+Do not rely only on your walkthrough.
 
-This is incorrect.
+Inspect the actual files currently present in the workspace, including:
 
-The query is explicitly intended to resolve to:
+* `ProgressAnomalyEvaluationService` and its result types
+* `anomaly-message.types.ts`
+* `anomaly-message-generator.service.ts`
+* prompt-builder code
+* `AIService`
+* `GroqAIProvider`
+* `MockAIProvider`
+* all current Phase 2 tests
+* every current caller of the Phase 2 generator
 
-ACT-B02 — Crude Pump Foundation Piling Works
-Location: Area B
+Also inspect the Phase 1 implementation that actually exists in the workspace.
 
-The repository's own README describes this exact phrasing as a supported heterogeneous-language scenario:
+### Important
 
-"Pump foundation piles completed to 65%"
+There was previously a distinction between the Phase 1 architecture described in the report and the implementation visible on remote `main`. Therefore:
 
-and states that heterogeneous field descriptions should map to canonical schedule activities.
+**Treat the actual local code as authoritative.**
 
-Therefore this is a real regression/functional gap in the text-based project assistant and must be fixed.
+Do not assume that a capability exists merely because the walkthrough says it exists.
 
-===================================================
+If any Phase 2 code is currently compensating for, duplicating, or reconstructing Phase 1 logic, correct that.
 
-1. CONFIRMED ROOT CAUSE
-   ===================================================
+---
 
-Relevant files:
+# 2. HARDEN THE TRUST BOUNDARY BETWEEN PHASE 1 AND PHASE 2
 
-backend/src/services/assistant/assistant-intent.service.ts
-backend/src/services/assistant/assistant.service.ts
-backend/src/services/assistant/activity-resolver.ts
-backend/src/services/matching/text-similarity.ts
-backend/tests/assistant_service.test.ts
-backend/tests/assistant_security.test.ts
-README.md
+This is the most important correction.
 
-Current architecture:
+Phase 2 must consume **trusted anomaly facts produced by Phase 1**.
 
-1. AssistantIntentService interprets the user question into:
+It must NOT independently:
 
-   * intent
-   * activityQuery
-   * explicitDate
+* calculate anomaly scores
+* determine severity
+* infer whether an activity is anomalous
+* reconstruct the canonical baseline
+* recompute previous progress from arbitrary database state
+* reinterpret Match Model confidence as anomaly evidence
+* change severity based on LLM judgment
 
-2. AssistantService passes activityQuery to:
-   DeterministicActivityResolver.resolve(projectId, activityQuery)
+The intended flow is:
 
-3. DeterministicActivityResolver currently performs:
+```text
+Phase 1 anomaly evaluation
+        ↓
+trusted structured anomaly result
+        ↓
+small Phase 2 mapping/adaptation layer
+        ↓
+GenerateAnomalyMessageInput
+        ↓
+Groq / deterministic fallback
+```
 
-   * exact externalId
-   * exact activity name
-   * exact name + location
-   * unique textual substring/token matching
+Inspect every caller and verify that they are passing the actual Phase 1 anomaly result rather than manually recreating anomaly facts.
 
-The current final textual fallback requires all query words to be contained in:
+If needed, introduce a small explicit mapper/adapter such as:
 
-external ID + activity name + location
+`toAnomalyMessageInput(...)`
 
-The problematic example becomes approximately:
+or an equivalent narrow boundary.
 
-query:
-"Pump foundation piles"
+Do NOT duplicate anomaly calculations merely to populate the Phase 2 input.
 
-canonical activity:
-"Crude Pump Foundation Piling Works"
+---
 
-Current word comparison:
+# 3. SERVER-OWNED FACTS MUST REMAIN SERVER-OWNED
 
-pump       -> matches
-foundation -> matches
-piles      -> DOES NOT match "piling"
+The LLM may generate:
 
-Therefore the resolver returns:
-status = not_found
+* title
+* summary
+* details
+* recommendedAction
+* fullMessage
 
-AssistantService then correctly displays its "No activity matching..." message.
+The LLM must NOT be authoritative for:
 
-DO NOT treat this as an AI-provider failure.
+* anomalyScore
+* anomalySeverity
+* activity identity
+* activityExternalId
+* activityMatchId
+* project identity
+* observation date
+* reporter identity
+* previous progress
+* current reported progress
 
-DO NOT fix this by changing the assistant's fallback answer.
+These values must come from trusted server-side data.
 
-Fix the activity resolution itself.
+Prefer this architecture:
 
-===================================================
-2. REQUIRED BEHAVIOR
-====================
+```text
+trusted server facts
+        +
+LLM-generated text payload
+        ↓
+final AnomalyAlertMessage
+```
 
-The activity assistant must understand ordinary morphological variants of project/activity terminology.
+not:
 
-At minimum:
+```text
+LLM generates everything
+        ↓
+server trusts the result
+```
 
-piles       ↔ piling
-pile        ↔ piling
-install     ↔ installed ↔ installation
-erect       ↔ erection
-weld        ↔ welding
-excavate    ↔ excavation
-foundation  ↔ foundations
-construct   ↔ construction
-complete    ↔ completed ↔ completion
+If the current Zod schema allows the model to generate authoritative metadata, correct it.
 
-Do NOT implement uncontrolled fuzzy matching across arbitrary words.
+---
 
-The resolver must remain deterministic, project-scoped, and auditable.
+# 4. STRENGTHEN THE PHASE 2 DATA MODEL FOR FUTURE TRACEABILITY
 
-===================================================
-3. GOLDEN DEMO REQUIREMENT
-==========================
+Phase 2 is channel-neutral, but future Phase 4 notification persistence will need deterministic correlation.
 
-After the fix, this exact query:
+Do not prematurely add persistence or notification functionality.
 
-"Pump foundation piles completed to 65% at Area B crude pump bay."
+However, ensure that the Phase 2 message object can be traced back to its source anomaly.
 
-must resolve to:
+Evaluate the current model and, where appropriate, preserve a stable correlation identifier such as:
 
-ACT-B02
-Crude Pump Foundation Piling Works
-Area B
+* `activityMatchId`
+* anomaly evaluation/event identifier
+* project/activity identity
+* observation date
 
-The assistant must return the verified activity information rather than:
+Do not invent fake IDs.
 
-"No activity matching..."
+Do not force a new persistence system into Phase 2.
 
-It must still obtain all factual project information from the existing verified-facts pipeline.
+The goal is simply:
 
-Do not hard-code ACT-B02.
+**A future notification system must be able to know exactly which anomaly produced a message.**
 
-The resolver must find it from the project activities.
+If the current `activityMatchId` is already sufficient, keep it and ensure it is preserved through the generation result.
 
-===================================================
-4. PREFERRED IMPLEMENTATION
-===========================
+---
 
-Extend:
+# 5. AUDIT THE DETERMINISTIC FALLBACK
 
-backend/src/services/assistant/activity-resolver.ts
+The fallback is a critical reliability path.
 
-rather than replacing the resolver.
+Verify that fallback messaging:
 
-Preserve existing precedence:
+* never requires Groq
+* uses only supplied trusted facts
+* never invents missing information
+* does not accidentally fabricate `previousPercent`
+* does not imply a previous observation when none exists
+* does not invent causes
+* does not accuse anyone of misconduct
+* preserves severity
+* preserves the real anomaly score
+* produces the same structural contract as the Groq path
 
-1. exact externalId
-2. exact normalized activity name
-3. exact normalized name + location
-4. unique deterministic textual match
+Particularly inspect this case:
 
-Add a morphology-aware normalization layer to step 4.
+```text
+previousPercent = null
+reportedPercent = 82
+```
 
-Create a helper with a clear purpose, for example:
+The fallback must NOT produce:
 
-normalizeConstructionWord(...)
-or
-stemConstructionToken(...)
+> "Progress increased from X% to 82%"
 
-Keep it deterministic and testable.
+unless X actually exists.
 
-Possible strategy:
+Instead, it should communicate only what is known.
 
-* tokenize normalized text
-* map known construction/scheduling morphological variants to a canonical lexical form
-* compare canonicalized query tokens against canonicalized activity tokens
-* only accept a candidate when the normalized query remains uniquely attributable to one activity
+Test both:
+
+```text
+previousPercent present
+previousPercent absent
+```
+
+---
+
+# 6. PRESERVE THE SEMANTIC MEANING OF ANOMALY SCORE
+
+The prompt and output must never imply:
+
+```text
+anomalyScore 0.91 = 91% probability of fraud
+```
+
+or:
+
+```text
+91% chance the worker is wrong
+```
+
+or:
+
+```text
+91% chance the report is fake
+```
+
+The correct interpretation is that the observed progression pattern is statistically distant from the learned/expected progression baseline according to Phase 1.
+
+The model may explain this in natural language, but must not change its meaning.
+
+Add or strengthen tests that catch this class of semantic failure.
+
+---
+
+# 7. KEEP ACTIVITY MATCH AND ANOMALY AS ORTHOGONAL CONCEPTS
+
+Verify the exact-match scenario:
+
+```text
+activityMatchConfidence = 100%
+anomalySeverity = high
+```
+
+The message must NOT say:
+
+* activity may have been incorrectly identified
+* the report may belong to another activity
+* matching itself is suspicious
+
+The activity can be correctly identified while the reported progression is anomalous.
+
+This distinction must remain explicit in prompt construction and tests.
+
+---
+
+# 8. STRENGTHEN OPTIONAL-FIELD HANDLING
+
+Test all combinations where optional fields are absent:
+
+* no `previousPercent`
+* no `reporterName`
+* no `activityLocation`
+* no `activityMatchId`
+
+The LLM and fallback must:
+
+* omit unavailable facts
+* or describe them neutrally as unavailable/unrecorded
+
+They must NEVER invent them.
+
+Especially ensure that the prompt does not encourage the model to fill gaps using “likely” or “reasonable” assumptions.
+
+---
+
+# 9. MAKE THE GROQ CONTRACT AS STRICT AS POSSIBLE
+
+Continue using the existing FieldLine AI abstraction.
+
+Do NOT create another Groq client.
+
+Use the existing:
+
+* `AIService.extractStructured(...)`
+* `GroqAIProvider`
+* `MockAIProvider`
+
+The generated payload should be structurally validated with Zod.
+
+Prefer the model to generate ONLY the textual fields:
+
+```text
+title
+summary
+details
+recommendedAction
+fullMessage
+```
+
+Then have the server attach trusted metadata.
+
+Also verify behavior when Groq returns:
+
+* malformed JSON
+* missing fields
+* extra fields
+* empty strings
+* absurdly long strings
+* invalid content
+
+The service should fail safely into deterministic fallback rather than leaking malformed content downstream.
+
+---
+
+# 10. VERIFY NORMAL / COLD-START BEHAVIOR
+
+This invariant must remain:
+
+```text
+normal → no anomaly alert message
+cold start → no anomaly alert message
+```
+
+Verify both score and severity boundaries.
+
+Phase 2 must never manufacture an alert from a normal observation.
+
+Also verify that Phase 3 cannot accidentally be triggered by a normal/cold-start generator call.
+
+Do not add Phase 3 functionality yet; merely make the Phase 2 boundary unambiguous.
+
+---
+
+# 11. TEST THE GENERATOR AS A BEHAVIORAL SYSTEM, NOT JUST A UNIT
+
+Keep the current unit tests, but add/strengthen tests around these behavioral invariants:
+
+### Case A — High anomaly
 
 Example:
 
-"piles"
-"pile"
-"piling"
-
-can canonicalize to:
-"pile"
-
-Likewise:
-
-"erection"
-"erected"
-"erect"
-
-can canonicalize to:
-"erect"
-
-Do not over-stem identifiers.
-
-Do not modify:
-ACT-B02
-PR-07
-WBS-02.02
-
-Identifier normalization must remain handled by the existing identifier-specific logic.
-
-===================================================
-5. ALTERNATIVE SAFE APPROACH
-============================
-
-If a generic lightweight stemmer is used, it must be bounded to ordinary construction/scheduling terms and validated against the FieldLine activity corpus.
-
-Do not introduce a large NLP dependency.
-
-Do not introduce:
-
-* embeddings
-* vector database
-* external search service
-* LLM-based activity identity resolution
-* Python runtime
-* heavy NLP frameworks
-
-This resolver is intentionally deterministic.
-
-===================================================
-6. USE LOCATION AS A DISAMBIGUATION SIGNAL
-==========================================
-
-The failing Golden Demo query explicitly contains:
-
-"Area B"
-
-and the target activity is:
-
-ACT-B02 — Crude Pump Foundation Piling Works
-Area B
-
-Use the existing location field as a deterministic supporting signal.
-
-Do not weaken project boundaries.
-
-All candidates MUST still come from:
-
-activityRepo.listByProjectId(projectId)
-
-Never search activities from another project.
-
-===================================================
-7. DO NOT CHANGE ASSISTANT GROUNDING ARCHITECTURE
-=================================================
-
-Do NOT alter:
-
-* VerifiedFactBuilder
-* authoritative-fact validation
-* assistant claim verification
-* project isolation
-* AssistantIntentService's prohibition on inventing activity IDs
-* grounded-answer generation
-* worker/admin information boundaries
-
-The assistant must continue to be:
-
-natural-language query
-→ deterministic activity identity resolution
-→ verified facts
-→ grounded answer
-
-===================================================
-8. DO NOT USE THE MATCH MODEL FOR PROJECT QUERY IDENTITY
-========================================================
-
-The Match Model is designed for field-report activity matching.
-
-Do not repurpose it as the project's conversational activity resolver.
-
-The assistant needs deterministic, auditable identity resolution.
-
-The Match Model remains where it currently belongs in:
-
-ActivityMatchingService
-
-Do not modify ML features, artifacts, thresholds, or inference.
-
-===================================================
-9. BACKWARD COMPATIBILITY
-=========================
-
-Existing exact queries MUST continue to behave exactly as before.
-
-Examples:
-
-"ACT-B02"
-→ ACT-B02
-
-"Crude Pump Foundation Piling Works"
-→ ACT-B02
-
-"Crude Pump Foundation Piling Works Area B"
-→ ACT-B02
-
-"Pump foundation piles"
-→ ACT-B02
-
-"Pipe Rack PR-07 Structural Steel Erection"
-→ ACT-C01
-
-"PR-07"
-→ ACT-C01
-
-Do not regress exact ID or exact-name resolution.
-
-===================================================
-10. AMBIGUITY MUST REMAIN SAFE
-==============================
-
-If the normalized query matches more than one activity:
-
-return:
-
-status = ambiguous
-
-with the candidate activities.
-
-Do NOT arbitrarily choose one.
-
-Example:
-If both PR-07 and PR-08 satisfy a generalized query like:
-
-"Pipe Rack structural steel erection"
-
-the assistant should continue to ask for clarification.
-
-This is intentional behavior.
-
-===================================================
-11. TESTS — MANDATORY
-=====================
-
-Add/extend:
-
-backend/tests/assistant_service.test.ts
-
-and/or dedicated:
-
-backend/tests/activity_resolver.test.ts
-
-Add deterministic resolver tests for:
-
-A.
-Query:
-"Pump foundation piles"
+```text
+41% → 82%
+score = 0.91
+severity = high
+```
 
 Expected:
-ACT-B02
 
-B.
-Full Golden Demo text:
-"Pump foundation piles completed to 65% at Area B crude pump bay."
+* urgent but professional language
+* statistical explanation
+* physical verification recommendation
+* no accusation
 
-Expected:
-ACT-B02
-
-C.
-Query:
-"Crude pump piling"
+### Case B — Review anomaly
 
 Expected:
-ACT-B02
 
-D.
-Query:
-"Foundation piling Area B"
+* lower urgency than high
+* still actionable
+* no accidental escalation to high
 
-Expected:
-ACT-B02
-
-E.
-Exact:
-"Crude Pump Foundation Piling Works"
+### Case C — Exact match + high anomaly
 
 Expected:
-ACT-B02
 
-F.
-Exact identifier:
-"ACT-B02"
+* activity identity treated as trusted
+* only progression anomaly discussed
 
-Expected:
-ACT-B02
-
-G.
-Pipe Rack exact identifier:
-"PR-07"
+### Case D — Cold start
 
 Expected:
-ACT-C01
 
-H.
-Ambiguous query:
-"Pipe Rack structural steel erection"
+* no generated alert
+
+### Case E — Groq outage
 
 Expected:
-ambiguous if both PR-07 / PR-08 style siblings are present in the resolver test fixture.
 
-I.
-Project isolation:
-Project A query MUST NOT resolve an activity belonging only to Project B.
+* deterministic fallback
+* anomaly information preserved
 
-J.
-Negative case:
-A genuinely unrelated query must still return:
-not_found
+### Case F — Missing previous progress
 
-===================================================
-12. REAL GOLDEN DEMO TEST
-=========================
+Expected:
 
-Use the actual Golden Demo project:
+* no fabricated baseline comparison
 
-REFINERY-U4
-Refinery Expansion — Unit 4
+### Case G — Missing reporter/location
 
-Run:
+Expected:
 
-npm run demo:reset
+* no invented identity/location
 
-Then use the Operational Field Assistant with:
+### Case H — Hallucination resistance
 
-"Pump foundation piles completed to 65% at Area B crude pump bay."
+Given incomplete facts, verify that the resulting message contains no fabricated:
 
-Expected UI behavior:
+* weather
+* material shortage
+* equipment failure
+* photographs
+* CCTV
+* sensor values
+* conversations
+* site conditions
+* management instructions
+* causes of the anomaly
 
-Input:
-Pump foundation piles completed to 65% at Area B crude pump bay
+### Case I — Semantic integrity
 
-↓
+Verify that the model never turns anomaly score into a probability of wrongdoing.
 
-Assistant resolves:
-ACT-B02 — Crude Pump Foundation Piling Works
+---
 
-↓
+# 12. ADD A STRONGER “MESSAGE QUALITY” EVALUATION
 
-Grounded Field Intelligence returns the verified project information for ACT-B02.
+Do not rely only on string-presence tests.
 
-It MUST NOT display:
+For representative outputs, manually/behaviorally evaluate:
 
-"No activity matching "Pump foundation piles"..."
+### Accuracy
 
-===================================================
-13. DO NOT DAMAGE THE NEW MULTILINGUAL NORMALIZATION
-====================================================
+Does every factual statement originate from supplied data?
 
-The current main branch also contains the new:
+### Clarity
 
-FieldProgressNormalizationService
+Could a site administrator understand the anomaly in under ~15 seconds?
 
-for canonical English worker progress.
+### Actionability
 
-Do not modify or regress that feature.
+Does the message clearly state what should be checked next?
 
-This task is ONLY about text assistant activity-query resolution.
+### Restraint
 
-Existing multilingual project-progress normalization must continue to work.
+Does it avoid accusing the worker, contractor, or reporter?
 
-===================================================
-14. VERIFY EXISTING LIVE VOICE PATH
-===================================
+### Statistical integrity
 
-Do not rewrite Live Voice as part of this task.
+Does it describe the anomaly score correctly?
 
-Run its existing tests and confirm they still pass.
+### Completeness
 
-The Live Voice "Pardon Me" / ambiguity behavior should remain intact.
+Does it communicate the important facts without irrelevant verbosity?
 
-===================================================
-15. VALIDATION
-==============
+### Missing-data behavior
 
-Run:
+Does it gracefully handle absent optional information?
 
-npm test
-npm run build
-npm run demo:reset
-npm run demo:verify
-npm run ml:verify
+Use these evaluations to make targeted corrections to prompts or formatting.
 
-Run all newly added focused resolver/assistant tests.
+Do not overfit the implementation to exact example wording.
 
-Then perform an actual browser test:
+---
 
-Worker Cockpit
-→ Field Assistant
-→ enter:
+# 13. CHECK FOR UNNECESSARY COMPLEXITY
 
-"Pump foundation piles completed to 65% at Area B crude pump bay."
+Keep Phase 2 narrow.
 
-→ Ask
+Do NOT add:
 
-Verify the UI returns the ACT-B02 grounded project result.
+* email sending
+* WhatsApp sending
+* notification persistence
+* retry queues
+* scheduling
+* delivery status
+* webhook handling
+* Resend integration
+* WhatsApp integration
+* dashboard notification history
 
-Do not rely solely on mocked unit tests.
+Those belong to later phases.
 
-===================================================
-16. FINAL ACCEPTANCE CRITERIA
-=============================
+Phase 2 should remain:
 
-The task is complete only when:
+**trusted anomaly facts → human-readable anomaly message**
 
-[ ] "Pump foundation piles" resolves to ACT-B02.
-[ ] The full Golden Demo query resolves to ACT-B02.
-[ ] Location "Area B" is correctly preserved as a supporting signal.
-[ ] Exact ID matching still works.
-[ ] Exact activity-name matching still works.
-[ ] Ambiguous queries remain ambiguous.
-[ ] Cross-project resolution remains impossible.
-[ ] No LLM/vector/NLP-heavy dependency is introduced.
-[ ] Match Model is unchanged.
-[ ] Anomaly Model is unchanged.
-[ ] Multilingual progress normalization remains intact.
-[ ] Existing assistant grounding/security tests pass.
-[ ] Full test suite passes.
-[ ] Build passes.
-[ ] Golden Demo verification passes.
-[ ] ML verification passes.
-[ ] Actual browser text-assistant query returns ACT-B02 instead of "No activity matching...".
+---
 
-At completion report:
+# 14. RUN THE FULL VERIFICATION AFTER CORRECTIONS
 
-* exact root cause
-* exact resolver change
-* normalization/stemming rules introduced
-* files changed
-* tests added
-* Golden Demo browser result
-* confirmation that project isolation remains intact
-* confirmation that ML models were not changed
+Run at minimum:
+
+```bash
+npx vitest run backend/tests/anomaly_message_generator.test.ts
+npx vitest run backend/tests/architecture.test.ts
+npx tsc -p tsconfig.backend.json --noEmit
+```
+
+Then run the broader backend/test suite that is appropriate for the repository.
+
+Also run your existing intuitive evaluation script and update it if necessary.
+
+Do not claim success from a command you did not actually execute.
+
+---
+
+# 15. FINAL REPORT REQUIREMENTS
+
+When finished, return a concise but technically precise report containing:
+
+### A. What you changed
+
+List only actual changes.
+
+### B. Trust-boundary audit
+
+Explain how Phase 2 now consumes trusted Phase 1 anomaly facts.
+
+### C. Metadata ownership
+
+Explicitly state which fields are server-owned and which fields Groq is allowed to generate.
+
+### D. Fallback audit
+
+Explain what happens under Groq outage / malformed output / missing facts.
+
+### E. Tests executed
+
+Give exact commands and actual pass/fail counts.
+
+### F. Behavioral evaluation
+
+Show representative examples and briefly evaluate:
+
+* factuality
+* clarity
+* actionability
+* non-accusatory wording
+* statistical integrity
+
+### G. Remaining limitations
+
+State honestly anything still unresolved.
+
+Do not simply say “Phase 2 complete” unless the actual implementation satisfies the above constraints.
+
+---
+
+## Definition of done
+
+Phase 2 is considered 10/10 only when all of these are true:
+
+```text
+✓ Phase 1 remains the sole source of anomaly truth
+✓ Phase 2 does not recompute anomaly facts
+✓ Groq generates language, not anomaly decisions
+✓ Server owns score/severity/identity metadata
+✓ Exact-match and anomaly semantics remain orthogonal
+✓ Normal/cold-start produce no alert
+✓ Missing data never gets fabricated
+✓ Groq failure cannot destroy the anomaly
+✓ Deterministic fallback is fully trustworthy
+✓ Output is schema validated
+✓ Correlation to the originating anomaly is preserved
+✓ Behavioral tests cover realistic administrator use
+✓ No Phase 3/4/5 concerns leak into Phase 2
+✓ TypeScript/tests are actually executed and passing
+✓ Implementation matches the written architecture
+```
+
+Make the smallest set of changes necessary to achieve this quality level.
+
+**Do not redesign working FieldLine architecture merely for stylistic reasons. Preserve existing conventions wherever they are already sound.**

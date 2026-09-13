@@ -225,6 +225,9 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
       .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)
       .map(r => {
         const isAutoConfirm = r.reviewDecision?.autoConfirm ?? false;
+        const anomalyScore = r.bestMatch.anomalyScore ?? r.bestMatch.anomaly?.anomalyScore ?? null;
+        const anomalySeverity = r.bestMatch.anomalySeverity ?? r.bestMatch.anomaly?.severity ?? null;
+        const anomalyReasons = r.bestMatch.anomalyReasons ?? r.bestMatch.anomaly?.reasons ?? null;
         return {
           projectId,
           evidenceId,
@@ -237,7 +240,12 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
           confidenceTier: r.confidenceTier || (isAutoConfirm ? 'high' : 'medium'),
           reviewState: r.reviewDecision?.reviewState || (isAutoConfirm ? 'resolved' : 'awaiting_review'),
           reviewedBy: isAutoConfirm ? 'system' : null,
-          reviewedAt: isAutoConfirm ? nowIso : null
+          reviewedAt: isAutoConfirm ? nowIso : null,
+          mlConfidence: r.bestMatch.mlConfidence ?? null,
+          anomalyScore,
+          anomalySeverity,
+          anomalyReasonsJson:
+            anomalyReasons && anomalyReasons.length > 0 ? JSON.stringify(anomalyReasons) : null
         };
       });
 

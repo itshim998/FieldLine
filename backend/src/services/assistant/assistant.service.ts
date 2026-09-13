@@ -34,6 +34,10 @@ import {
   activityMatchRepository as defaultActivityMatchRepo
 } from '../../repositories/activity-match.repository.js';
 import {
+  ProgressAnomalyEvaluationService,
+  defaultProgressAnomalyEvaluationService
+} from '../anomaly/progress-anomaly-evaluation.service.js';
+import {
   normalizeDate
 } from '../normalization/date-normalizer.js';
 import {
@@ -442,6 +446,7 @@ export class AssistantService {
   private progressUpdateService: ProgressUpdateService;
   private progressService: ProgressService;
   private activityMatchRepo: ActivityMatchRepository;
+  private anomalyEvaluationService: ProgressAnomalyEvaluationService;
 
   constructor(
     aiServiceInstance: AIService = defaultAiService,
@@ -451,7 +456,8 @@ export class AssistantService {
     projectRepoInstance: ProjectRepository = defaultProjectRepo,
     progressUpdateServiceInstance: ProgressUpdateService = defaultProgressUpdateService,
     progressServiceInstance: ProgressService = defaultProgressService,
-    activityMatchRepoInstance: ActivityMatchRepository = defaultActivityMatchRepo
+    activityMatchRepoInstance: ActivityMatchRepository = defaultActivityMatchRepo,
+    anomalyEvaluationServiceInstance: ProgressAnomalyEvaluationService = defaultProgressAnomalyEvaluationService
   ) {
     this.aiService = aiServiceInstance;
     this.intentService = intentServiceInstance;
@@ -461,6 +467,7 @@ export class AssistantService {
     this.progressUpdateService = progressUpdateServiceInstance;
     this.progressService = progressServiceInstance;
     this.activityMatchRepo = activityMatchRepoInstance;
+    this.anomalyEvaluationService = anomalyEvaluationServiceInstance;
   }
 
   /**
@@ -632,6 +639,17 @@ export class AssistantService {
           sourceType: options?.role === 'worker' ? 'voice' : 'manual'
         });
 
+        // Evaluate anomaly before recording progress
+        let anomaly = null;
+        if (progressPercent !== null && progressPercent !== undefined) {
+          anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+            projectId,
+            activityId: resolvedActivity.id,
+            reportedPercent: progressPercent,
+            reportDate: canonicalDate
+          });
+        }
+
         const match = this.activityMatchRepo.create({
           projectId,
           progressUpdateId: updateRecord.id,
@@ -644,7 +662,13 @@ export class AssistantService {
           confidenceTier: 'high',
           reviewState: 'resolved',
           reviewedBy: reporterName,
-          reviewedAt: new Date().toISOString()
+          reviewedAt: new Date().toISOString(),
+          anomalyScore: anomaly?.anomalyScore ?? null,
+          anomalySeverity: anomaly?.severity ?? null,
+          anomalyReasonsJson:
+            anomaly?.reasons && anomaly.reasons.length > 0
+              ? JSON.stringify(anomaly.reasons)
+              : null
         });
 
         this.progressService.normalizeAndRecordProgress({

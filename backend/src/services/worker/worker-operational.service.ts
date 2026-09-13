@@ -31,6 +31,11 @@ import {
   activityMatchingService as defaultMatchingService
 } from '../matching/activity-matching.service.js';
 import {
+  ProgressAnomalyEvaluationService,
+  defaultProgressAnomalyEvaluationService
+} from '../anomaly/progress-anomaly-evaluation.service.js';
+import { AnomalyPrediction } from '../../ml/types.js';
+import {
   ProgressSnapshotService,
   progressSnapshotService as defaultSnapshotService,
   validateSnapshotDate,
@@ -88,6 +93,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   private extractionService: FieldProgressExtractionService;
   private matchingService: ActivityMatchingService;
   private normalizationService: FieldProgressNormalizationService;
+  private anomalyEvaluationService: ProgressAnomalyEvaluationService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -99,6 +105,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     extractionService?: FieldProgressExtractionService;
     matchingService?: ActivityMatchingService;
     normalizationService?: FieldProgressNormalizationService;
+    anomalyEvaluationService?: ProgressAnomalyEvaluationService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
@@ -109,6 +116,8 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     this.extractionService = dependencies?.extractionService || defaultExtractionService;
     this.matchingService = dependencies?.matchingService || defaultMatchingService;
     this.normalizationService = dependencies?.normalizationService || defaultNormalizationService;
+    this.anomalyEvaluationService =
+      dependencies?.anomalyEvaluationService || defaultProgressAnomalyEvaluationService;
   }
 
   getOperationalTasks(
@@ -313,6 +322,33 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
         }
       }
 
+      // Determine effective reported percentage (direct percent or quantity-derived)
+      let reportedPercent: number | null = null;
+      if (input.progressPercent != null) {
+        reportedPercent = input.progressPercent;
+      } else if (
+        input.actualQuantity != null &&
+        activity.plannedQuantity != null &&
+        activity.plannedQuantity > 0
+      ) {
+        reportedPercent = Math.min(
+          100,
+          Math.round((input.actualQuantity / activity.plannedQuantity) * 10000) / 100
+        );
+      }
+
+      // Evaluate anomaly BEFORE recording canonical progress so observation does not become its own baseline
+      let anomaly: AnomalyPrediction | null = null;
+      if (reportedPercent !== null) {
+        anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+          projectId,
+          activityId: activity.id,
+          activity,
+          reportedPercent,
+          reportDate
+        });
+      }
+
       // 1. Create progress record with attribution
       const updateRecord = this.progressUpdateRepo.create({
         projectId,
@@ -324,7 +360,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
         status: 'received'
       });
 
-      // 2. Create auto-confirmed match record
+      // 2. Create auto-confirmed match record with anomaly advisory metadata
       const match = this.activityMatchRepo.create({
         projectId,
         progressUpdateId: updateRecord.id,
@@ -337,7 +373,13 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
         confidenceTier: 'high',
         reviewState: 'resolved',
         reviewedBy: reporterName,
-        reviewedAt: new Date().toISOString()
+        reviewedAt: new Date().toISOString(),
+        anomalyScore: anomaly?.anomalyScore ?? null,
+        anomalySeverity: anomaly?.severity ?? null,
+        anomalyReasonsJson:
+          anomaly?.reasons && anomaly.reasons.length > 0
+            ? JSON.stringify(anomaly.reasons)
+            : null
       });
 
       // 3. Normalize and record progress deterministically

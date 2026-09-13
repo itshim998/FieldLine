@@ -228,4 +228,30 @@ export {
 } from './blocker/blocker.service.js';
 export type { BlockerServiceDependencies } from './blocker/blocker.service.js';
 
+export {
+  DefaultProgressAnomalyEvaluationService,
+  defaultProgressAnomalyEvaluationService
+} from './anomaly/progress-anomaly-evaluation.service.js';
+export type {
+  ProgressAnomalyEvaluationService,
+  EvaluateProgressAnomalyInput
+} from './anomaly/progress-anomaly-evaluation.types.js';
+
+export {
+  DefaultAnomalyMessageGeneratorService,
+  defaultAnomalyMessageGeneratorService,
+  buildAnomalyMessagePrompt,
+  generateDeterministicFallbackMessage,
+  anomalyAlertPayloadSchema,
+  isEligibleForAnomalyAlert,
+  toAnomalyMessageInput
+} from './anomaly/index.js';
+export type {
+  AnomalyAlertSeverity,
+  GenerateAnomalyMessageInput,
+  AdaptAnomalyEvaluationOptions,
+  AnomalyAlertPayload,
+  AnomalyAlertMessage,
+  AnomalyMessageGeneratorService
+} from './anomaly/index.js';
 
