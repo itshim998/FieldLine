@@ -197,4 +197,29 @@ export class SqliteProjectEventRepository implements ProjectEventRepository {
   }
 }
 
-export const projectEventRepository: ProjectEventRepository = new SqliteProjectEventRepository();
+export const sqliteProjectEventRepository: ProjectEventRepository = new SqliteProjectEventRepository();
+
+import { PostgresProjectEventRepository } from './postgres/postgres-project-event.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresProjectEventRepoInstance: PostgresProjectEventRepository | null = null;
+export function getPostgresProjectEventRepository(): PostgresProjectEventRepository {
+  if (!_postgresProjectEventRepoInstance) {
+    _postgresProjectEventRepoInstance = new PostgresProjectEventRepository();
+  }
+  return _postgresProjectEventRepoInstance;
+}
+
+export const projectEventRepository: ProjectEventRepository = new Proxy(Object.create(sqliteProjectEventRepository) as ProjectEventRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresProjectEventRepository() : sqliteProjectEventRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

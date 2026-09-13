@@ -231,4 +231,29 @@ export class SqliteActivityRepository implements ActivityRepository {
   }
 }
 
-export const activityRepository: ActivityRepository = new SqliteActivityRepository();
+export const sqliteActivityRepository: ActivityRepository = new SqliteActivityRepository();
+
+import { PostgresActivityRepository } from './postgres/postgres-activity.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresActivityRepoInstance: PostgresActivityRepository | null = null;
+export function getPostgresActivityRepository(): PostgresActivityRepository {
+  if (!_postgresActivityRepoInstance) {
+    _postgresActivityRepoInstance = new PostgresActivityRepository();
+  }
+  return _postgresActivityRepoInstance;
+}
+
+export const activityRepository: ActivityRepository = new Proxy(Object.create(sqliteActivityRepository) as ActivityRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresActivityRepository() : sqliteActivityRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

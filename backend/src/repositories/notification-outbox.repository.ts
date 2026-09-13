@@ -530,5 +530,29 @@ export class SqliteNotificationOutboxRepository implements NotificationOutboxRep
   }
 }
 
-export const notificationOutboxRepository: NotificationOutboxRepository =
+export const sqliteNotificationOutboxRepository: NotificationOutboxRepository =
   new SqliteNotificationOutboxRepository();
+
+import { PostgresNotificationOutboxRepository } from './postgres/postgres-notification-outbox.repository.js';
+
+let _postgresNotificationOutboxRepoInstance: PostgresNotificationOutboxRepository | null = null;
+export function getPostgresNotificationOutboxRepository(): PostgresNotificationOutboxRepository {
+  if (!_postgresNotificationOutboxRepoInstance) {
+    _postgresNotificationOutboxRepoInstance = new PostgresNotificationOutboxRepository();
+  }
+  return _postgresNotificationOutboxRepoInstance;
+}
+
+export const notificationOutboxRepository: NotificationOutboxRepository = new Proxy(Object.create(sqliteNotificationOutboxRepository) as NotificationOutboxRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresNotificationOutboxRepository() : sqliteNotificationOutboxRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

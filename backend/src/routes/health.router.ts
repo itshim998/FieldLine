@@ -5,9 +5,9 @@ import { healthResponseSchema } from '../validation/health.schema.js';
 export function createHealthRouter(service: HealthService = healthService): Router {
   const router = Router();
 
-  router.get('/health', (_req: Request, res: Response, next: NextFunction): void => {
+  router.get('/health', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const payload = service.getHealthStatus();
+      const payload = await service.getHealthStatus();
 
       // Validate output payload contract against schema
       const parsed = healthResponseSchema.safeParse(payload);

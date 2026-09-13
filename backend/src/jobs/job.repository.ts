@@ -530,4 +530,29 @@ export class SqliteJobRepository implements JobRepository {
   }
 }
 
-export const jobRepository: JobRepository = new SqliteJobRepository();
+export const sqliteJobRepository: JobRepository = new SqliteJobRepository();
+
+import { PostgresJobRepository } from '../repositories/postgres/postgres-job.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresJobRepoInstance: PostgresJobRepository | null = null;
+export function getPostgresJobRepository(): PostgresJobRepository {
+  if (!_postgresJobRepoInstance) {
+    _postgresJobRepoInstance = new PostgresJobRepository();
+  }
+  return _postgresJobRepoInstance;
+}
+
+export const jobRepository: JobRepository = new Proxy(Object.create(sqliteJobRepository) as JobRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresJobRepository() : sqliteJobRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

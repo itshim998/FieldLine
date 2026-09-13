@@ -8,13 +8,14 @@ describe('HealthService', () => {
     PORT: 3001,
     NODE_ENV: 'test',
     DATABASE_PATH: ':memory:',
+    DATABASE_PROVIDER: 'sqlite',
     UPLOAD_DIR: './test-uploads',
     VITE_PORT: 3000,
     AI_PROVIDER: 'mock',
     GEMINI_MODEL: 'gemini-3.7-flash'
-  };
+  } as any;
 
-  it('should assemble healthy response when repository reports healthy status', () => {
+  it('should assemble healthy response when repository reports healthy status', async () => {
     const mockRepo: SystemRepository = {
       isHealthy: () => true,
       getAllMetadata: () => ({
@@ -27,7 +28,7 @@ describe('HealthService', () => {
     };
 
     const service = new DefaultHealthService(mockRepo, mockConfig);
-    const result = service.getHealthStatus();
+    const result = await service.getHealthStatus();
 
     expect(result.status).toBe('ok');
     expect(result.service).toBe('FieldLine Backend');
@@ -38,7 +39,7 @@ describe('HealthService', () => {
     expect(result.metadata?.app_name).toBe('FieldLine');
   });
 
-  it('should assemble degraded response when repository reports unhealthy status', () => {
+  it('should assemble degraded response when repository reports unhealthy status', async () => {
     const mockRepo: SystemRepository = {
       isHealthy: () => false,
       getAllMetadata: () => ({}),
@@ -47,7 +48,7 @@ describe('HealthService', () => {
     };
 
     const service = new DefaultHealthService(mockRepo, mockConfig);
-    const result = service.getHealthStatus();
+    const result = await service.getHealthStatus();
 
     expect(result.status).toBe('degraded');
     expect(result.database.status).toBe('disconnected');

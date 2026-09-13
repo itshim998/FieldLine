@@ -1,933 +1,1192 @@
-You are now implementing **Phase 4 — Notification Persistence, Idempotency & Retry Reliability** for FieldLine.
+Your task is to migrate FieldLine from a Render-filesystem-backed SQLite production database to a **persistent Supabase PostgreSQL production database**, while preserving the existing application architecture and all currently implemented behavior.
 
-Phase 1 and Phase 2 established anomaly detection and channel-neutral anomaly explanation.
+## Current authoritative baseline
 
-Phase 3 established immediate HTTP email delivery through Resend.
+The latest GitHub `main` commit is:
 
-Phase 4 must now transform that into a **durable, idempotent, retryable notification system** without redesigning the anomaly or email architecture.
-
-The core principle remains:
-
-```text
-ML detects.
-Groq explains.
-Notification system records intent.
-Delivery adapters deliver.
+```text id="x8g1v2"
+1036141538cfa0b1184cadb59b5f4271639fef0b
 ```
+
+Commit:
+
+```text id="yh5oq4"
+feat(anomaly): implement Phase 4 notification outbox, worker runner & retry reliability
+```
+
+This commit already contains the completed Phase 1–4 architecture, including:
+
+* unified anomaly evaluation
+* Groq anomaly-message generation
+* Resend HTTP email delivery
+* notification outbox
+* notification worker
+* bounded retry/backoff
+* lease claiming/recovery
+* notification idempotency
+* immutable notification payload snapshot
+* atomic notification persistence with anomaly match persistence
+
+Do NOT redesign those phases.
 
 ---
 
-# 0. BEFORE IMPLEMENTATION: AUDIT THE ACTUAL CODE
+# 1. PRIMARY OBJECTIVE
 
-Do not rely only on previous walkthroughs.
+Make FieldLine production-compatible with:
 
-Inspect the actual current local workspace and GitHub `main` baseline.
+```text id="jxj7u8"
+Render
+  ↓
+FieldLine Node/Express backend
+  ↓
+PostgreSQL
+  ↓
+Supabase
+```
 
-Specifically inspect:
+The application architecture should become:
 
-* current Phase 1 anomaly evaluation implementation
-* current Phase 2 `AnomalyAlertMessage` implementation
-* current Phase 3 notification orchestration
-* current Phase 3 email delivery adapter
-* activity match persistence
-* progress persistence
-* SQLite migration system
-* existing `processing_jobs` table/repository
-* existing `WorkerRunner`
-* stale job recovery
-* `project_events`
-* current transaction boundaries
-* current test patterns
-* `ChatGPT_plan.md`
+```text id="8tew0h"
+Application services
+       ↓
+Repository interfaces
+       ↓
+PostgreSQL repository implementation
+       ↓
+Supabase PostgreSQL
+```
 
-Treat the actual local Phase 1–3 code as authoritative.
+The existing SQLite implementation may remain as a **local/test compatibility backend** so that deterministic offline development and the existing golden-demo workflow are preserved.
 
-Do not blindly implement against an older remote `main` snapshot if local Phase 1–3 work has not yet been pushed.
+Production should use PostgreSQL.
 
 ---
 
-# 1. CORE OBJECTIVE
+# 2. IMPORTANT: THIS IS NOT A SIMPLE DATABASE-CONFIG CHANGE
 
-Change the notification model from:
+The current database layer uses synchronous `better-sqlite3`, SQLite-specific transactions, PRAGMA settings, SQLite error codes, and a custom SQLite migration system.
 
-```text
-anomaly
-  ↓
-generate message
-  ↓
-send email immediately
-```
+Therefore, do not assume that replacing:
 
-to:
-
-```text
-anomaly
-  ↓
-persist anomaly
-  ↓
-atomically create notification intent
-  ↓
-notification worker
-  ↓
-generate/reuse Phase 2 message
-  ↓
-deliver via email adapter
-  ↓
-success / retry / permanent failure
-```
-
-The important distinction is:
-
-**Phase 4 persists the intent to notify; the delivery adapter performs the external side effect.**
-
----
-
-# 2. DO NOT REUSE `processing_jobs` UNLESS THE AUDIT PROVES IT IS CLEARLY APPROPRIATE
-
-The current repository already has:
-
-```text
-processing_jobs
-```
-
-but it is currently explicitly designed for asynchronous processing jobs and its schema restricts `job_type` to:
-
-```text
-document_ingestion
+```text id="7y0c1j"
+DATABASE_PATH
 ```
 
 with:
 
 ```text
-queued → processing → completed | failed
+DATABASE_URL
 ```
 
-and generic job fields.
+is sufficient.
 
-Do not automatically overload this table for notification delivery.
+The PostgreSQL implementation will require asynchronous database access.
 
-Prefer a dedicated:
-
-```text
-notification_outbox
-```
-
-unless the actual current architecture makes a unified job model materially cleaner without weakening notification semantics.
-
-The notification system requires concepts such as:
-
-* notification event identity
-* channel
-* idempotency key
-* next retry time
-* delivery status
-* provider message ID
-* retryable vs permanent failure
-* immutable payload snapshot
-
-Do not distort the existing document-processing job model merely to avoid creating a table.
+Perform a full architecture audit first and determine the smallest safe migration strategy.
 
 ---
 
-# 3. ADD A DEDICATED NOTIFICATION OUTBOX
+# 3. FIRST: AUDIT THE ENTIRE DATABASE SURFACE
 
-Create a migration for a dedicated `notification_outbox` table or an equivalent repository-consistent structure.
+Before implementing:
 
-The table should contain enough state to support:
+### Inspect
+
+* `backend/src/database/db.ts`
+* `backend/src/database/migrator.ts`
+* `backend/src/database/schema.ts`
+* every SQLite migration
+* every repository
+* every service that directly accesses the database
+* `better-sqlite3` imports
+* `getDatabase()`
+* `runInTransaction()`
+* SQLite-specific error handling
+* database health checks
+* transaction boundaries
+* startup/shutdown
+* seed scripts
+* demo reset/verification scripts
+* processing job repositories
+* notification outbox repository
+* activity match repository
+* progress repository
+* event repository
+* tests and test database setup
+
+Search the entire repository for:
 
 ```text
-pending / processing / retry_wait / delivered / failed
+better-sqlite3
+getDatabase(
+runInTransaction(
+.prepare(
+.exec(
+.transaction(
+pragma(
+sqlite_master
+SQLITE_
+DATABASE_PATH
 ```
 
-and should conceptually include:
+Do not assume the repository layer is the only place with SQLite coupling.
+
+Produce an internal migration map before modifying code.
+
+---
+
+# 4. TARGET DATABASE ARCHITECTURE
+
+Use PostgreSQL on Supabase.
+
+Prefer a native Node PostgreSQL client rather than using Supabase's REST/Data API for backend persistence.
+
+Evaluate a suitable client such as:
 
 ```text
+postgres
+```
+
+or:
+
+```text
+pg
+```
+
+and choose based on the repository's existing architecture and transaction requirements.
+
+Do not add a large ORM merely to perform this migration.
+
+Prefer direct SQL + repository abstractions.
+
+---
+
+# 5. CONNECTION CONFIGURATION
+
+Introduce a production configuration centered around:
+
+```text
+DATABASE_PROVIDER=postgres
+DATABASE_URL=<Supabase PostgreSQL connection string>
+DATABASE_SSL=true
+```
+
+Use exact names consistent with the repository if another clean convention already exists.
+
+Keep SQLite configuration available for local/test compatibility, for example:
+
+```text
+DATABASE_PROVIDER=sqlite
+DATABASE_PATH=./database/fieldline.db
+```
+
+Do not expose credentials in source control.
+
+Do not commit any actual Supabase password, connection string, or service-role credential.
+
+---
+
+# 6. CHOOSE THE CORRECT SUPABASE CONNECTION MODE
+
+Do not hard-code assumptions.
+
+Supabase currently supports:
+
+* direct Postgres connection
+* shared pooler session mode
+* shared pooler transaction mode
+* dedicated pooler modes on applicable plans
+
+For a persistent Render backend, determine whether direct connectivity is appropriate.
+
+If the deployment environment is IPv4-only, use Supabase's shared pooler in **session mode** rather than assuming IPv6 direct connectivity.
+
+Use a connection configuration that preserves the transaction semantics required by FieldLine.
+
+SSL must be enabled for remote production connections.
+
+The same `DATABASE_URL` abstraction should support the chosen connection mode cleanly.
+
+---
+
+# 7. BUILD A DATABASE ABSTRACTION
+
+Create a clean database-provider boundary.
+
+Conceptually:
+
+```text id="qqw4o3"
+DatabaseProvider
+   ├── SqliteDatabaseProvider
+   └── PostgresDatabaseProvider
+```
+
+or an equivalent repository-consistent architecture.
+
+Do not force services to know which database engine is active.
+
+The service layer should continue speaking in domain/repository terms.
+
+---
+
+# 8. ASYNC MIGRATION
+
+This is a major part of the work.
+
+The current SQLite repositories are synchronous.
+
+PostgreSQL access will be asynchronous.
+
+Convert repository contracts to async where necessary:
+
+```ts id="c4gh3b"
+await repository.getById(...)
+await repository.create(...)
+await repository.list(...)
+await repository.update(...)
+```
+
+Then propagate `async/await` through the affected service/controller paths.
+
+Do NOT create:
+
+```text
+sync wrappers around async DB operations
+```
+
+using hacks such as child processes, blocking loops, or arbitrary synchronous network workarounds.
+
+Do not hide asynchronous database calls behind unsafe pseudo-synchronous abstractions.
+
+Use normal Node asynchronous I/O.
+
+---
+
+# 9. PRESERVE SQLite TEST/LOCAL COMPATIBILITY
+
+Do not throw away the existing SQLite implementation unless the audit demonstrates that maintaining it is genuinely unsafe.
+
+The preferred model is:
+
+```text id="q2j29b"
+DATABASE_PROVIDER=sqlite
+        ↓
+SQLite repository implementation
+```
+
+for local deterministic tests.
+
+And:
+
+```text
+DATABASE_PROVIDER=postgres
+        ↓
+Postgres repository implementation
+```
+
+for production.
+
+The repository interfaces should make both implementations behaviorally equivalent.
+
+---
+
+# 10. POSTGRESQL SCHEMA
+
+Create a PostgreSQL schema representing the **current FieldLine domain state**, rather than mechanically translating every historical SQLite migration.
+
+Use a PostgreSQL baseline migration under a repository-consistent location, preferably:
+
+```text
+supabase/migrations/
+```
+
+unless an audit reveals a better existing convention.
+
+The baseline must include every currently required table and constraint.
+
+At minimum audit/include:
+
+```text
+projects
+project_accounts
+activities
+schedules
+evidence
+progress_updates
+activity_matches
+activity_progress
+project_events
+operational_blockers
+processing_jobs
+notification_outbox
+```
+
+plus any other actual tables found in the current repository.
+
+Preserve:
+
+* primary keys
+* foreign keys
+* unique constraints
+* indexes
+* not-null constraints
+* check constraints
+* cascade behavior
+* review-state constraints
+* anomaly severity constraints
+* notification state constraints
+
+---
+
+# 11. DO NOT LOSE THE CURRENT PHASE 4 OUTBOX
+
+The current `notification_outbox` is part of the latest architecture.
+
+Its logical model includes fields equivalent to:
+
+```text id="0eawpe"
 id
 project_id
 activity_match_id
-
 notification_type
 channel
-
 status
-
 payload_json
 idempotency_key
-
 attempt_count
 max_attempts
-
 next_attempt_at
 locked_at
 last_attempt_at
 delivered_at
-
 provider_message_id
-
 last_error_code
 last_error_summary
-
 created_at
 updated_at
 ```
 
-Use exact names consistent with repository conventions.
+and a uniqueness model preventing duplicate logical anomaly notifications.
 
-Do not store secrets.
+Preserve these semantics exactly.
 
-Do not store unnecessary provider payloads if the channel-neutral alert payload is sufficient.
+Do not simplify them during the migration.
 
 ---
 
-# 4. ATOMICALLY CREATE THE OUTBOX WITH THE ANOMALY RECORD
+# 12. CANONICAL TRUTH MUST SURVIVE IDENTICALLY
 
-This is a mandatory invariant.
+Preserve the existing FieldLine invariant:
 
-The transaction should conceptually be:
+```text id="w6z8j4"
+unconfirmed/suggested match
+      ↓
+NO canonical activity_progress write
+```
 
-```text
+and:
+
+```text id="c6h8ri"
+confirmed match
+      ↓
+allowed to become canonical progress
+```
+
+The migration must not change:
+
+* Match Review Policy
+* canonical progress rules
+* anomaly advisory semantics
+* dashboard truth semantics
+
+Existing canonical-truth tests must remain green.
+
+Add PostgreSQL-backed equivalents where needed.
+
+---
+
+# 13. TRANSACTION MIGRATION
+
+Replace SQLite-specific transaction logic with native PostgreSQL transactions.
+
+The important invariant is:
+
+```text id="lvn2wc"
 BEGIN
     persist anomaly/activity match
     create notification_outbox row
 COMMIT
 ```
 
-Then, only after commit:
+The external providers MUST NOT be called inside the database transaction.
 
-```text
-notification worker → external delivery
+Never do:
+
+```text id="6k0lfx"
+BEGIN
+    DB writes
+    ↓
+    Resend HTTP request
+    ↓
+COMMIT
 ```
 
-Never perform the Resend HTTP request inside the SQLite transaction.
+Instead:
 
-The objective is to eliminate this failure mode:
+```text id="p2wtgd"
+BEGIN
+    DB writes
+    outbox insert
+COMMIT
 
-```text
-anomaly committed
-server crashes
-notification intent never recorded
+Notification worker
+    ↓
+external provider
 ```
 
-The outbox row must be created as part of the same successful persistence unit as the anomaly when the anomaly qualifies for notification.
+The notification outbox must remain atomically coupled to anomaly persistence.
 
 ---
 
-# 5. DO NOT CREATE NOTIFICATIONS FOR NORMAL/COLD-START
+# 14. POSTGRES TRANSACTION CLIENT/PINNING
 
-Preserve the existing Phase 1/2 policy:
+When using a PostgreSQL pool, transaction operations must execute on the same checked-out connection/client.
 
-```text
-normal → no notification
-cold start → no notification
+Do not accidentally run:
+
+```text id="tw5r1s"
+BEGIN on connection A
+INSERT on connection B
+COMMIT on connection C
 ```
 
-Only eligible anomaly severities should create an outbox record.
+The transaction helper must guarantee a single connection for the entire transaction.
 
-Do not create a pending notification and later decide it was unnecessary.
+Test this.
 
 ---
 
-# 6. ENFORCE LOGICAL IDEMPOTENCY IN SQLITE
+# 15. MIGRATE THE EXISTING `processing_jobs` SYSTEM
 
-The same anomaly event must not create multiple logical notification records for the same channel.
-
-Define a deterministic identity conceptually equivalent to:
+The existing repository already uses a persistent `processing_jobs` model with:
 
 ```text
-anomaly-alert:<activityMatchId>:email
-```
-
-or another repository-appropriate event key.
-
-Prefer a database uniqueness constraint/index protecting the logical event.
-
-For example, conceptually:
-
-```text
-(project_id, activity_match_id, notification_type, channel)
-```
-
-must be unique where appropriate.
-
-Do not rely solely on Resend idempotency.
-
-The application itself should know:
-
-> "This anomaly already has an email notification intent."
-
----
-
-# 7. PRESERVE A SNAPSHOT OF THE PHASE 2 MESSAGE PAYLOAD
-
-Do NOT make notification retries call Groq again.
-
-The preferred lifecycle is:
-
-```text
-anomaly persisted
-    ↓
-create notification intent
-    ↓
-generate Phase 2 AnomalyAlertMessage exactly once
-    ↓
-store immutable message/payload snapshot
-    ↓
-email delivery
-```
-
-or, if the current Phase 3 architecture already generates the message before the outbox transaction, ensure the equivalent immutable payload is captured in the outbox.
-
-The crucial invariant is:
-
-```text
-One notification event
-    ↓
-One message snapshot
-    ↓
-All delivery retries reuse that exact payload
-```
-
-This is important both for consistency and for Resend idempotency.
-
-Do not regenerate natural-language content on every retry.
-
----
-
-# 8. PRESERVE SERVER-OWNED ANOMALY FACTS
-
-The outbox snapshot must retain the trusted values from Phase 1/2.
-
-Do not derive any of these from generated prose:
-
-* anomaly score
-* severity
-* activity identity
-* project identity
-* progress values
-* reporter
-* anomaly reasons
-
-Groq remains a language generator only.
-
----
-
-# 9. CREATE A NOTIFICATION WORKER
-
-Use the existing repository's in-process worker philosophy.
-
-Do NOT introduce:
-
-* Redis
-* BullMQ
-* Kafka
-* RabbitMQ
-* external queue services
-* cloud functions
-* paid infrastructure
-
-The existing repository already has an in-process worker and stale-job-recovery pattern.
-
-Reuse that design philosophy.
-
-Choose the cleanest implementation after inspecting the actual current worker architecture.
-
-A dedicated lightweight `NotificationWorker` is acceptable and may be preferable if sharing the current document worker would make the code confusing or cause notification starvation.
-
-The worker must support:
-
-```text
-claim next eligible notification
-        ↓
-process
-        ↓
-finish / schedule retry
-```
-
----
-
-# 10. SAFE CLAIMING / LEASE SEMANTICS
-
-A notification must be atomically claimed before delivery.
-
-The worker should transition:
-
-```text
-pending/retry_wait
-        ↓
+queued
 processing
-```
-
-and set:
-
-```text
+completed
+failed
+attempt_count
 locked_at
 ```
 
-or an equivalent lease timestamp.
+and stale-job recovery.
 
-Another worker must not simultaneously claim the same row.
+Migrate this functionality to PostgreSQL without redesigning its behavior.
 
-Follow the existing `JobRepository.claimNextQueued()` transactional pattern where appropriate.
+The existing document-ingestion worker should continue working.
+
+Do not introduce Redis, BullMQ, Kafka, RabbitMQ, or another queue.
 
 ---
 
-# 11. RECOVER STALE NOTIFICATIONS
+# 16. MIGRATE `notification_outbox` CLAIM/LEASE SEMANTICS
 
-If the process crashes after claiming:
+Preserve Phase 4 behavior.
 
-```text
+The notification worker must still safely:
+
+```text id="fy39kg"
+claim pending/retry_wait item
+        ↓
 processing
+        ↓
+deliver
 ```
 
-but before completion:
+and stale processing notifications must remain recoverable.
 
-```text
-locked_at = old
-```
+Make the claim operation atomic under PostgreSQL concurrency.
 
-the next worker startup/poll should be able to identify the stale lease and return the notification to a retryable state.
+Use PostgreSQL transaction/locking semantics appropriate for the implementation.
 
-Use a bounded lease timeout.
+Do not assume SQLite locking behavior translates directly to PostgreSQL.
 
-Do not create an infinite retry loop.
+Add a concurrency test demonstrating that two consumers cannot legitimately claim the same notification simultaneously.
 
 ---
 
-# 12. RETRY CLASSIFICATION
+# 17. IDEMPOTENCY
 
-Classify delivery errors into two categories.
+Preserve the existing logical idempotency rules.
 
-### Retryable
+The database must prevent duplicate logical notification events.
 
-At minimum consider:
+The Resend idempotency key must remain stable.
 
-```text
-HTTP 429
-HTTP 500
-HTTP 502
-HTTP 503
-HTTP 504
-network failures
-connection reset
-timeout
-temporary provider failures
+The same notification event must retain:
+
+```text id="xk0b58"
+same outbox identity
+same payload snapshot
+same Resend idempotency key
 ```
 
-### Permanent
+across retries.
 
-At minimum consider:
-
-```text
-HTTP 400
-HTTP 401
-HTTP 403
-invalid request
-invalid sender
-invalid recipient
-missing/invalid configuration
-```
-
-Do not retry permanent configuration/authentication failures indefinitely.
-
-Use the actual Resend response semantics already present in the Phase 3 adapter.
+Do not generate a new random identity when retrying.
 
 ---
 
-# 13. RETRY BACKOFF
-
-Implement a bounded backoff policy.
-
-A simple sequence such as:
-
-```text
-attempt 1 → short delay
-attempt 2 → longer delay
-attempt 3 → longer again
-...
-```
-
-is sufficient.
-
-For example:
-
-```text
-1m
-5m
-15m
-30m
-```
-
-The exact values may follow repository conventions, but must be:
-
-* bounded
-* non-zero
-* increasing
-* testable
-* capped
-
-Add small jitter if useful and simple.
-
-Do not busy-loop.
-
----
-
-# 14. MAXIMUM ATTEMPTS
-
-Set an explicit maximum number of delivery attempts.
-
-After the limit:
-
-```text
-status = failed
-```
-
-with a machine-readable error code and human-readable sanitized summary.
-
-Do not retry forever.
-
-The exact limit can be chosen after inspecting current configuration conventions.
-
-Prefer configuration or a clearly documented constant over scattering the value through worker code.
-
----
-
-# 15. RESEND IDEMPOTENCY
-
-Preserve the Phase 3 Resend idempotency-key behavior.
-
-The key must remain deterministic for the same notification event.
-
-Resend's API supports idempotency keys and uses them to suppress duplicate processing of the same email request. Its documentation also states that retries using the same idempotency key should use the same payload; otherwise the provider can reject the request as an invalid idempotent request.
-
-Therefore:
-
-```text
-same notification
-    ↓
-same idempotency key
-    ↓
-same email payload
-```
-
-must remain true across retries.
-
-Do not generate a new random key per retry.
-
----
-
-# 16. HANDLE THE "CRASH AFTER SEND, BEFORE DB UPDATE" CASE
-
-This is a critical failure scenario.
-
-Example:
-
-```text
-worker
-  ↓
-Resend accepts email
-  ↓
-process crashes
-  ↓
-notification row still says processing
-```
-
-When the stale row is retried, FieldLine may make the same request again.
-
-This is exactly where the deterministic Resend idempotency key protects against duplicate delivery.
-
-The architecture must explicitly account for this scenario.
-
-Add a behavioral test for it where practical.
-
----
-
-# 17. RECORD DELIVERY RESULT
-
-On successful delivery, store:
-
-```text
-status = delivered
-delivered_at
-provider_message_id
-attempt_count
-updated_at
-```
-
-Use the actual provider message ID returned by Resend.
-
-On retryable failure:
-
-```text
-status = retry_wait
-next_attempt_at
-last_error_code
-last_error_summary
-attempt_count
-```
-
-On permanent failure:
-
-```text
-status = failed
-last_error_code
-last_error_summary
-attempt_count
-```
-
-Never store API secrets.
-
----
-
-# 18. NOTIFICATION OBSERVABILITY
-
-Use the existing `project_events` audit architecture where it materially helps.
-
-Useful event types may include:
-
-```text
-notification_created
-notification_delivery_succeeded
-notification_retry_scheduled
-notification_delivery_failed
-```
-
-Do not emit events for every polling cycle.
-
-Keep audit events tied to meaningful state transitions.
-
----
-
-# 19. PRESERVE EMAIL FAILURE INDEPENDENCE
-
-This invariant remains mandatory:
-
-```text
-anomaly persistence succeeds
-+
-notification delivery fails
-=
-anomaly remains valid
-```
-
-The worker must never:
-
-* delete the anomaly
-* undo canonical progress
-* modify the activity match to hide the failure
-* roll back anomaly persistence because email failed
-
-The notification system is downstream of the anomaly truth.
-
----
-
-# 20. DO NOT REINTRODUCE SYNCHRONOUS RESEND DELIVERY INTO THE REPORT TRANSACTION
-
-Phase 3 may still have synchronous invocation depending on the actual current implementation.
-
-Phase 4 must transition the durable notification system toward:
-
-```text
-request
-  ↓
-database transaction
-  ↓
-outbox row
-  ↓
-commit
-  ↓
-notification worker
-  ↓
-Resend
-```
-
-The external API call should not be required for the worker's database commit.
-
-Do not hold SQLite locks while waiting for Resend.
-
----
-
-# 21. DO NOT ALTER EXISTING PROCESSING JOB SEMANTICS UNLESS NECESSARY
-
-The current document-ingestion job system already has:
-
-* queue state
-* claim state
-* attempt count
-* stale job recovery
-
-Do not break it.
-
-The existing `processing_jobs` behavior must remain green.
-
-If you choose to extend it for notifications, first prove that the resulting abstraction is cleaner than a dedicated notification outbox. Otherwise use the dedicated outbox.
-
----
-
-# 22. TESTING
-
-Add focused tests for:
-
-### Outbox persistence
-
-```text
-eligible anomaly → exactly one notification row
-normal anomaly → zero notification rows
-duplicate processing → one logical notification
-```
-
-### Atomicity
-
-Simulate persistence failure and verify the outbox is not left orphaned without its anomaly.
-
-Simulate outbox insertion failure and verify the transaction rolls back consistently.
-
-### Claiming
-
-Two worker attempts must not successfully claim the same notification simultaneously.
-
-### Retry logic
-
-Verify:
-
-```text
-429 → retry_wait
-503 → retry_wait
-timeout → retry_wait
-400 → failed
-401 → failed
-```
-
-### Backoff
-
-Verify `next_attempt_at` increases according to policy.
-
-### Max attempts
-
-Verify the notification becomes permanently failed after the configured limit.
-
-### Success
-
-Verify:
-
-```text
-delivered
-provider_message_id recorded
-delivered_at recorded
-```
-
-### Retry idempotency
-
-Verify retries reuse:
-
-```text
-same notification id
-same idempotency key
-same payload
-```
-
-### Crash-after-send scenario
-
-Simulate:
-
-```text
-provider success
-DB success update interrupted
-stale recovery
+# 18. MESSAGE SNAPSHOT
+
+Preserve Phase 4's rule that Groq is not called repeatedly during email retries.
+
+The lifecycle must remain:
+
+```text id="3qkjb9"
+anomaly
+ ↓
+notification intent
+ ↓
+message generated once
+ ↓
+message snapshot stored
+ ↓
+delivery attempt
+ ↓
 retry
+ ↓
+same snapshot
 ```
 
-and verify the provider request uses the same idempotency identity.
-
-### Groq call count
-
-Verify that retrying email delivery does NOT call Groq again.
-
-### Failure independence
-
-Verify Resend failures never remove or alter the anomaly record.
+The database migration must preserve this payload exactly.
 
 ---
 
-# 23. INTUITIVE / BEHAVIORAL EVALUATION
+# 19. POSTGRES MIGRATION FILES
 
-Do not stop at unit tests.
+Create a clean Supabase-compatible migration history for the PostgreSQL schema.
 
-Run realistic lifecycle scenarios.
+Do not blindly copy SQLite syntax.
 
-### Scenario A — successful anomaly notification
+Examples of things that require deliberate PostgreSQL translation include:
 
-```text
-HIGH anomaly
-→ outbox created
-→ worker claims
-→ Groq message created once
-→ Resend success
-→ delivered
+* SQLite `INTEGER PRIMARY KEY`
+* SQLite `AUTOINCREMENT`
+* SQLite-specific `CURRENT_TIMESTAMP` semantics
+* SQLite `PRAGMA`
+* SQLite `sqlite_master`
+* SQLite-specific indexes
+* `ALTER TABLE` behavior
+* JSON storage
+* boolean representation
+* date/time representation
+* `ON CONFLICT` semantics where relevant
+
+Use PostgreSQL-native types and constraints.
+
+For JSON payloads, evaluate whether `jsonb` is appropriate for fields currently represented as JSON text.
+
+Do not change domain semantics solely for stylistic reasons.
+
+---
+
+# 20. DATA TYPE AUDIT
+
+Audit every schema column and make deliberate PostgreSQL type choices.
+
+Pay special attention to:
+
+* IDs
+* percentages
+* quantities
+* anomaly scores
+* timestamps
+* booleans
+* JSON payloads
+* nullable fields
+* enums/check-constrained strings
+
+Do not blindly convert all SQLite `TEXT` columns to arbitrary PostgreSQL types.
+
+Preserve application-level behavior.
+
+---
+
+# 21. DATA MIGRATION / IMPORT TOOL
+
+Create a deterministic one-time migration/import utility for an existing SQLite database.
+
+Conceptually:
+
+```text id="u6y1v3"
+SQLite fieldline.db
+        ↓
+read data
+        ↓
+transform SQLite → PostgreSQL values
+        ↓
+insert preserving IDs
+        ↓
+verify relationships
+        ↓
+report counts
 ```
 
-### Scenario B — temporary outage
+Preserve all existing primary keys and foreign-key relationships.
 
-```text
-HIGH anomaly
-→ outbox created
-→ Resend 503
-→ retry_wait
-→ later success
-→ delivered
+Import in dependency-safe order derived from the actual schema.
+
+The import must be idempotent or safely repeatable.
+
+Do not require real production data to be present for tests.
+
+---
+
+# 22. MIGRATION VERIFICATION
+
+After import, compare at minimum:
+
+```text id="uujyga"
+row counts per table
+primary key sets
+foreign key integrity
+critical project/activity relationships
+activity_match counts
+activity_progress counts
+notification_outbox counts
+processing_jobs counts
 ```
 
-### Scenario C — permanent configuration error
+For representative records compare important field values.
+
+Where practical, create a migration verification script that reports:
 
 ```text
-HIGH anomaly
-→ Resend 401
-→ failed
-→ no infinite retry
+table
+sqlite_count
+postgres_count
+status
 ```
 
-### Scenario D — duplicate trigger
+Do not claim migration success based solely on total row count.
 
-Invoke the anomaly notification path twice for the same activity match.
+---
+
+# 23. GOLDEN DEMO
+
+Preserve the existing Golden Demo behavior.
+
+The existing project has a deterministic demo/reset/verification workflow.
+
+Local mode should continue supporting:
+
+```bash
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+npm test
+```
+
+Do not make normal tests require a live Supabase database.
+
+For PostgreSQL, provide explicit commands/scripts for:
+
+```text id="v5h4yi"
+initialize schema
+seed golden demo
+verify database
+import SQLite data
+```
+
+Use safe names consistent with the repository.
+
+---
+
+# 24. DO NOT ALLOW `demo:reset` TO WIPE PRODUCTION
+
+This is mandatory.
+
+A developer convenience command must not silently operate against an arbitrary `DATABASE_URL`.
+
+Use explicit environment/provider safeguards.
+
+For example, require a deliberate flag or a clearly test/local database provider before destructive reset operations.
+
+Do not implement a dangerous:
+
+```text id="6pp9i8"
+DROP TABLES
+```
+
+against any configured production database merely because someone runs `npm run demo:reset`.
+
+---
+
+# 25. STARTUP / HEALTH CHECK
+
+Update startup so the application:
+
+```text id="78p2c4"
+starts
+ ↓
+initializes selected database provider
+ ↓
+verifies database connectivity
+ ↓
+verifies expected schema/migration state
+ ↓
+starts workers
+ ↓
+starts HTTP server
+```
+
+Health checks should distinguish:
+
+```text DB unavailable
+```
+
+from:
+
+```text application unavailable
+```
+
+without leaking credentials.
+
+---
+
+# 26. SHUTDOWN
+
+Ensure graceful shutdown closes:
+
+```text id="yq09d5"
+notification worker
+processing worker
+HTTP server
+PostgreSQL pool/client
+```
+
+in a safe order.
+
+Do not leave active DB connections hanging.
+
+---
+
+# 27. ENVIRONMENT CONFIGURATION
+
+Update `env.ts` using the repository's existing Zod configuration approach.
+
+Support:
+
+### Local/test
+
+```text
+DATABASE_PROVIDER=sqlite
+DATABASE_PATH=...
+```
+
+### Production
+
+```text
+DATABASE_PROVIDER=postgres
+DATABASE_URL=...
+DATABASE_SSL=true
+```
+
+Do not commit secrets.
+
+Update `.env.example`.
+
+Update `render.yaml` appropriately.
+
+Do not expose passwords or complete connection strings in source control.
+
+---
+
+# 28. RENDER CONFIGURATION
+
+The current production configuration still uses the local database path.
+
+Replace production database configuration with the Supabase PostgreSQL configuration.
+
+Keep only the necessary variables.
+
+Do not require the Render filesystem for application data persistence.
+
+The production application should no longer depend on:
+
+```text
+DATABASE_PATH=./database/fieldline.db
+```
+
+for its primary database.
+
+---
+
+# 29. IMPORTANT: FILE STORAGE IS A SEPARATE CONCERN
+
+Do not pretend that moving SQLite → Supabase PostgreSQL automatically makes uploaded files persistent.
+
+The current application still has a filesystem upload directory.
+
+For this phase:
+
+* migrate the database
+* preserve existing evidence metadata behavior
+* do not silently redesign evidence storage
+
+If the audit identifies that evidence files are required to persist across Render restarts for the SIH demo, document that as a separate follow-up concern rather than mixing it into the database migration.
+
+---
+
+# 30. SUPABASE SECURITY
+
+The backend should own the privileged database connection.
+
+Do not expose the Postgres connection string to the frontend.
+
+Do not put a database password in frontend code.
+
+Do not expose a Supabase service credential through Vite/browser environment variables.
+
+The architecture should remain:
+
+```text id="u5n9n4"
+Browser
+   ↓
+FieldLine API
+   ↓
+Supabase PostgreSQL
+```
+
+not direct browser-to-database access.
+
+Do not add Supabase Auth merely because Supabase is being introduced.
+
+Do not add RLS everywhere merely because Supabase supports RLS; first preserve the existing backend trust boundary.
+
+---
+
+# 31. TEST STRATEGY
+
+Preserve the current SQLite test suite as the fast deterministic baseline.
+
+Then add PostgreSQL-specific integration tests.
+
+At minimum test:
+
+### Database connection
+
+```text id="0c42v3"
+connect
+health check
+disconnect
+```
+
+### Schema
+
+```text id="z6s6yq"
+all required tables exist
+constraints exist
+indexes exist
+```
+
+### Repository equivalence
+
+For representative CRUD operations, verify SQLite and PostgreSQL implementations behave equivalently.
+
+### Transaction rollback
+
+A forced failure midway through a transaction must roll back all writes.
+
+### Canonical truth
+
+Unconfirmed matches must not create canonical progress.
+
+### Outbox atomicity
+
+Anomaly + notification intent must commit together.
+
+### Notification claiming
+
+Concurrent workers must not claim the same item simultaneously.
+
+### Stale lease recovery
+
+Stale processing notification becomes eligible again.
+
+### Retry state
+
+Backoff and max-attempt semantics remain unchanged.
+
+### Idempotency
+
+Duplicate notification creation does not produce two logical events.
+
+### Message snapshot
+
+Retries do not call Groq again.
+
+### Existing processing jobs
+
+Document ingestion queue behavior remains intact.
+
+---
+
+# 32. BEHAVIORAL REGRESSION TESTING
+
+Do not stop at database-level tests.
+
+Use existing realistic FieldLine workflows.
+
+Run representative flows:
+
+```text id="wq4n8e"
+Worker report
+ ↓
+matching
+ ↓
+anomaly detection
+ ↓
+match persistence
+ ↓
+notification outbox
+ ↓
+notification worker
+ ↓
+mocked email delivery
+```
+
+Verify behavior is equivalent before and after changing database provider.
+
+Especially test:
+
+### Scenario A
+
+Normal worker report.
 
 Expected:
 
-```text
-one logical notification
+```text no anomaly alert
+no notification
 ```
 
-### Scenario E — crash after external send
+### Scenario B
 
-Verify deterministic idempotency prevents duplicate logical email delivery.
-
-### Scenario F — application restart during processing
-
-Verify stale `processing` notification can be reclaimed safely.
-
-### Scenario G — message stability
-
-Verify that retrying a notification does not produce a new Groq message.
-
-### Scenario H — normal report
+High anomaly.
 
 Expected:
 
-```text
-no notification outbox row
-no Groq anomaly-message generation
-no email
+```text anomaly persisted
+notification persisted
+message snapshot persisted
+```
+
+### Scenario C
+
+Resend failure.
+
+Expected:
+
+```text anomaly remains valid
+notification enters retry state
+```
+
+### Scenario D
+
+Retry.
+
+Expected:
+
+```text same notification
+same message payload
+same idempotency key
+```
+
+### Scenario E
+
+Application restart.
+
+Expected:
+
+```text pending/retry notification survives process restart
+```
+
+### Scenario F
+
+Two worker instances/processes attempt the same notification.
+
+Expected:
+
+```text exactly one logical claim at a time
 ```
 
 ---
 
-# 24. RENDER / DEPLOYMENT REALITY
+# 33. FULL REGRESSION
 
-The current deployment uses Render Free and SQLite.
+Do not declare the migration complete until the actual commands have been run.
 
-Do not pretend this makes SQLite persistent across every deploy/restart/spindown.
-
-Render documents that the Free filesystem is ephemeral.
-
-Therefore the final documentation should state honestly:
-
-```text
-Phase 4 provides durable notification state within the current SQLite deployment architecture,
-plus crash/retry/idempotency handling while the database persists.
-Cross-redeploy durability on Render Free remains an infrastructure limitation.
-```
-
-Do not add paid infrastructure merely to solve this.
-
----
-
-# 25. SECURITY
-
-Verify:
-
-* no Resend API key in database
-* no API key in outbox payload
-* no Authorization header persisted
-* no secret in logs
-* email payload contains only intended notification information
-* recipient addresses remain configuration-driven
-* worker reports cannot choose notification recipients
-
----
-
-# 26. GOLDEN DEMO PRESERVATION
-
-The following workflows must remain functional:
+At minimum:
 
 ```bash
 npm test
+npx tsc -p tsconfig.backend.json --noEmit
 npm run demo:reset
 npm run demo:verify
 npm run verify:release
 ```
 
-The test/demo environment must not require real Resend credentials.
+plus the new PostgreSQL/Supabase integration tests and migration verification.
 
-Prefer:
+If some existing command must change because of the new architecture, document the exact reason and provide the repository-consistent replacement.
 
-```text
-EMAIL_ENABLED=false
-```
-
-for offline runs.
-
-When email delivery is disabled, the outbox/worker architecture should still remain testable using mocks without making external HTTP requests.
+Do not silently break established workflows.
 
 ---
 
-# 27. FINAL VERIFICATION
+# 34. PERFORMANCE / CONNECTION POOL
 
-Run:
+Choose a conservative connection pool size appropriate for:
 
-```bash
-npx vitest run <new notification/outbox tests>
-npx vitest run <relevant Phase 1/2/3 regression tests>
-npx tsc -p tsconfig.backend.json --noEmit
-npm test
-```
+* Render Free resource limits
+* Supabase plan limits
+* FieldLine's current single-process/small-worker architecture
 
-Also run the realistic behavioral lifecycle evaluation.
+Do not open a connection per request.
 
-Do not claim success for commands not actually executed.
+Do not create a separate pool for every repository.
+
+Use one shared database client/pool.
+
+Do not optimize prematurely.
 
 ---
 
-# 28. DEFINITION OF DONE
+# 35. FINAL REPORT
 
-Phase 4 is complete only when all of these are true:
+Return a detailed walkthrough after implementation.
 
-```text
-✓ Dedicated notification outbox exists
-✓ Notification creation is atomic with anomaly persistence
-✓ Normal/cold-start produce no notification intent
-✓ Logical notification identity is deterministic
-✓ Duplicate triggers cannot create duplicate logical notifications
-✓ Phase 2 message is generated once per notification event
-✓ Notification retries reuse an immutable payload
-✓ Resend idempotency key remains stable
-✓ Notification claiming is concurrency-safe
-✓ Stale processing notifications can be recovered
-✓ Retryable provider failures are distinguished from permanent failures
-✓ Backoff is bounded and testable
-✓ Maximum attempts are enforced
-✓ Successful delivery records provider message ID
-✓ Permanent failure stops retrying
-✓ Delivery failure never invalidates anomaly truth
-✓ No external queue infrastructure is introduced
-✓ Existing document-processing jobs remain unaffected
-✓ Golden demo remains offline-capable
-✓ No WhatsApp implementation is introduced
-✓ Full repository tests remain green
-✓ TypeScript compilation is clean
-✓ Behavioral lifecycle evaluation passes
-✓ Render Free SQLite durability limitation is documented honestly
+Include:
+
+## A. Architecture before / after
+
+```text id="lh1vcp"
+BEFORE
+FieldLine
+  ↓
+SQLite file
+  ↓
+Render filesystem
+
+AFTER
+FieldLine
+  ↓
+Repository abstraction
+  ↓
+PostgreSQL
+  ↓
+Supabase
 ```
 
-Implement the smallest architecture that satisfies this definition of done.
+## B. Database provider strategy
+
+Explain:
+
+* production provider
+* local/test provider
+* connection mode
+* client library
+* SSL behavior
+
+## C. Schema migration
+
+List:
+
+* PostgreSQL baseline migration
+* important indexes/constraints
+* notification outbox migration
+* processing jobs
+* canonical progress tables
+
+## D. Repository migration
+
+Explain which repositories were changed and how SQLite/PostgreSQL coexist.
+
+## E. Transaction migration
+
+Show how anomaly persistence + notification outbox remains atomic.
+
+## F. Data migration
+
+Describe the import tool and verification results.
+
+## G. Render deployment
+
+State exactly which environment variables are required, without exposing secrets.
+
+## H. Test results
+
+Provide exact commands and actual counts.
+
+## I. Behavioral evaluation
+
+Demonstrate representative worker → anomaly → notification flows.
+
+## J. Remaining limitations
+
+Be explicit about:
+
+* filesystem evidence persistence
+* Supabase Free project pausing
+* anything not migrated
+
+Do not claim zero limitations if they exist.
+
+---
+
+# Definition of Done
+
+This migration is complete only when:
+
+```text id="4g5z6q"
+✓ Production database is Supabase PostgreSQL
+✓ SQLite remains available only where intentionally useful for local/test compatibility
+✓ Repository abstraction hides database engine
+✓ PostgreSQL access is properly asynchronous
+✓ No synchronous hacks around async DB operations
+✓ Current domain schema is faithfully represented in PostgreSQL
+✓ Primary/foreign keys are preserved
+✓ Canonical progress semantics are preserved
+✓ Existing ML advisory fields are preserved
+✓ processing_jobs works on PostgreSQL
+✓ notification_outbox works on PostgreSQL
+✓ Notification claim/lease semantics remain concurrency-safe
+✓ Outbox creation remains atomic with anomaly persistence
+✓ Resend remains outside DB transactions
+✓ Notification idempotency is preserved
+✓ Message snapshots remain immutable across retries
+✓ Groq is not called repeatedly for email retries
+✓ Existing SQLite test/demo workflow remains usable
+✓ Production no longer depends on DATABASE_PATH/local SQLite
+✓ Supabase credentials remain server-side only
+✓ Startup/shutdown correctly manage PostgreSQL connections
+✓ Migration/import tooling exists
+✓ Migration verification exists
+✓ Golden Demo behavior is preserved
+✓ demo reset cannot accidentally wipe production
+✓ Existing processing-worker behavior remains intact
+✓ Full regression suite passes
+✓ PostgreSQL-specific integration tests pass
+✓ Behavioral evaluation passes
+✓ Remaining infrastructure limitations are documented honestly
+```
+
+Do the smallest clean migration that satisfies these requirements.
 
 Do not perform unrelated refactors.
 
-Preserve existing FieldLine conventions wherever they are already sound.
+Do not redesign Phase 1, Phase 2, Phase 3, or Phase 4.
+
+Preserve existing FieldLine behavior unless a PostgreSQL compatibility change genuinely requires modification.

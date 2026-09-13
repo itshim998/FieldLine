@@ -3,7 +3,7 @@ import { EnvConfig, env as defaultEnv } from '../config/env.js';
 import { HealthResponse } from '../validation/health.schema.js';
 
 export interface HealthService {
-  getHealthStatus(): HealthResponse;
+  getHealthStatus(): HealthResponse | Promise<HealthResponse>;
 }
 
 export class DefaultHealthService implements HealthService {
@@ -18,7 +18,37 @@ export class DefaultHealthService implements HealthService {
     this.config = config;
   }
 
-  getHealthStatus(): HealthResponse {
+  getHealthStatus(): HealthResponse | Promise<HealthResponse> {
+    if (this.config.DATABASE_PROVIDER === 'postgres') {
+      return (async () => {
+        let isDbHealthy = false;
+        let metadata: Record<string, string> = {};
+        try {
+          isDbHealthy = await (this.systemRepo as any).isHealthy();
+          if (isDbHealthy) {
+            metadata = await (this.systemRepo as any).getAllMetadata();
+          }
+        } catch {
+          isDbHealthy = false;
+        }
+
+        return {
+          status: isDbHealthy ? 'ok' : 'degraded',
+          service: 'FieldLine Backend',
+          version: '0.1.0',
+          timestamp: new Date().toISOString(),
+          uptime: process.uptime(),
+          environment: this.config.NODE_ENV,
+          database: {
+            status: isDbHealthy ? 'connected' : 'disconnected',
+            type: 'postgres',
+            provider: 'postgres'
+          },
+          metadata
+        };
+      })();
+    }
+
     const isDbHealthy = this.systemRepo.isHealthy();
     const metadata = isDbHealthy ? this.systemRepo.getAllMetadata() : {};
 

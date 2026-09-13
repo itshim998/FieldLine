@@ -59,4 +59,29 @@ export class SqliteSystemRepository implements SystemRepository {
   }
 }
 
-export const systemRepository: SystemRepository = new SqliteSystemRepository();
+export const sqliteSystemRepository: SystemRepository = new SqliteSystemRepository();
+
+import { PostgresSystemRepository } from './postgres/postgres-system.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresSystemRepoInstance: PostgresSystemRepository | null = null;
+export function getPostgresSystemRepository(): PostgresSystemRepository {
+  if (!_postgresSystemRepoInstance) {
+    _postgresSystemRepoInstance = new PostgresSystemRepository();
+  }
+  return _postgresSystemRepoInstance;
+}
+
+export const systemRepository: SystemRepository = new Proxy(Object.create(sqliteSystemRepository) as SystemRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresSystemRepository() : sqliteSystemRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

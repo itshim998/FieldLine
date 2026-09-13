@@ -1015,4 +1015,29 @@ export class SqliteActivityMatchRepository implements ActivityMatchRepository {
   }
 }
 
-export const activityMatchRepository: ActivityMatchRepository = new SqliteActivityMatchRepository();
+export const sqliteActivityMatchRepository: ActivityMatchRepository = new SqliteActivityMatchRepository();
+
+import { PostgresActivityMatchRepository } from './postgres/postgres-activity-match.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresActivityMatchRepoInstance: PostgresActivityMatchRepository | null = null;
+export function getPostgresActivityMatchRepository(): PostgresActivityMatchRepository {
+  if (!_postgresActivityMatchRepoInstance) {
+    _postgresActivityMatchRepoInstance = new PostgresActivityMatchRepository();
+  }
+  return _postgresActivityMatchRepoInstance;
+}
+
+export const activityMatchRepository: ActivityMatchRepository = new Proxy(Object.create(sqliteActivityMatchRepository) as ActivityMatchRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresActivityMatchRepository() : sqliteActivityMatchRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

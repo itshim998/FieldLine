@@ -392,4 +392,29 @@ export class SqliteEvidenceRepository implements EvidenceRepository {
   }
 }
 
-export const evidenceRepository: EvidenceRepository = new SqliteEvidenceRepository();
+export const sqliteEvidenceRepository: EvidenceRepository = new SqliteEvidenceRepository();
+
+import { PostgresEvidenceRepository } from './postgres/postgres-evidence.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresEvidenceRepoInstance: PostgresEvidenceRepository | null = null;
+export function getPostgresEvidenceRepository(): PostgresEvidenceRepository {
+  if (!_postgresEvidenceRepoInstance) {
+    _postgresEvidenceRepoInstance = new PostgresEvidenceRepository();
+  }
+  return _postgresEvidenceRepoInstance;
+}
+
+export const evidenceRepository: EvidenceRepository = new Proxy(Object.create(sqliteEvidenceRepository) as EvidenceRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresEvidenceRepository() : sqliteEvidenceRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

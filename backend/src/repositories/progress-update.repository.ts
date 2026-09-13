@@ -418,4 +418,29 @@ export class SqliteProgressUpdateRepository implements ProgressUpdateRepository 
   }
 }
 
-export const progressUpdateRepository: ProgressUpdateRepository = new SqliteProgressUpdateRepository();
+export const sqliteProgressUpdateRepository: ProgressUpdateRepository = new SqliteProgressUpdateRepository();
+
+import { PostgresProgressUpdateRepository } from './postgres/postgres-progress-update.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresProgressUpdateRepoInstance: PostgresProgressUpdateRepository | null = null;
+export function getPostgresProgressUpdateRepository(): PostgresProgressUpdateRepository {
+  if (!_postgresProgressUpdateRepoInstance) {
+    _postgresProgressUpdateRepoInstance = new PostgresProgressUpdateRepository();
+  }
+  return _postgresProgressUpdateRepoInstance;
+}
+
+export const progressUpdateRepository: ProgressUpdateRepository = new Proxy(Object.create(sqliteProgressUpdateRepository) as ProgressUpdateRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresProgressUpdateRepository() : sqliteProgressUpdateRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

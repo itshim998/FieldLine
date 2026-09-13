@@ -53,10 +53,10 @@ export function createJobRouter(service: JobService = defaultJobService): Router
   router.get(
     '/projects/:projectId/jobs/:jobId',
     validateParams(jobParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, jobId } = req.params;
-        const job = service.getJob(projectId, jobId);
+        const job = await service.getJob(projectId, jobId);
         res.status(200).json({ job: formatJobResponse(job) });
       } catch (error) {
         next(error);
@@ -69,11 +69,11 @@ export function createJobRouter(service: JobService = defaultJobService): Router
     '/projects/:projectId/jobs',
     validateParams(jobProjectIdParamSchema),
     validateQuery(listJobsQuerySchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
         const jobType = req.query.type as 'document_ingestion' | undefined;
-        const jobs = service.listJobs(projectId, jobType);
+        const jobs = await service.listJobs(projectId, jobType);
         res.status(200).json({ jobs: jobs.map(formatJobResponse) });
       } catch (error) {
         next(error);

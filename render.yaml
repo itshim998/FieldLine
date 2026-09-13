@@ -17,8 +17,12 @@ services:
         sync: false
       - key: AUTO_SEED_DEMO
         value: "true"
-      - key: DATABASE_PATH
-        value: ./database/fieldline.db
+      - key: DATABASE_PROVIDER
+        value: postgres
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SSL
+        value: "true"
       - key: UPLOAD_DIR
         value: ./uploads
       - key: EMAIL_ENABLED

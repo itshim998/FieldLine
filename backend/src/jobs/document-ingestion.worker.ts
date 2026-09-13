@@ -86,18 +86,18 @@ export class DocumentIngestionWorker {
       if (!payload || typeof payload.evidenceId !== 'string' || !payload.evidenceId.trim()) {
         const errorMsg = 'Malformed job payload: missing or invalid evidenceId';
         logger.warn(`DocumentIngestionWorker: ${errorMsg} on job ${jobId}`);
-        this.jobRepo.markFailed(jobId, errorMsg);
+        await this.jobRepo.markFailed(jobId, errorMsg);
         return;
       }
 
       const evidenceId = payload.evidenceId.trim();
 
       // 2. Verify evidence still exists and belongs to job.projectId
-      const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, job.projectId);
+      const evidence = await this.evidenceRepo.getByIdAndProjectId(evidenceId, job.projectId);
       if (!evidence) {
         const errorMsg = `Evidence '${evidenceId}' not found for project '${job.projectId}'`;
         logger.warn(`DocumentIngestionWorker: ${errorMsg} on job ${jobId}`);
-        this.jobRepo.markFailed(jobId, errorMsg);
+        await this.jobRepo.markFailed(jobId, errorMsg);
         return;
       }
 
@@ -113,7 +113,7 @@ export class DocumentIngestionWorker {
       };
 
       // 5. Mark job completed
-      this.jobRepo.markCompleted(jobId, boundedResult);
+      await this.jobRepo.markCompleted(jobId, boundedResult);
       logger.info(`DocumentIngestionWorker: Job ${jobId} successfully completed for evidence ${evidenceId}`);
     } catch (err: unknown) {
       const payload = job.payload as DocumentIngestionJobPayload | undefined;
@@ -122,14 +122,14 @@ export class DocumentIngestionWorker {
       // Check if project state was already committed to prevent corrupting valid state
       if (evidenceId) {
         try {
-          const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, job.projectId);
+          const evidence = await this.evidenceRepo.getByIdAndProjectId(evidenceId, job.projectId);
           if (evidence?.progressUpdateId) {
             logger.warn(
               `DocumentIngestionWorker: Project state was already committed for evidence ${evidenceId} (progressUpdateId: ${evidence.progressUpdateId}). Preserving durable project truth.`
             );
             // Attempt to repair job status to completed
             try {
-              this.jobRepo.markCompleted(jobId, {
+              await this.jobRepo.markCompleted(jobId, {
                 evidenceId,
                 progressUpdateId: evidence.progressUpdateId,
                 matchCount: 0,
@@ -148,7 +148,7 @@ export class DocumentIngestionWorker {
       const rawError = err instanceof Error ? err.message : String(err);
       const sanitized = sanitizeErrorMessage(rawError);
       logger.error(`DocumentIngestionWorker: Job ${jobId} processing failed: ${sanitized}`);
-      this.jobRepo.markFailed(jobId, sanitized);
+      await this.jobRepo.markFailed(jobId, sanitized);
     }
   }
 }

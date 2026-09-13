@@ -1,7 +1,12 @@
 import { createApp, attachLiveSessionWebSocket } from './app.js';
 import { createLiveToolExecutor } from './ai/live/live-tool-handlers.js';
 import { env } from './config/env.js';
-import { initDatabase, closeDatabase } from './database/db.js';
+import {
+  initActiveDatabase,
+  closeActiveDatabase,
+  isPostgresDatabase,
+  runPostgresMigrations
+} from './database/provider.js';
 import { projectRepository } from './repositories/project.repository.js';
 import { jobRepository } from './jobs/job.repository.js';
 import { workerRunner } from './jobs/worker-runner.js';
@@ -14,13 +19,21 @@ async function startServer(): Promise<void> {
   try {
     console.log('⚡ Starting FieldLine Server...');
     
-    // Initialize SQLite database
-    initDatabase();
-    console.log(`📦 SQLite database initialized at: ${env.DATABASE_PATH}`);
+    // Initialize database provider (SQLite or PostgreSQL)
+    if (isPostgresDatabase()) {
+      console.log('🐘 Initializing PostgreSQL database connection...');
+      await initActiveDatabase();
+      console.log('📦 Running PostgreSQL schema migrations...');
+      const migResult = await runPostgresMigrations();
+      console.log(`✅ PostgreSQL ready. Applied ${migResult.applied.length} migration(s).`);
+    } else {
+      initActiveDatabase();
+      console.log(`📦 SQLite database initialized at: ${env.DATABASE_PATH}`);
+    }
 
     // Auto-seed golden demo dataset if requested and database is empty
     if (env.AUTO_SEED_DEMO) {
-      const projectCount = projectRepository.count();
+      const projectCount = await projectRepository.count();
       if (projectCount === 0) {
         console.log('🌱 Fresh/empty database detected. Auto-seeding Golden Demo Dataset...');
         try {
@@ -34,20 +47,22 @@ async function startServer(): Promise<void> {
       }
     }
 
-    // Reconcile any legacy evidence rows without content hashes
-    const reconciliation = reconcileLegacyEvidenceHashes();
-    if (reconciliation.reconciledCount > 0) {
-      console.log(`🔍 Reconciled ${reconciliation.reconciledCount} legacy evidence content hashes.`);
+    // Reconcile any legacy evidence rows without content hashes (SQLite only)
+    if (!isPostgresDatabase()) {
+      const reconciliation = reconcileLegacyEvidenceHashes();
+      if (reconciliation.reconciledCount > 0) {
+        console.log(`🔍 Reconciled ${reconciliation.reconciledCount} legacy evidence content hashes.`);
+      }
     }
 
     // Recover any abandoned/stale processing jobs from a previous crash/restart
-    const recoveredCount = jobRepository.requeueStaleProcessingJobs(5 * 60 * 1000);
+    const recoveredCount = await jobRepository.requeueStaleProcessingJobs(5 * 60 * 1000);
     if (recoveredCount > 0) {
       console.log(`🔄 Recovered ${recoveredCount} stale processing jobs to queued state.`);
     }
 
     // Recover any abandoned/stale notification leases from a previous crash/restart
-    const recoveredNotifs = notificationOutboxRepository.requeueStaleProcessing(
+    const recoveredNotifs = await notificationOutboxRepository.requeueStaleProcessing(
       env.NOTIFICATION_LEASE_TIMEOUT_MS ?? 5 * 60 * 1000
     );
     if (recoveredNotifs > 0) {
@@ -98,9 +113,9 @@ async function startServer(): Promise<void> {
       console.log('👷 Background workers stopped cleanly.');
 
       // 3. Close HTTP server
-      server.close(() => {
+      server.close(async () => {
         // 4. Close database connection
-        closeDatabase();
+        await closeActiveDatabase();
         console.log('🔒 Database connection closed. Server exited cleanly.');
         process.exit(0);
       });

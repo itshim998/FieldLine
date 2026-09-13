@@ -14,6 +14,20 @@ async function resetDemoEnvironment(): Promise<void> {
   const rootDir = process.cwd();
   const env = getValidatedEnv();
 
+  // Safety guard: prevent accidental wiping of PostgreSQL production databases
+  if (env.DATABASE_PROVIDER === 'postgres') {
+    if (!process.argv.includes('--allow-remote-reset')) {
+      console.error('🛑 SAFETY GUARD PREVENTED DEMO RESET:');
+      console.error('DATABASE_PROVIDER is currently configured as "postgres".');
+      console.error('The default `npm run demo:reset` is strictly intended for local SQLite demo resets to prevent accidental data loss in PostgreSQL environments.');
+      console.error('If you specifically intend to reset a remote PostgreSQL database, you must provide the explicit `--allow-remote-reset` flag:');
+      console.error('  npx tsx scripts/demo-reset.ts --allow-remote-reset');
+      console.error('Otherwise, set DATABASE_PROVIDER=sqlite (default) to reset the local SQLite database.');
+      process.exit(1);
+    }
+    console.warn('⚠️ WARNING: --allow-remote-reset flag detected.');
+  }
+
   // 1. Close existing DB if open
   closeDatabase();
 

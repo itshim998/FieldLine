@@ -84,7 +84,7 @@ export class WorkerRunner {
 
     this.isProcessing = true;
     try {
-      const claimedJob = this.jobRepo.claimNextQueued();
+      const claimedJob = await this.jobRepo.claimNextQueued();
       if (!claimedJob) {
         return false;
       }
@@ -93,7 +93,7 @@ export class WorkerRunner {
         await this.docIngestionWorker.process(claimedJob);
       } else {
         logger.warn(`WorkerRunner: Unrecognized job type '${claimedJob.jobType}' on job ${claimedJob.id}`);
-        this.jobRepo.markFailed(claimedJob.id, `Unrecognized job type: ${claimedJob.jobType}`);
+        await this.jobRepo.markFailed(claimedJob.id, `Unrecognized job type: ${claimedJob.jobType}`);
       }
 
       return true;

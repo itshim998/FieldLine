@@ -65,7 +65,7 @@ export class DefaultJobService implements JobService {
       fileType: evidence.fileType
     });
 
-    const { job, isNew } = this.jobRepo.findOrCreateDocumentIngestionJob(
+    const { job, isNew } = await this.jobRepo.findOrCreateDocumentIngestionJob(
       projectId,
       evidenceId,
       summary,

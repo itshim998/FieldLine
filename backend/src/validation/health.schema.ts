@@ -9,8 +9,9 @@ export const healthResponseSchema = z.object({
   environment: z.string(),
   database: z.object({
     status: z.enum(['connected', 'disconnected', 'error']),
-    type: z.literal('sqlite'),
-    path: z.string()
+    type: z.enum(['sqlite', 'postgres']),
+    path: z.string().optional(),
+    provider: z.string().optional()
   }),
   metadata: z.record(z.string()).optional()
 });

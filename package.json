@@ -30,7 +30,12 @@
     "ml:train:anomaly": "python scripts/ml/train_anomaly_model.py",
     "ml:train": "npm run ml:train:match && npm run ml:train:anomaly",
     "ml:evaluate": "python scripts/ml/evaluate_models.py",
-    "ml:verify": "tsx scripts/ml/verify-production-models.ts"
+    "ml:verify": "tsx scripts/ml/verify-production-models.ts",
+    "pg:init": "tsx scripts/pg-init.ts",
+    "pg:import": "tsx scripts/pg-import.ts",
+    "pg:seed": "tsx scripts/pg-seed.ts",
+    "pg:verify": "tsx scripts/pg-verify.ts",
+    "pg:compare": "tsx scripts/pg-compare.ts"
   },
   "dependencies": {
     "@google/genai": "^2.19.0",
@@ -41,6 +46,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "multer": "^2.2.0",
+    "pg": "^8.23.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "tesseract.js": "^7.0.0",
@@ -57,6 +63,7 @@
     "@types/express": "^4.17.21",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.13.5",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@types/supertest": "^6.0.2",
@@ -65,6 +72,7 @@
     "concurrently": "^9.1.2",
     "happy-dom": "^20.13.2",
     "lucide-react": "^0.475.0",
+    "pg-mem": "^3.0.14",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "supertest": "^7.0.0",

@@ -98,7 +98,16 @@ export function parseAnomalyAlertRecipients(raw?: string | null): string[] {
 export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  DATABASE_PROVIDER: z.enum(['sqlite', 'postgres']).default('sqlite'),
   DATABASE_PATH: z.string().min(1).default('./database/fieldline.db'),
+  DATABASE_URL: z.string().optional(),
+  DATABASE_SSL: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
+    if (typeof val === 'boolean') return val;
+    return true;
+  }, z.boolean()).default(true),
+  DATABASE_POOL_MIN: z.coerce.number().int().positive().default(1),
+  DATABASE_POOL_MAX: z.coerce.number().int().positive().default(5),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
   VITE_PORT: z.coerce.number().int().positive().default(3000),
   AI_PROVIDER: z.enum(['mock', 'gemini', 'groq']).default('mock'),
@@ -135,6 +144,16 @@ export const envSchema = z.object({
     parsedAlertRecipients: alertRecipients
   };
 }).superRefine((data, ctx) => {
+  if (data.DATABASE_PROVIDER === 'postgres') {
+    if (!data.DATABASE_URL || data.DATABASE_URL.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'DATABASE_URL is required when DATABASE_PROVIDER=postgres',
+        path: ['DATABASE_URL']
+      });
+    }
+  }
+
   const hasGeminiKey = (data.GEMINI_API_KEY && data.GEMINI_API_KEY.trim().length > 0) || (data.geminiApiKeys && data.geminiApiKeys.length > 0);
   if (data.AI_PROVIDER === 'gemini' && !hasGeminiKey) {
     ctx.addIssue({

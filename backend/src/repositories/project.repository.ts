@@ -178,4 +178,29 @@ export class SqliteProjectRepository implements ProjectRepository {
   }
 }
 
-export const projectRepository: ProjectRepository = new SqliteProjectRepository();
+export const sqliteProjectRepository: ProjectRepository = new SqliteProjectRepository();
+
+import { PostgresProjectRepository } from './postgres/postgres-project.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresProjectRepoInstance: PostgresProjectRepository | null = null;
+export function getPostgresProjectRepository(): PostgresProjectRepository {
+  if (!_postgresProjectRepoInstance) {
+    _postgresProjectRepoInstance = new PostgresProjectRepository();
+  }
+  return _postgresProjectRepoInstance;
+}
+
+export const projectRepository: ProjectRepository = new Proxy(Object.create(sqliteProjectRepository) as ProjectRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresProjectRepository() : sqliteProjectRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

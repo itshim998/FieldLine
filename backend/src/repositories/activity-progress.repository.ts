@@ -454,5 +454,30 @@ export class SqliteActivityProgressRepository implements ActivityProgressReposit
   }
 }
 
-export const activityProgressRepository: ActivityProgressRepository =
+export const sqliteActivityProgressRepository: ActivityProgressRepository =
   new SqliteActivityProgressRepository();
+
+import { PostgresActivityProgressRepository } from './postgres/postgres-activity-progress.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresActivityProgressRepoInstance: PostgresActivityProgressRepository | null = null;
+export function getPostgresActivityProgressRepository(): PostgresActivityProgressRepository {
+  if (!_postgresActivityProgressRepoInstance) {
+    _postgresActivityProgressRepoInstance = new PostgresActivityProgressRepository();
+  }
+  return _postgresActivityProgressRepoInstance;
+}
+
+export const activityProgressRepository: ActivityProgressRepository = new Proxy(Object.create(sqliteActivityProgressRepository) as ActivityProgressRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresActivityProgressRepository() : sqliteActivityProgressRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

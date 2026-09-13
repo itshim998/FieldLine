@@ -285,4 +285,29 @@ export class SqliteScheduleRepository implements ScheduleRepository {
   }
 }
 
-export const scheduleRepository: ScheduleRepository = new SqliteScheduleRepository();
+export const sqliteScheduleRepository: ScheduleRepository = new SqliteScheduleRepository();
+
+import { PostgresScheduleRepository } from './postgres/postgres-schedule.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresScheduleRepoInstance: PostgresScheduleRepository | null = null;
+export function getPostgresScheduleRepository(): PostgresScheduleRepository {
+  if (!_postgresScheduleRepoInstance) {
+    _postgresScheduleRepoInstance = new PostgresScheduleRepository();
+  }
+  return _postgresScheduleRepoInstance;
+}
+
+export const scheduleRepository: ScheduleRepository = new Proxy(Object.create(sqliteScheduleRepository) as ScheduleRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresScheduleRepository() : sqliteScheduleRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

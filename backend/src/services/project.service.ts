@@ -31,33 +31,47 @@ export class DefaultProjectService implements ProjectService {
       targetEndDate: input.targetEndDate || null
     };
 
-    return this.projectRepo.create(formattedInput);
+    return this.projectRepo.create(formattedInput) as any;
   }
 
   listProjects(): Project[] {
-    return this.projectRepo.listAll();
+    return this.projectRepo.listAll() as any;
   }
 
   getProject(id: string): Project {
-    const project = this.projectRepo.getById(id);
-    if (!project) {
+    const res: any = this.projectRepo.getById(id);
+    if (res && typeof res.then === 'function') {
+      return res.then((project: any) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${id}' not found`);
+        }
+        return project;
+      }) as any;
+    }
+    if (!res) {
       throw new NotFoundError(`Project with ID '${id}' not found`);
     }
-    return project;
+    return res;
   }
 
   getProjectByCode(code: string): Project {
-    const project = this.projectRepo.getByCode(code.trim().toUpperCase());
-    if (!project) {
+    const res: any = this.projectRepo.getByCode(code.trim().toUpperCase());
+    if (res && typeof res.then === 'function') {
+      return res.then((project: any) => {
+        if (!project) {
+          throw new NotFoundError(`Project with code '${code}' not found`);
+        }
+        return project;
+      }) as any;
+    }
+    if (!res) {
       throw new NotFoundError(`Project with code '${code}' not found`);
     }
-    return project;
+    return res;
   }
 
   updateProject(id: string, input: UpdateProjectInput): Project {
-    // Verify existence first
-    this.getProject(id);
-
+    const existing: any = this.getProject(id);
     const formattedInput: UpdateProjectInput = {
       ...input,
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
@@ -70,14 +84,35 @@ export class DefaultProjectService implements ProjectService {
       ...(input.targetEndDate !== undefined ? { targetEndDate: input.targetEndDate || null } : {})
     };
 
-    return this.projectRepo.update(id, formattedInput);
+    if (existing && typeof existing.then === 'function') {
+      return existing.then(() => this.projectRepo.update(id, formattedInput)) as any;
+    }
+    return this.projectRepo.update(id, formattedInput) as any;
   }
 
   deleteProject(id: string): boolean {
-    // Verify existence first
-    this.getProject(id);
+    const existing: any = this.getProject(id);
+    if (existing && typeof existing.then === 'function') {
+      return existing.then(() => {
+        const success: any = this.projectRepo.delete(id);
+        if (success && typeof success.then === 'function') {
+          return success.then((s: any) => {
+            if (!s) throw new NotFoundError(`Project with ID '${id}' could not be deleted`);
+            return true;
+          });
+        }
+        if (!success) throw new NotFoundError(`Project with ID '${id}' could not be deleted`);
+        return true;
+      }) as any;
+    }
 
-    const success = this.projectRepo.delete(id);
+    const success: any = this.projectRepo.delete(id);
+    if (success && typeof success.then === 'function') {
+      return success.then((s: any) => {
+        if (!s) throw new NotFoundError(`Project with ID '${id}' could not be deleted`);
+        return true;
+      }) as any;
+    }
     if (!success) {
       throw new NotFoundError(`Project with ID '${id}' could not be deleted`);
     }

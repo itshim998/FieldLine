@@ -453,9 +453,12 @@ describe('Phase 31 — Canonical Truth Boundary Certification', () => {
       }
     }
 
-    // Exactly one file may contain INSERT INTO activity_progress: activity-progress.repository.ts
-    expect(filesWithInsert.length).toBe(1);
-    expect(filesWithInsert[0]).toContain('activity-progress.repository.ts');
+    // Only activity-progress repositories (SQLite and PostgreSQL implementations) may contain INSERT INTO activity_progress
+    expect(filesWithInsert.length).toBeGreaterThanOrEqual(1);
+    expect(filesWithInsert.length).toBeLessThanOrEqual(2);
+    for (const file of filesWithInsert) {
+      expect(file).toContain('activity-progress.repository.ts');
+    }
 
     // Zero files may contain UPDATE activity_progress (append-only table invariant)
     expect(filesWithUpdate.length).toBe(0);

@@ -200,5 +200,30 @@ export class SqliteOperationalBlockerRepository implements OperationalBlockerRep
   }
 }
 
-export const operationalBlockerRepository: OperationalBlockerRepository =
+export const sqliteOperationalBlockerRepository: OperationalBlockerRepository =
   new SqliteOperationalBlockerRepository();
+
+import { PostgresOperationalBlockerRepository } from './postgres/postgres-operational-blocker.repository.js';
+import { env } from '../config/env.js';
+
+let _postgresOperationalBlockerRepoInstance: PostgresOperationalBlockerRepository | null = null;
+export function getPostgresOperationalBlockerRepository(): PostgresOperationalBlockerRepository {
+  if (!_postgresOperationalBlockerRepoInstance) {
+    _postgresOperationalBlockerRepoInstance = new PostgresOperationalBlockerRepository();
+  }
+  return _postgresOperationalBlockerRepoInstance;
+}
+
+export const operationalBlockerRepository: OperationalBlockerRepository = new Proxy(Object.create(sqliteOperationalBlockerRepository) as OperationalBlockerRepository, {
+  get(target, prop, receiver) {
+    if (Object.prototype.hasOwnProperty.call(target, prop)) {
+      return Reflect.get(target, prop, receiver);
+    }
+    const activeRepo: any = env.DATABASE_PROVIDER === 'postgres' ? getPostgresOperationalBlockerRepository() : sqliteOperationalBlockerRepository;
+    const val = Reflect.get(activeRepo, prop, receiver);
+    if (typeof val === 'function') {
+      return val.bind(activeRepo);
+    }
+    return val;
+  }
+});

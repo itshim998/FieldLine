@@ -17,14 +17,14 @@ export function createProjectRouter(service: ProjectService = projectService): R
   // GET /projects - List all projects (supports ?autoSeed=true for on-demand self-healing)
   router.get('/projects', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      let projects = service.listProjects();
+      let projects = await service.listProjects();
 
       // On-demand self-healing auto-seed when requested via ?autoSeed=true
       if (projects.length === 0 && req.query.autoSeed === 'true' && env.AUTO_SEED_DEMO) {
         logger.info('🌱 Empty project list with ?autoSeed=true detected. Auto-seeding Golden Demo...');
         try {
           await seedGoldenDemo();
-          projects = service.listProjects();
+          projects = await service.listProjects();
         } catch (seedErr) {
           logger.error('⚠️ On-demand golden demo seeding encountered an error:', seedErr);
         }
@@ -40,9 +40,9 @@ export function createProjectRouter(service: ProjectService = projectService): R
   router.post(
     '/projects',
     validateBody(createProjectSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
-        const project = service.createProject(req.body);
+        const project = await service.createProject(req.body);
         res.status(201).json({ project });
       } catch (error) {
         next(error);
@@ -55,10 +55,10 @@ export function createProjectRouter(service: ProjectService = projectService): R
     '/projects/:projectId',
     optionalAuthenticateSession,
     validateParams(projectIdParamSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        const project = service.getProject(projectId);
+        const project = await service.getProject(projectId);
         res.status(200).json({ project });
       } catch (error) {
         next(error);
@@ -71,10 +71,10 @@ export function createProjectRouter(service: ProjectService = projectService): R
     '/projects/:projectId',
     requireRole(['admin']),
     validateRequest({ params: projectIdParamSchema, body: updateProjectSchema }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        const project = service.updateProject(projectId, req.body);
+        const project = await service.updateProject(projectId, req.body);
         res.status(200).json({ project });
       } catch (error) {
         next(error);
@@ -87,10 +87,10 @@ export function createProjectRouter(service: ProjectService = projectService): R
     '/projects/:projectId',
     requireRole(['admin']),
     validateParams(projectIdParamSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        service.deleteProject(projectId);
+        await service.deleteProject(projectId);
         res.status(200).json({
           success: true,
           message: 'Project deleted successfully'
