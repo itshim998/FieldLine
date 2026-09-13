@@ -24,11 +24,13 @@ export interface VarianceCalculation {
   varianceState: VarianceState;
 }
 
+import { MaybePromise } from '../../database/provider.js';
+
 export interface ProgressSnapshotInput {
   projectId: string;
   asOfDate?: string;
 }
 
 export interface ProgressSnapshotService {
-  getProgressSnapshot(projectId: string, asOfDate?: string): ProjectProgressSnapshot;
+  getProgressSnapshot(projectId: string, asOfDate?: string): MaybePromise<ProjectProgressSnapshot>;
 }

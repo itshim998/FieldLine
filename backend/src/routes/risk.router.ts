@@ -24,12 +24,12 @@ export function createRiskRouter(
       params: riskStatusParamsSchema,
       query: riskStatusQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
         const asOfDate = req.query.asOfDate as string | undefined;
 
-        const result = service.getProjectRiskStatus(projectId, asOfDate);
+        const result = await service.getProjectRiskStatus(projectId, asOfDate);
 
         res.status(200).json(result);
       } catch (error) {

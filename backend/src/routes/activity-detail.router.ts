@@ -24,12 +24,12 @@ export function createActivityDetailRouter(
       params: activityDetailParamsSchema,
       query: activityDetailQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, activityId } = req.params;
         const query = req.query as unknown as ActivityDetailQueryDto;
 
-        const detail = service.getActivityDetail(projectId, activityId, {
+        const detail = await service.getActivityDetail(projectId, activityId, {
           asOfDate: query.asOfDate
         });
 

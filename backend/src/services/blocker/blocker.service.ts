@@ -49,12 +49,12 @@ export class BlockerService {
     this.projectEventRepo = deps?.projectEventRepo || defaultProjectEventRepo;
   }
 
-  reportBlocker(
+  async reportBlocker(
     projectId: string,
     input: CreateBlockerDto,
     session?: SessionIdentity
-  ): OperationalBlocker {
-    const project = this.projectRepo.getById(projectId);
+  ): Promise<OperationalBlocker> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
@@ -65,13 +65,13 @@ export class BlockerService {
 
     if (input.activityId) {
       // Check direct ID or external ID within the project
-      let act = this.activityRepo.getById(input.activityId);
+      let act = await this.activityRepo.getById(input.activityId);
       if (act && act.projectId === projectId) {
         resolvedActivityId = act.id;
         actName = act.name;
         actExternalId = act.externalId;
       } else {
-        const projectActivities = this.activityRepo.listByProjectId(projectId);
+        const projectActivities = await this.activityRepo.listByProjectId(projectId);
         const matchByExt = projectActivities.find(
           (a) => a.externalId.toLowerCase() === input.activityId?.toLowerCase()
         );
@@ -89,7 +89,7 @@ export class BlockerService {
 
     const reporterName = input.reporterName || session?.displayName || 'Worker Crew';
 
-    const blocker = this.blockerRepo.create({
+    const blocker = await this.blockerRepo.create({
       projectId,
       activityId: resolvedActivityId,
       category: input.category,
@@ -100,7 +100,7 @@ export class BlockerService {
 
     // Record auditable project event
     const summaryTarget = actExternalId ? ` on ${actExternalId} (${actName})` : ' on General Site';
-    this.projectEventRepo.create({
+    await this.projectEventRepo.create({
       projectId,
       eventType: 'blocker_reported',
       entityType: 'operational_blocker',
@@ -123,29 +123,29 @@ export class BlockerService {
     return blocker;
   }
 
-  listActiveByProject(projectId: string): OperationalBlocker[] {
-    const project = this.projectRepo.getById(projectId);
+  async listActiveByProject(projectId: string): Promise<OperationalBlocker[]> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
 
-    return this.blockerRepo.listActiveByProject(projectId);
+    return await this.blockerRepo.listActiveByProject(projectId);
   }
 
-  listByProject(
+  async listByProject(
     projectId: string,
     options?: { status?: BlockerStatus; activityId?: string }
-  ): OperationalBlocker[] {
-    const project = this.projectRepo.getById(projectId);
+  ): Promise<OperationalBlocker[]> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
 
     let targetActivityId = options?.activityId;
     if (targetActivityId) {
-      const act = this.activityRepo.getById(targetActivityId);
+      const act = await this.activityRepo.getById(targetActivityId);
       if (!act) {
-        const projectActivities = this.activityRepo.listByProjectId(projectId);
+        const projectActivities = await this.activityRepo.listByProjectId(projectId);
         const matchByExt = projectActivities.find(
           (a) => a.externalId.toLowerCase() === targetActivityId?.toLowerCase()
         );
@@ -155,28 +155,28 @@ export class BlockerService {
       }
     }
 
-    return this.blockerRepo.listByProjectId(projectId, {
+    return await this.blockerRepo.listByProjectId(projectId, {
       status: options?.status,
       activityId: targetActivityId
     });
   }
 
-  listByActivity(projectId: string, activityId: string): OperationalBlocker[] {
-    return this.listByProject(projectId, { activityId });
+  async listByActivity(projectId: string, activityId: string): Promise<OperationalBlocker[]> {
+    return await this.listByProject(projectId, { activityId });
   }
 
-  resolveBlocker(
+  async resolveBlocker(
     projectId: string,
     blockerId: string,
     input?: ResolveBlockerDto,
     session?: SessionIdentity
-  ): OperationalBlocker {
-    const project = this.projectRepo.getById(projectId);
+  ): Promise<OperationalBlocker> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
 
-    const blocker = this.blockerRepo.findById(blockerId);
+    const blocker = await this.blockerRepo.findById(blockerId);
     if (!blocker || blocker.projectId !== projectId) {
       throw new NotFoundError(
         `Operational blocker '${blockerId}' not found in project '${projectId}'`
@@ -187,13 +187,13 @@ export class BlockerService {
       return blocker;
     }
 
-    const resolved = this.blockerRepo.resolve(blockerId, projectId, input?.resolvedAt);
+    const resolved = await this.blockerRepo.resolve(blockerId, projectId, input?.resolvedAt);
     if (!resolved) {
       throw new NotFoundError(`Operational blocker '${blockerId}' could not be resolved`);
     }
 
     // Record auditable project event
-    this.projectEventRepo.create({
+    await this.projectEventRepo.create({
       projectId,
       eventType: 'blocker_resolved',
       entityType: 'operational_blocker',
@@ -213,19 +213,19 @@ export class BlockerService {
     return resolved;
   }
 
-  reportSafetyHazard(
+  async reportSafetyHazard(
     projectId: string,
     input: ReportHazardDto,
     session?: SessionIdentity
-  ): ProjectEvent {
-    const project = this.projectRepo.getById(projectId);
+  ): Promise<ProjectEvent> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
 
     const reporterName = input.reporterName || session?.displayName || 'Site Personnel';
 
-    const event = this.projectEventRepo.create({
+    const event = await this.projectEventRepo.create({
       projectId,
       eventType: 'safety_hazard_reported',
       entityType: 'safety_hazard',
@@ -249,13 +249,13 @@ export class BlockerService {
     return event;
   }
 
-  countByRootCause(projectId: string): Record<BlockerCategory, number> {
-    const project = this.projectRepo.getById(projectId);
+  async countByRootCause(projectId: string): Promise<Record<BlockerCategory, number>> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project '${projectId}' not found`);
     }
 
-    return this.blockerRepo.countByRootCause(projectId);
+    return await this.blockerRepo.countByRootCause(projectId);
   }
 }
 

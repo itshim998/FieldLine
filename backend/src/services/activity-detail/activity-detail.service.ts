@@ -45,7 +45,16 @@ import {
 } from './activity-detail.types.js';
 import { NotFoundError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
-import { ProgressUpdateSourceType } from '../../models/domain.types.js';
+import {
+  ProgressUpdateSourceType,
+  Activity,
+  ActivityProgress,
+  ActivityMatch,
+  ProgressUpdate,
+  ProjectProgressSnapshot,
+  ProjectRiskStatus
+} from '../../models/domain.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export class DefaultActivityDetailService implements ActivityDetailService {
   private projectRepo: ProjectRepository;
@@ -83,39 +92,151 @@ export class DefaultActivityDetailService implements ActivityDetailService {
     projectId: string,
     activityId: string,
     options?: ActivityDetailQueryOptions
-  ): ActivityDetail {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  ): MaybePromise<ActivityDetail> {
+    const canonicalAsOfDate = options?.asOfDate
+      ? validateSnapshotDate(options.asOfDate)
+      : getTodayDateString();
+
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const activity = await this.activityRepo.getByIdAndProjectId(activityId, projectId);
+        if (!activity) {
+          throw new NotFoundError(
+            `Activity with ID '${activityId}' not found for project '${projectId}'`
+          );
+        }
+        const snapshot = await this.progressSnapshotService.getProgressSnapshot(
+          projectId,
+          canonicalAsOfDate
+        );
+        const riskStatus = await this.riskClassificationService.getProjectRiskStatus(
+          projectId,
+          canonicalAsOfDate
+        );
+        const allObservations = await this.activityProgressRepo.listByActivityId(
+          activityId,
+          projectId
+        );
+        const rawMatches = await this.activityMatchRepo.listByActivityId(activityId, projectId);
+
+        const filteredObservations = allObservations
+          .filter((obs) => obs.asOfDate <= canonicalAsOfDate)
+          .sort(
+            (a, b) =>
+              a.asOfDate.localeCompare(b.asOfDate) ||
+              a.createdAt.localeCompare(b.createdAt) ||
+              a.id.localeCompare(b.id)
+          );
+
+        const updateIdSet = new Set<string>();
+        for (const obs of filteredObservations) {
+          if (obs.progressUpdateId) updateIdSet.add(obs.progressUpdateId);
+        }
+        for (const m of rawMatches) {
+          if (m.progressUpdateId) updateIdSet.add(m.progressUpdateId);
+        }
+        const uniqueUpdateIds = Array.from(updateIdSet);
+        const progressUpdateRecords = await this.progressUpdateRepo.listByIds(
+          uniqueUpdateIds,
+          projectId
+        );
+        const rawEvidence = await this.evidenceRepo.listByActivityId(activityId, projectId);
+
+        return this.composeDetail(
+          projectId,
+          activity,
+          canonicalAsOfDate,
+          snapshot,
+          riskStatus,
+          filteredObservations,
+          rawMatches,
+          progressUpdateRecords,
+          rawEvidence
+        );
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Verify activity exists and strictly belongs to the requested project
-    const activity = this.activityRepo.getByIdAndProjectId(activityId, projectId);
-    if (!activity) {
+    const activityRes = this.activityRepo.getByIdAndProjectId(activityId, projectId);
+    if (activityRes instanceof Promise) {
+      return Promise.resolve(activityRes).then((act) => {
+        if (!act) {
+          throw new NotFoundError(
+            `Activity with ID '${activityId}' not found for project '${projectId}'`
+          );
+        }
+        return this.getActivityDetail(projectId, activityId, options);
+      });
+    }
+
+    if (!activityRes) {
       throw new NotFoundError(
         `Activity with ID '${activityId}' not found for project '${projectId}'`
       );
     }
 
-    // 3. Resolve canonical snapshot date (validated via existing canonical validator)
-    const canonicalAsOfDate = options?.asOfDate
-      ? validateSnapshotDate(options.asOfDate)
-      : getTodayDateString();
+    const snapshotRes = this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
+    const riskStatusRes = this.riskClassificationService.getProjectRiskStatus(projectId, canonicalAsOfDate);
+    const allObservationsRes = this.activityProgressRepo.listByActivityId(activityId, projectId);
+    const rawMatchesRes = this.activityMatchRepo.listByActivityId(activityId, projectId);
+    const rawEvidenceRes = this.evidenceRepo.listByActivityId(activityId, projectId);
 
-    // 4. Obtain canonical Current State from Snapshot & Risk services (reusing deterministic domain logic)
-    const snapshot = this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
-    const riskStatus = this.riskClassificationService.getProjectRiskStatus(projectId, canonicalAsOfDate);
+    if (
+      snapshotRes instanceof Promise ||
+      riskStatusRes instanceof Promise ||
+      allObservationsRes instanceof Promise ||
+      rawMatchesRes instanceof Promise ||
+      rawEvidenceRes instanceof Promise
+    ) {
+      return Promise.all([
+        Promise.resolve(snapshotRes),
+        Promise.resolve(riskStatusRes),
+        Promise.resolve(allObservationsRes),
+        Promise.resolve(rawMatchesRes),
+        Promise.resolve(rawEvidenceRes)
+      ]).then(async ([snapshot, riskStatus, allObservations, rawMatches, rawEvidence]) => {
+        const filteredObservations = allObservations
+          .filter((obs) => obs.asOfDate <= canonicalAsOfDate)
+          .sort(
+            (a, b) =>
+              a.asOfDate.localeCompare(b.asOfDate) ||
+              a.createdAt.localeCompare(b.createdAt) ||
+              a.id.localeCompare(b.id)
+          );
+        const updateIdSet = new Set<string>();
+        for (const obs of filteredObservations) {
+          if (obs.progressUpdateId) updateIdSet.add(obs.progressUpdateId);
+        }
+        for (const m of rawMatches) {
+          if (m.progressUpdateId) updateIdSet.add(m.progressUpdateId);
+        }
+        const uniqueUpdateIds = Array.from(updateIdSet);
+        const progressUpdateRecords = await this.progressUpdateRepo.listByIds(
+          uniqueUpdateIds,
+          projectId
+        );
+        return this.composeDetail(
+          projectId,
+          activityRes,
+          canonicalAsOfDate,
+          snapshot,
+          riskStatus,
+          filteredObservations,
+          rawMatches,
+          progressUpdateRecords,
+          rawEvidence
+        );
+      });
+    }
 
-    const snapItem = snapshot.activities.find((a) => a.activityId === activityId);
-    const riskItem = riskStatus.activities.find((a) => a.activityId === activityId);
-
-    // 5. Query ActivityProgress history (strictly project-scoped)
-    const allObservations = this.activityProgressRepo.listByActivityId(activityId, projectId);
-
-    // Filter by historical semantic boundary (observation.asOfDate <= canonicalAsOfDate)
-    // and sort deterministically: asOfDate ASC, createdAt ASC, id ASC
-    const filteredObservations = allObservations
+    const filteredObservations = allObservationsRes
       .filter((obs) => obs.asOfDate <= canonicalAsOfDate)
       .sort(
         (a, b) =>
@@ -124,8 +245,57 @@ export class DefaultActivityDetailService implements ActivityDetailService {
           a.id.localeCompare(b.id)
       );
 
-    // 6. Query ActivityMatches (strictly project-scoped)
-    const rawMatches = this.activityMatchRepo.listByActivityId(activityId, projectId);
+    const updateIdSet = new Set<string>();
+    for (const obs of filteredObservations) {
+      if (obs.progressUpdateId) updateIdSet.add(obs.progressUpdateId);
+    }
+    for (const m of rawMatchesRes) {
+      if (m.progressUpdateId) updateIdSet.add(m.progressUpdateId);
+    }
+    const uniqueUpdateIds = Array.from(updateIdSet);
+    const progressUpdateRecordsRes = this.progressUpdateRepo.listByIds(uniqueUpdateIds, projectId);
+    if (progressUpdateRecordsRes instanceof Promise) {
+      return progressUpdateRecordsRes.then((progressUpdateRecords) =>
+        this.composeDetail(
+          projectId,
+          activityRes,
+          canonicalAsOfDate,
+          snapshotRes,
+          riskStatusRes,
+          filteredObservations,
+          rawMatchesRes,
+          progressUpdateRecords,
+          rawEvidenceRes
+        )
+      );
+    }
+
+    return this.composeDetail(
+      projectId,
+      activityRes,
+      canonicalAsOfDate,
+      snapshotRes,
+      riskStatusRes,
+      filteredObservations,
+      rawMatchesRes,
+      progressUpdateRecordsRes,
+      rawEvidenceRes
+    );
+  }
+
+  private composeDetail(
+    projectId: string,
+    activity: Activity,
+    canonicalAsOfDate: string,
+    snapshot: ProjectProgressSnapshot,
+    riskStatus: ProjectRiskStatus,
+    filteredObservations: ActivityProgress[],
+    rawMatches: ActivityMatch[],
+    progressUpdateRecords: ProgressUpdate[],
+    rawEvidence: any[]
+  ): ActivityDetail {
+    const snapItem = snapshot.activities.find((a) => a.activityId === activity.id);
+    const riskItem = riskStatus.activities.find((a) => a.activityId === activity.id);
 
     const hasAnomalyFlag = rawMatches.some(
       (m) =>
@@ -168,24 +338,8 @@ export class DefaultActivityDetailService implements ActivityDetailService {
       anomalyReasons: m.anomalyReasons ?? null
     }));
 
-    // 7. Batch lookup for relevant field progress reports (avoiding N+1 queries)
-    const updateIdSet = new Set<string>();
-    for (const obs of filteredObservations) {
-      if (obs.progressUpdateId) {
-        updateIdSet.add(obs.progressUpdateId);
-      }
-    }
-    for (const m of matches) {
-      if (m.progressUpdateId) {
-        updateIdSet.add(m.progressUpdateId);
-      }
-    }
-
-    const uniqueUpdateIds = Array.from(updateIdSet);
-    const progressUpdateRecords = this.progressUpdateRepo.listByIds(uniqueUpdateIds, projectId);
     const updateMap = new Map(progressUpdateRecords.map((u) => [u.id, u]));
 
-    // Map originating field report DTOs
     const progressUpdates: ActivityDetailProgressUpdateItem[] = progressUpdateRecords.map((u) => ({
       progressUpdateId: u.id,
       reportDate: u.reportDate,
@@ -197,7 +351,6 @@ export class DefaultActivityDetailService implements ActivityDetailService {
       createdAt: u.createdAt
     }));
 
-    // Map Timeline items resolving source from originating field report
     const timeline: ActivityDetailTimelineItem[] = filteredObservations.map((obs) => {
       let source: ProgressUpdateSourceType = 'manual';
       if (obs.progressUpdateId) {
@@ -222,8 +375,6 @@ export class DefaultActivityDetailService implements ActivityDetailService {
       };
     });
 
-    // 8. Query Evidence through traceable provenance (strictly project/activity-scoped & deduplicated)
-    const rawEvidence = this.evidenceRepo.listByActivityId(activityId, projectId);
     const seenEvidenceIds = new Set<string>();
     const evidence: ActivityDetailEvidence[] = [];
 
@@ -241,7 +392,6 @@ export class DefaultActivityDetailService implements ActivityDetailService {
       }
     }
 
-    // 9. Activity Identity section
     const activityDto: ActivityDetailActivity = {
       activityId: activity.id,
       externalId: activity.externalId,

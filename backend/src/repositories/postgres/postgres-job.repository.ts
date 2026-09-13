@@ -75,7 +75,7 @@ function mapRowToProcessingJob(row: ProcessingJobDbRow): ProcessingJob {
   };
 }
 
-export class PostgresJobRepository {
+export class PostgresJobRepository implements JobRepository {
   private poolProvider: () => pg.Pool;
 
   constructor(poolProvider?: () => pg.Pool) {

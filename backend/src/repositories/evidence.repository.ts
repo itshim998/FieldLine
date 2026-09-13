@@ -8,25 +8,27 @@ import {
 } from '../models/domain.types.js';
 import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface EvidenceRepository {
-  create(input: CreateEvidenceInput): Evidence;
+  create(input: CreateEvidenceInput): MaybePromise<Evidence>;
   createWithEvent(
     evidenceInput: CreateEvidenceInput,
     eventInput: CreateProjectEventInput
-  ): Evidence;
-  getById(id: string): Evidence | null;
-  getByIdAndProjectId(id: string, projectId: string): Evidence | null;
-  findByProjectIdAndHash(projectId: string, contentSha256: string): Evidence | null;
-  updateContentSha256(id: string, contentSha256: string): boolean;
-  listUnreconciledLegacyEvidence(): Evidence[];
-  listByProjectId(projectId: string): Evidence[];
-  listByProgressUpdateId(progressUpdateId: string, projectId?: string): Evidence[];
-  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): Evidence[];
-  listByActivityId(activityId: string, projectId: string): Evidence[];
-  countByProjectId(projectId: string): number;
-  attachToProgressUpdate(evidenceId: string, progressUpdateId: string, projectId: string): boolean;
-  delete(id: string, projectId?: string): boolean;
-  deleteByIdAndProjectId(id: string, projectId: string): boolean;
+  ): MaybePromise<Evidence>;
+  getById(id: string): MaybePromise<Evidence | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<Evidence | null>;
+  findByProjectIdAndHash(projectId: string, contentSha256: string): MaybePromise<Evidence | null>;
+  updateContentSha256(id: string, contentSha256: string): MaybePromise<boolean>;
+  listUnreconciledLegacyEvidence(): MaybePromise<Evidence[]>;
+  listByProjectId(projectId: string): MaybePromise<Evidence[]>;
+  listByProgressUpdateId(progressUpdateId: string, projectId?: string): MaybePromise<Evidence[]>;
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): MaybePromise<Evidence[]>;
+  listByActivityId(activityId: string, projectId: string): MaybePromise<Evidence[]>;
+  countByProjectId(projectId: string): MaybePromise<number>;
+  attachToProgressUpdate(evidenceId: string, progressUpdateId: string, projectId: string): MaybePromise<boolean>;
+  delete(id: string, projectId?: string): MaybePromise<boolean>;
+  deleteByIdAndProjectId(id: string, projectId: string): MaybePromise<boolean>;
 }
 
 interface EvidenceDbRow {

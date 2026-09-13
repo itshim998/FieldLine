@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
 import { Schedule, Activity, CreateScheduleInput, CreateActivityInput } from '../models/domain.types.js';
 import { ConflictError, DatabaseError } from '../errors/AppError.js';
+import { MaybePromise } from '../database/provider.js';
 
 export interface ScheduleImportDataResult {
   schedule: Schedule;
@@ -10,16 +11,16 @@ export interface ScheduleImportDataResult {
 }
 
 export interface ScheduleRepository {
-  create(input: CreateScheduleInput): Schedule;
+  create(input: CreateScheduleInput): MaybePromise<Schedule>;
   createWithActivities(
     scheduleInput: CreateScheduleInput,
     activityInputs: Omit<CreateActivityInput, 'scheduleId'>[]
-  ): ScheduleImportDataResult;
-  getById(id: string): Schedule | null;
-  getByIdAndProjectId(id: string, projectId: string): Schedule | null;
-  listByProjectId(projectId: string): Schedule[];
-  countByProjectId(projectId: string): number;
-  delete(id: string): boolean;
+  ): MaybePromise<ScheduleImportDataResult>;
+  getById(id: string): MaybePromise<Schedule | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<Schedule | null>;
+  listByProjectId(projectId: string): MaybePromise<Schedule[]>;
+  countByProjectId(projectId: string): MaybePromise<number>;
+  delete(id: string): MaybePromise<boolean>;
 }
 
 interface ScheduleDbRow {

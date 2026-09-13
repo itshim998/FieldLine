@@ -50,7 +50,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   assert(isDatabaseHealthy(), 'SQLite database is healthy and reachable');
 
   // 2. Project Invariants
-  const project = projectRepository.getByCode(goldenManifestInvariants.projectCode);
+  const project = await projectRepository.getByCode(goldenManifestInvariants.projectCode);
   assert(!!project, `Golden project '${goldenManifestInvariants.projectCode}' exists in database`);
 
   if (!project) {
@@ -61,10 +61,10 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   assert(project.name === goldenManifestInvariants.projectName, `Project name matches '${goldenManifestInvariants.projectName}'`);
 
   // 3. Schedule & Activity Invariants
-  const schedules = scheduleRepository.listByProjectId(projectId);
+  const schedules = await scheduleRepository.listByProjectId(projectId);
   assert(schedules.length === goldenManifestInvariants.scheduleCount, `Expected exactly ${goldenManifestInvariants.scheduleCount} schedule, found ${schedules.length}`);
 
-  const activities = activityRepository.listByProjectId(projectId);
+  const activities = await activityRepository.listByProjectId(projectId);
   assert(activities.length === goldenManifestInvariants.activityCount, `Expected ${goldenManifestInvariants.activityCount} activities, found ${activities.length}`);
 
   const actMap = new Map(activities.map((a) => [a.externalId, a]));
@@ -79,13 +79,13 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   assert(areas.has('Area F'), 'Area F activities exist');
 
   // 4. Progress Snapshot Invariants
-  const snapshot = progressSnapshotService.getProgressSnapshot(projectId, GOLDEN_AS_OF_DATE);
+  const snapshot = await progressSnapshotService.getProgressSnapshot(projectId, GOLDEN_AS_OF_DATE);
   assert(snapshot.summary.totalActivities === goldenManifestInvariants.activityCount, `Snapshot total activities equals ${goldenManifestInvariants.activityCount}`);
   assert(snapshot.summary.completed === goldenManifestInvariants.expectedRiskCounts.completed, `Completed activities in snapshot: ${snapshot.summary.completed} (expected ${goldenManifestInvariants.expectedRiskCounts.completed})`);
   assert(snapshot.summary.overdue === goldenManifestInvariants.expectedRiskCounts.delayed, `Overdue activities in snapshot: ${snapshot.summary.overdue} (expected ${goldenManifestInvariants.expectedRiskCounts.delayed})`);
 
   // 5. Risk Classification Engine Invariants
-  const risks = riskClassificationService.getProjectRiskStatus(projectId, GOLDEN_AS_OF_DATE);
+  const risks = await riskClassificationService.getProjectRiskStatus(projectId, GOLDEN_AS_OF_DATE);
   assert(risks.summary.delayed === goldenManifestInvariants.expectedRiskCounts.delayed, `Risk engine delayed count: ${risks.summary.delayed} (expected ${goldenManifestInvariants.expectedRiskCounts.delayed})`);
   assert(risks.summary.atRisk === goldenManifestInvariants.expectedRiskCounts.atRisk, `Risk engine at-risk count: ${risks.summary.atRisk} (expected ${goldenManifestInvariants.expectedRiskCounts.atRisk})`);
   assert(risks.summary.completed === goldenManifestInvariants.expectedRiskCounts.completed, `Risk engine completed count: ${risks.summary.completed} (expected ${goldenManifestInvariants.expectedRiskCounts.completed})`);
@@ -111,7 +111,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   }
 
   // 6. Project Intelligence Invariants
-  const intel = projectIntelligenceService.getIntelligence(projectId, {
+  const intel = await projectIntelligenceService.getIntelligence(projectId, {
     asOfDate: GOLDEN_AS_OF_DATE,
     recentDays: 7,
     approachingDays: 14
@@ -127,7 +127,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   }
 
   // 7. Dashboard API Invariants
-  const dashboard = projectDashboardService.getDashboard(projectId, {
+  const dashboard = await projectDashboardService.getDashboard(projectId, {
     asOfDate: GOLDEN_AS_OF_DATE
   });
   assert(dashboard.project.code === goldenManifestInvariants.projectCode, 'Dashboard project code matches');
@@ -154,7 +154,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   assert(assistantTank.resolvedActivity !== null || assistantTank.grounded === true, 'Assistant resolves crude pump query to project state');
 
   // 9. Physical Evidence & Filesystem Invariants
-  const evidenceList = evidenceRepository.listByProjectId(projectId);
+  const evidenceList = await evidenceRepository.listByProjectId(projectId);
   assert(evidenceList.length === goldenManifestInvariants.expectedEvidenceFileNames.length, `Expected ${goldenManifestInvariants.expectedEvidenceFileNames.length} evidence items, found ${evidenceList.length}`);
 
   for (const ev of evidenceList) {
@@ -163,7 +163,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   }
 
   // 10. Project Accounts & Two-Account Authentication Invariants (Pass 28)
-  const accounts = projectAccountRepository.listByProjectId(projectId);
+  const accounts = await projectAccountRepository.listByProjectId(projectId);
   assert(accounts.length === 2, `Project has exactly 2 accounts, found ${accounts.length}`);
 
   const workerAcc = accounts.find((a) => a.accountType === 'worker');
@@ -217,7 +217,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   assert(invalidPasscodeRejected, 'Invalid worker passcode is rejected cleanly');
 
   // 11. Operational Blockers Invariants (Pass 33 & 36)
-  const activeBlockers = operationalBlockerRepository.listActiveByProject(projectId);
+  const activeBlockers = await operationalBlockerRepository.listActiveByProject(projectId);
   assert(
     activeBlockers.length === goldenManifestInvariants.expectedActiveBlockersCount,
     `Active operational blockers count equals ${goldenManifestInvariants.expectedActiveBlockersCount} (found ${activeBlockers.length})`
@@ -247,7 +247,7 @@ export async function verifyGoldenDemoEnvironment(): Promise<VerificationResult>
   );
 
   // 12. Dual-Role & Operational Projection Invariants (Pass 31 & 36)
-  const workerTasks = workerOperationalService.getOperationalTasks(projectId, {
+  const workerTasks = await workerOperationalService.getOperationalTasks(projectId, {
     asOfDate: GOLDEN_AS_OF_DATE,
     scope: 'all'
   });

@@ -24,53 +24,78 @@ export async function getAppliedPostgresMigrations(client: PoolClient | Pool): P
   return result.rows.map((r: { name: string }) => r.name);
 }
 
+let activeMigrationPromise: Promise<PostgresMigrationResult> | null = null;
+
 export async function runPostgresMigrations(targetPool?: Pool): Promise<PostgresMigrationResult> {
-  const pool = targetPool || (await import('./postgres.js')).getPostgresPool();
-  await initPostgresMigrationTable(pool);
-  const appliedList = await getAppliedPostgresMigrations(pool);
-  const appliedSet = new Set(appliedList);
-  const newlyApplied: string[] = [];
-  const alreadyApplied: string[] = [];
-
-  const migrationsDir = path.resolve(process.cwd(), 'supabase', 'migrations');
-  if (!fs.existsSync(migrationsDir)) {
-    return { applied: [], alreadyApplied: appliedList };
+  if (activeMigrationPromise) {
+    return activeMigrationPromise;
   }
 
-  const files = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
-
-  for (const file of files) {
-    const migrationName = path.basename(file, '.sql');
-    if (appliedSet.has(migrationName)) {
-      alreadyApplied.push(migrationName);
-      continue;
-    }
-
-    const filePath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(filePath, 'utf-8');
-
-    const client = await pool.connect();
+  activeMigrationPromise = (async () => {
     try {
-      await client.query('BEGIN');
-      await client.query(sql);
-      await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [migrationName]);
-      await client.query('COMMIT');
-      newlyApplied.push(migrationName);
-      logger.info(`PostgreSQL migration applied successfully: ${migrationName}`);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      logger.error(`PostgreSQL migration failed for ${migrationName}:`, err);
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
+      const pool = targetPool || (await import('./postgres.js')).getPostgresPool();
+      await initPostgresMigrationTable(pool);
+      const appliedList = await getAppliedPostgresMigrations(pool);
+      const appliedSet = new Set(appliedList);
+      const newlyApplied: string[] = [];
+      const alreadyApplied: string[] = [];
 
-  return {
-    applied: newlyApplied,
-    alreadyApplied
-  };
+      const migrationsDir = path.resolve(process.cwd(), 'supabase', 'migrations');
+      if (!fs.existsSync(migrationsDir)) {
+        return { applied: [], alreadyApplied: appliedList };
+      }
+
+      const files = fs
+        .readdirSync(migrationsDir)
+        .filter((f) => f.endsWith('.sql'))
+        .sort();
+
+      for (const file of files) {
+        const migrationName = path.basename(file, '.sql');
+        if (appliedSet.has(migrationName)) {
+          alreadyApplied.push(migrationName);
+          continue;
+        }
+
+        const filePath = path.join(migrationsDir, file);
+        const sql = fs.readFileSync(filePath, 'utf-8');
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          // Re-check inside transaction for concurrent runners
+          const checkRes = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [migrationName]);
+          if (checkRes.rows.length > 0) {
+            await client.query('COMMIT');
+            appliedSet.add(migrationName);
+            alreadyApplied.push(migrationName);
+            continue;
+          }
+
+          await client.query(sql);
+          await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [migrationName]);
+          await client.query('COMMIT');
+          appliedSet.add(migrationName);
+          newlyApplied.push(migrationName);
+          logger.info(`PostgreSQL migration applied successfully: ${migrationName}`);
+        } catch (err) {
+          await client.query('ROLLBACK');
+          logger.error(`PostgreSQL migration failed for ${migrationName}:`, err);
+          throw err;
+        } finally {
+          client.release();
+        }
+      }
+
+      return {
+        applied: newlyApplied,
+        alreadyApplied
+      };
+    } finally {
+      activeMigrationPromise = null;
+    }
+  })();
+
+  return activeMigrationPromise;
 }
+

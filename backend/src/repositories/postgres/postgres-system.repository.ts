@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { getPostgresPool } from '../../database/postgres.js';
 import type { SystemRepository } from '../system.repository.js';
 
-export class PostgresSystemRepository {
+export class PostgresSystemRepository implements SystemRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

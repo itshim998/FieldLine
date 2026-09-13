@@ -72,10 +72,10 @@ export function createActivityMatchingRouter(
     '/projects/:projectId/progress-updates/:updateId/matches',
     optionalAuthenticateSession,
     validateParams(matchProgressUpdateParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, updateId } = req.params;
-        const matches = service.getMatchesForUpdate(projectId, updateId);
+        const matches = await service.getMatchesForUpdate(projectId, updateId);
 
         const role = req.session?.accountType;
         const projectedMatches = matches.map((m) => sanitizeMatchForRole(m, role));
@@ -93,10 +93,10 @@ export function createActivityMatchingRouter(
     '/projects/:projectId/activity-matches/:matchId',
     optionalAuthenticateSession,
     validateParams(reviewMatchParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, matchId } = req.params;
-        const match = service.getMatchById(projectId, matchId);
+        const match = await service.getMatchById(projectId, matchId);
 
         const role = req.session?.accountType;
         res.status(200).json({ match: sanitizeMatchForRole(match, role) });

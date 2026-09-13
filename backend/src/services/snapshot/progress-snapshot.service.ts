@@ -21,6 +21,7 @@ import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { getDaysInMonth } from '../normalization/date-normalizer.js';
 import { logger } from '../../config/logger.js';
 import { ActivityProgress } from '../../models/domain.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -69,33 +70,101 @@ export class DefaultProgressSnapshotService implements ProgressSnapshotService {
     this.activityProgressRepo = dependencies?.activityProgressRepo || defaultActivityProgressRepo;
   }
 
-  getProgressSnapshot(projectId: string, asOfDate?: string): ProjectProgressSnapshot {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
-      throw new NotFoundError(`Project with ID '${projectId}' not found`);
-    }
-
+  getProgressSnapshot(projectId: string, asOfDate?: string): MaybePromise<ProjectProgressSnapshot> {
     // 2. Resolve single canonical snapshot date
     const canonicalAsOfDate = asOfDate
       ? validateSnapshotDate(asOfDate)
       : getTodayDateString();
 
-    // 3. Fetch project activities (strictly project-scoped)
-    const activities = this.activityRepo.listByProjectId(projectId);
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const activities = await this.activityRepo.listByProjectId(projectId);
+        const observations = new Map<string, ActivityProgress | null>();
+        await Promise.all(
+          activities.map(async (act) => {
+            const obs = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+              act.id,
+              projectId,
+              canonicalAsOfDate
+            );
+            observations.set(act.id, obs);
+          })
+        );
+        const snapshot = calculateProjectSnapshot(
+          projectId,
+          canonicalAsOfDate,
+          activities,
+          observations
+        );
+        logger.info(
+          `ProgressSnapshotService: Generated snapshot for project '${projectId}' as-of '${canonicalAsOfDate}' (${activities.length} activities)`
+        );
+        return snapshot;
+      });
+    }
 
-    // 4. Retrieve latest historical progress observation as of canonical snapshot date for each activity
+    if (!projectRes) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    const activitiesRes = this.activityRepo.listByProjectId(projectId);
+    if (activitiesRes instanceof Promise) {
+      return activitiesRes.then(async (activities) => {
+        const observations = new Map<string, ActivityProgress | null>();
+        await Promise.all(
+          activities.map(async (act) => {
+            const obs = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+              act.id,
+              projectId,
+              canonicalAsOfDate
+            );
+            observations.set(act.id, obs);
+          })
+        );
+        const snapshot = calculateProjectSnapshot(
+          projectId,
+          canonicalAsOfDate,
+          activities,
+          observations
+        );
+        logger.info(
+          `ProgressSnapshotService: Generated snapshot for project '${projectId}' as-of '${canonicalAsOfDate}' (${activities.length} activities)`
+        );
+        return snapshot;
+      });
+    }
+
+    const activities = activitiesRes;
     const observations = new Map<string, ActivityProgress | null>();
     for (const act of activities) {
-      const obs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+      const obsRes = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
         act.id,
         projectId,
         canonicalAsOfDate
       );
-      observations.set(act.id, obs);
+      if (obsRes instanceof Promise) {
+        return Promise.all(
+          activities.map(async (a) => {
+            const o = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+              a.id,
+              projectId,
+              canonicalAsOfDate
+            );
+            return { id: a.id, obs: o };
+          })
+        ).then((items) => {
+          const obsMap = new Map<string, ActivityProgress | null>();
+          for (const item of items) obsMap.set(item.id, item.obs);
+          return calculateProjectSnapshot(projectId, canonicalAsOfDate, activities, obsMap);
+        });
+      }
+      observations.set(act.id, obsRes);
     }
 
-    // 5. Run pure deterministic planned vs actual calculation
     const snapshot = calculateProjectSnapshot(
       projectId,
       canonicalAsOfDate,

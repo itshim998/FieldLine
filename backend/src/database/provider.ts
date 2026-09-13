@@ -4,6 +4,7 @@ import { isPostgresHealthy, closePostgres, initPostgres, runInPostgresTransactio
 import type pg from 'pg';
 
 export type DatabaseEngine = 'sqlite' | 'postgres';
+export type MaybePromise<T> = T | Promise<T>;
 
 export interface DatabaseProviderInfo {
   type: DatabaseEngine;
@@ -24,7 +25,7 @@ export function isPostgresDatabase(): boolean {
 
 export async function initActiveDatabase(): Promise<void> {
   if (isPostgresDatabase()) {
-    initPostgres();
+    await initPostgres({ skipMigrations: true });
   } else {
     initDatabase();
   }

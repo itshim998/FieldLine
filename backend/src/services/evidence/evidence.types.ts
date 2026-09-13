@@ -1,4 +1,5 @@
 import { Evidence, EvidenceFileType } from '../../models/domain.types.js';
+import type { MaybePromise } from '../../database/provider.js';
 
 export interface UploadedFilePayload {
   originalname: string;
@@ -31,10 +32,10 @@ export interface EvidenceService {
     file: UploadedFilePayload,
     options?: UploadEvidenceOptions
   ): Promise<UploadEvidenceResult>;
-  listProjectEvidence(projectId: string): Evidence[];
-  getEvidence(projectId: string, evidenceId: string): Evidence;
-  getEvidenceContent(projectId: string, evidenceId: string): EvidenceFileContentResult;
-  listProgressUpdateEvidence(projectId: string, updateId: string): Evidence[];
-  listActivityEvidence(projectId: string, activityId: string): Evidence[];
-  deleteEvidence(projectId: string, evidenceId: string): boolean;
+  listProjectEvidence(projectId: string): MaybePromise<Evidence[]>;
+  getEvidence(projectId: string, evidenceId: string): MaybePromise<Evidence>;
+  getEvidenceContent(projectId: string, evidenceId: string): MaybePromise<EvidenceFileContentResult>;
+  listProgressUpdateEvidence(projectId: string, updateId: string): MaybePromise<Evidence[]>;
+  listActivityEvidence(projectId: string, activityId: string): MaybePromise<Evidence[]>;
+  deleteEvidence(projectId: string, evidenceId: string): MaybePromise<boolean>;
 }

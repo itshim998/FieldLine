@@ -22,6 +22,7 @@ import {
   calculateNextAttemptAt,
   isRetryableDeliveryError
 } from './retry-policy.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export interface NotificationWorkerDependencies {
   outboxRepo?: NotificationOutboxRepository;
@@ -62,7 +63,7 @@ export class NotificationWorker {
         payload = JSON.parse(item.payloadJson) as NotificationOutboxPayload;
       } catch (parseErr) {
         logger.error(`NotificationWorker: Malformed payload in notification ${item.id}`, parseErr);
-        this.outboxRepo.markFailed(
+        await this.outboxRepo.markFailed(
           item.id,
           'MALFORMED_PAYLOAD',
           `Cannot parse payload JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`
@@ -79,16 +80,16 @@ export class NotificationWorker {
         alertMessage = await this.messageGenerator.generateAnomalyMessage(payload.messageInput);
 
         if (!alertMessage) {
-          await (this.outboxRepo.markFailed(
+          await this.outboxRepo.markFailed(
             item.id,
             'MESSAGE_GENERATION_FAILED',
             'Failed to generate anomaly alert message'
-          ) as any);
+          );
           return false;
         }
 
         // Snapshot so all subsequent retries reuse this exact payload
-        await (this.outboxRepo.saveMessageSnapshot(item.id, alertMessage) as any);
+        await this.outboxRepo.saveMessageSnapshot(item.id, alertMessage);
         payload.message = alertMessage;
       } else {
         logger.debug(
@@ -104,7 +105,7 @@ export class NotificationWorker {
         logger.info(
           `NotificationWorker: Notification ${item.id} delivered successfully. Provider message ID: ${deliveryResult.providerMessageId || 'acknowledged'}`
         );
-        await (this.outboxRepo.markDelivered(item.id, deliveryResult.providerMessageId) as any);
+        await this.outboxRepo.markDelivered(item.id, deliveryResult.providerMessageId);
         return true;
       }
 
@@ -118,7 +119,7 @@ export class NotificationWorker {
         logger.warn(
           `NotificationWorker: Temporary delivery failure for notification ${item.id} (${errorCode}). Retrying at ${nextAttemptAt}. Attempt ${item.attemptCount}/${item.maxAttempts}.`
         );
-        await (this.outboxRepo.scheduleRetry(item.id, errorCode, errorSummary, nextAttemptAt) as any);
+        await this.outboxRepo.scheduleRetry(item.id, errorCode, errorSummary, nextAttemptAt);
         return false;
       }
 
@@ -132,7 +133,7 @@ export class NotificationWorker {
       logger.error(
         `NotificationWorker: Permanent delivery failure for notification ${item.id} (${finalCode}): ${finalSummary}`
       );
-      await (this.outboxRepo.markFailed(item.id, finalCode, finalSummary) as any);
+      await this.outboxRepo.markFailed(item.id, finalCode, finalSummary);
       return false;
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -141,9 +142,9 @@ export class NotificationWorker {
       const isRetryable = isRetryableDeliveryError('UNEXPECTED_ERROR');
       if (isRetryable && item.attemptCount < item.maxAttempts) {
         const nextAttemptAt = calculateNextAttemptAt(item.attemptCount, this.backoffDelaysMs);
-        this.outboxRepo.scheduleRetry(item.id, 'UNEXPECTED_ERROR', errMsg, nextAttemptAt);
+        await this.outboxRepo.scheduleRetry(item.id, 'UNEXPECTED_ERROR', errMsg, nextAttemptAt);
       } else {
-        this.outboxRepo.markFailed(item.id, 'UNEXPECTED_ERROR', errMsg);
+        await this.outboxRepo.markFailed(item.id, 'UNEXPECTED_ERROR', errMsg);
       }
       return false;
     }
@@ -154,7 +155,7 @@ export class NotificationWorker {
    * Returns true if a notification was claimed and processed, false if none found.
    */
   async processNextNotification(): Promise<boolean> {
-    const claimed = this.outboxRepo.claimNextEligible();
+    const claimed = await this.outboxRepo.claimNextEligible();
     if (!claimed) {
       return false;
     }
@@ -179,7 +180,7 @@ export class NotificationWorker {
   /**
    * Recovers stale in-progress leases from process crashes or timeouts.
    */
-  requeueStaleNotifications(leaseTimeoutMs?: number): number {
+  requeueStaleNotifications(leaseTimeoutMs?: number): MaybePromise<number> {
     return this.outboxRepo.requeueStaleProcessing(leaseTimeoutMs);
   }
 }

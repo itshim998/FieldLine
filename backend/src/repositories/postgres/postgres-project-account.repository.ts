@@ -43,7 +43,7 @@ function toPublicAccount(account: ProjectAccount): ProjectAccountPublic {
   };
 }
 
-export class PostgresProjectAccountRepository {
+export class PostgresProjectAccountRepository implements ProjectAccountRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

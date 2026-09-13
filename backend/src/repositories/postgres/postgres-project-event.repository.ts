@@ -38,7 +38,7 @@ function getNextDayString(dateStr: string): string {
   return `${year}-${month}-${day}`;
 }
 
-export class PostgresProjectEventRepository {
+export class PostgresProjectEventRepository implements ProjectEventRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

@@ -37,9 +37,9 @@ import {
   riskClassificationService as defaultRiskClassificationService
 } from '../risk/risk-classification.service.js';
 import {
-  ProjectIntelligenceService,
   projectIntelligenceService as defaultProjectIntelligenceService
 } from '../intelligence/project-intelligence.service.js';
+import type { ProjectIntelligenceService } from '../intelligence/project-intelligence.types.js';
 import {
   ProjectDashboard,
   ProjectDashboardQueryOptions,
@@ -57,6 +57,19 @@ import {
   DashboardEvidenceItem,
   DashboardActiveBlockerItem
 } from './dashboard.types.js';
+import type { MaybePromise } from '../../database/provider.js';
+import type {
+  Project,
+  Activity,
+  ActivityMatch,
+  ProgressUpdate,
+  OperationalBlocker,
+  ActivityProgress,
+  Evidence
+} from '../../models/domain.types.js';
+import type { ProjectProgressSnapshot } from '../snapshot/progress-snapshot.types.js';
+import type { ProjectRiskStatus } from '../risk/risk-classification.types.js';
+import type { ProjectIntelligence } from '../intelligence/project-intelligence.types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 import { diffInCalendarDays } from '../snapshot/progress-snapshot.calculator.js';
@@ -106,14 +119,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
   getDashboard(
     projectId: string,
     options?: ProjectDashboardQueryOptions
-  ): ProjectDashboard {
-    // 1. Verify project exists and belongs to the workspace
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
-      throw new NotFoundError(`Project with ID '${projectId}' not found`);
-    }
-
-    // 2. Resolve canonical asOfDate
+  ): MaybePromise<ProjectDashboard> {
     const canonicalAsOfDate = options?.asOfDate
       ? validateSnapshotDate(options.asOfDate)
       : getTodayDateString();
@@ -125,16 +131,159 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
     const recentDays = options?.recentDays;
     const approachingDays = options?.approachingDays;
 
-    // 3. Obtain canonical Progress Snapshot & Risk Status (Pure deterministic delegation)
-    const snapshot = this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
-    const riskStatus = this.riskClassificationService.getProjectRiskStatus(projectId, canonicalAsOfDate);
-
-    // 4. Obtain canonical Project Intelligence
-    const intelligence = this.projectIntelligenceService.getIntelligence(projectId, {
+    const projectRes = this.projectRepo.getById(projectId);
+    const snapshotRes = this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
+    const riskStatusRes = this.riskClassificationService.getProjectRiskStatus(projectId, canonicalAsOfDate);
+    const intelligenceRes = this.projectIntelligenceService.getIntelligence(projectId, {
       asOfDate: canonicalAsOfDate,
       recentDays,
       approachingDays
     });
+    const activitiesRes = this.activityRepo.listByProjectId(projectId);
+    const allMatchesRes = this.activityMatchRepo.listByProjectId(projectId);
+    const updatesAllRes = this.progressUpdateRepo.listByProjectId(projectId);
+    const activeBlockersRes = this.blockerRepo.listActiveByProject(projectId);
+    const rootCauseSummaryRes = this.blockerRepo.countByRootCause(projectId);
+
+    const isAsync =
+      projectRes instanceof Promise ||
+      snapshotRes instanceof Promise ||
+      riskStatusRes instanceof Promise ||
+      intelligenceRes instanceof Promise ||
+      activitiesRes instanceof Promise ||
+      allMatchesRes instanceof Promise ||
+      updatesAllRes instanceof Promise ||
+      activeBlockersRes instanceof Promise ||
+      rootCauseSummaryRes instanceof Promise;
+
+    if (isAsync) {
+      return Promise.all([
+        Promise.resolve(projectRes),
+        Promise.resolve(snapshotRes),
+        Promise.resolve(riskStatusRes),
+        Promise.resolve(intelligenceRes),
+        Promise.resolve(activitiesRes),
+        Promise.resolve(allMatchesRes),
+        Promise.resolve(updatesAllRes),
+        Promise.resolve(activeBlockersRes),
+        Promise.resolve(rootCauseSummaryRes)
+      ]).then(async ([
+        project,
+        snapshot,
+        riskStatus,
+        intelligence,
+        activities,
+        allMatches,
+        updatesAll,
+        activeBlockers,
+        rootCauseSummary
+      ]) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const boundedUpdates = updatesAll.slice(0, recentLimit);
+        const boundedUpdateIds = boundedUpdates.map((u: ProgressUpdate) => u.id);
+
+        const [batchMatches, batchObs, batchEvidenceRaw] = await Promise.all([
+          Promise.resolve(this.activityMatchRepo.listByProgressUpdateIds(boundedUpdateIds, projectId)),
+          Promise.resolve(this.activityProgressRepo.listByProgressUpdateIds(boundedUpdateIds, projectId)),
+          Promise.resolve(this.evidenceRepo.listByProgressUpdateIds(boundedUpdateIds, projectId))
+        ]);
+
+        return this.composeDashboard(
+          project,
+          snapshot,
+          riskStatus,
+          intelligence,
+          activities,
+          allMatches,
+          updatesAll,
+          activeBlockers,
+          rootCauseSummary,
+          batchMatches,
+          batchObs,
+          batchEvidenceRaw,
+          canonicalAsOfDate,
+          recentLimit
+        );
+      });
+    }
+
+    const project = projectRes;
+    if (!project) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    const boundedUpdates = updatesAllRes.slice(0, recentLimit);
+    const boundedUpdateIds = boundedUpdates.map((u) => u.id);
+
+    const batchMatchesRes = this.activityMatchRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
+    const batchObsRes = this.activityProgressRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
+    const batchEvidenceRawRes = this.evidenceRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
+
+    if (
+      batchMatchesRes instanceof Promise ||
+      batchObsRes instanceof Promise ||
+      batchEvidenceRawRes instanceof Promise
+    ) {
+      return Promise.all([
+        Promise.resolve(batchMatchesRes),
+        Promise.resolve(batchObsRes),
+        Promise.resolve(batchEvidenceRawRes)
+      ]).then(([batchMatches, batchObs, batchEvidenceRaw]) => {
+        return this.composeDashboard(
+          project,
+          snapshotRes,
+          riskStatusRes,
+          intelligenceRes,
+          activitiesRes,
+          allMatchesRes,
+          updatesAllRes,
+          activeBlockersRes,
+          rootCauseSummaryRes,
+          batchMatches,
+          batchObs,
+          batchEvidenceRaw,
+          canonicalAsOfDate,
+          recentLimit
+        );
+      });
+    }
+
+    return this.composeDashboard(
+      project,
+      snapshotRes,
+      riskStatusRes,
+      intelligenceRes,
+      activitiesRes,
+      allMatchesRes,
+      updatesAllRes,
+      activeBlockersRes,
+      rootCauseSummaryRes,
+      batchMatchesRes,
+      batchObsRes,
+      batchEvidenceRawRes,
+      canonicalAsOfDate,
+      recentLimit
+    );
+  }
+
+  private composeDashboard(
+    project: Project,
+    snapshot: ProjectProgressSnapshot,
+    riskStatus: ProjectRiskStatus,
+    intelligence: ProjectIntelligence,
+    activities: Activity[],
+    allMatches: ActivityMatch[],
+    updatesAll: ProgressUpdate[],
+    activeBlockers: OperationalBlocker[],
+    rootCauseSummary: Record<string, number>,
+    batchMatches: ActivityMatch[],
+    batchObs: ActivityProgress[],
+    batchEvidenceRaw: Evidence[],
+    canonicalAsOfDate: string,
+    recentLimit: number
+  ): ProjectDashboard {
 
     // 5. Build ProjectSummary
     const projectSummary: ProjectSummary = {
@@ -192,7 +341,6 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
     };
 
     // Index activities for quick lookup
-    const activities = this.activityRepo.listByProjectId(projectId);
     const activityMap = new Map(activities.map((a) => [a.id, a]));
     const snapshotItemMap = new Map(snapshot.activities.map((item) => [item.activityId, item]));
     const riskItemMap = new Map(riskStatus.activities.map((item) => [item.activityId, item]));
@@ -290,8 +438,6 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
 
     // 9. Build Attention Summary
     // Query project matches for unresolved items
-    const allMatches = this.activityMatchRepo.listByProjectId(projectId);
-    const updatesAll = this.progressUpdateRepo.listByProjectId(projectId);
     const updateMap = new Map(updatesAll.map((u) => [u.id, u]));
 
     const unresolvedMatches: DashboardUnresolvedMatchItem[] = allMatches
@@ -317,10 +463,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
       })
       .sort((a, b) => a.confidenceScore - b.confidenceScore || b.reportDate.localeCompare(a.reportDate));
 
-    // Query active blockers and root-cause aggregation
-    const activeBlockers = this.blockerRepo.listActiveByProject(projectId);
-    const rootCauseSummary = this.blockerRepo.countByRootCause(projectId);
-
+    // Active blockers and root-cause aggregation
     const dashboardActiveBlockers: DashboardActiveBlockerItem[] = activeBlockers.map((b) => {
       const act = b.activityId ? activityMap.get(b.activityId) : undefined;
       return {
@@ -352,12 +495,6 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
 
     // 10. Build Recent Updates (bounded, deterministic newest first with batch repository queries)
     const boundedUpdates = updatesAll.slice(0, recentLimit);
-    const boundedUpdateIds = boundedUpdates.map((u) => u.id);
-
-    // Batch query matches, observations, and evidence across bounded report record IDs
-    const batchMatches = this.activityMatchRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
-    const batchObs = this.activityProgressRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
-    const batchEvidenceRaw = this.evidenceRepo.listByProgressUpdateIds(boundedUpdateIds, projectId);
 
     // Group batch results in-memory by progress report record id
     const matchesByReportId = new Map<string, DashboardMatchItem[]>();
@@ -433,7 +570,7 @@ export class DefaultProjectDashboardService implements ProjectDashboardService {
     });
 
     logger.info(
-      `ProjectDashboardService: Composed dashboard for project '${projectId}' as-of '${canonicalAsOfDate}' (health: ${overallRiskClassification} [${overallActualProgress}% / ${overallPlannedProgress}%], attention items: ${attention.delayedCount + attention.atRiskCount + attention.staleCount + attention.unresolvedMatchesCount}, recent items: ${recentUpdates.length})`
+      `ProjectDashboardService: Composed dashboard for project '${project.id}' as-of '${canonicalAsOfDate}' (health: ${overallRiskClassification} [${overallActualProgress}% / ${overallPlannedProgress}%], attention items: ${attention.delayedCount + attention.atRiskCount + attention.staleCount + attention.unresolvedMatchesCount}, recent items: ${recentUpdates.length})`
     );
 
     return {

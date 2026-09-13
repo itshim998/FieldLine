@@ -39,9 +39,10 @@ import {
   MAX_RECENT_CHANGES_LIMIT
 } from './project-intelligence.types.js';
 
-export type { ProjectIntelligenceService };
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
+import { Activity, ActivityProgress, ProjectProgressSnapshot, ProjectEvent } from '../../models/domain.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export function addDaysToDate(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -134,14 +135,7 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
   getIntelligence(
     projectId: string,
     options?: ProjectIntelligenceQueryOptions
-  ): ProjectIntelligence {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
-      throw new NotFoundError(`Project with ID '${projectId}' not found`);
-    }
-
-    // 2. Validate & normalize query options
+  ): MaybePromise<ProjectIntelligence> {
     const canonicalAsOfDate = options?.asOfDate
       ? validateSnapshotDate(options.asOfDate)
       : getTodayDateString();
@@ -163,20 +157,95 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
 
     const rawLimit = options?.limit ?? DEFAULT_RECENT_CHANGES_LIMIT;
     const limit = Math.max(1, Math.min(rawLimit, MAX_RECENT_CHANGES_LIMIT));
+    const staleCutoffDate = addDaysToDate(canonicalAsOfDate, -recentDays);
 
-    // 3. Obtain canonical progress snapshot as-of canonicalAsOfDate
-    const snapshot = this.progressSnapshotService.getProgressSnapshot(
-      projectId,
-      canonicalAsOfDate
-    );
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const snapshot = await this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
+        const activities = await this.activityRepo.listByProjectId(projectId);
+        const observations = new Map<string, ActivityProgress | null>();
+        await Promise.all(
+          activities.map(async (act) => {
+            const obs = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(act.id, projectId, canonicalAsOfDate);
+            observations.set(act.id, obs);
+          })
+        );
+        const rawEvents = await this.projectEventRepo.listRecentByProject(projectId, {
+          asOfDate: canonicalAsOfDate,
+          sinceDate: staleCutoffDate,
+          limit
+        });
+        return this.computeIntelligence(projectId, canonicalAsOfDate, snapshot, activities, observations, rawEvents, recentDays, approachingDays);
+      });
+    }
 
-    // 4. Calculate deterministic risk classification from snapshot (no duplicate formulas)
+    if (!projectRes) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    const snapshotRes = this.progressSnapshotService.getProgressSnapshot(projectId, canonicalAsOfDate);
+    const activitiesRes = this.activityRepo.listByProjectId(projectId);
+    const rawEventsRes = this.projectEventRepo.listRecentByProject(projectId, {
+      asOfDate: canonicalAsOfDate,
+      sinceDate: staleCutoffDate,
+      limit
+    });
+
+    if (snapshotRes instanceof Promise || activitiesRes instanceof Promise || rawEventsRes instanceof Promise) {
+      return Promise.all([
+        Promise.resolve(snapshotRes),
+        Promise.resolve(activitiesRes),
+        Promise.resolve(rawEventsRes)
+      ]).then(async ([snapshot, activities, rawEvents]) => {
+        const observations = new Map<string, ActivityProgress | null>();
+        await Promise.all(
+          activities.map(async (act) => {
+            const obs = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(act.id, projectId, canonicalAsOfDate);
+            observations.set(act.id, obs);
+          })
+        );
+        return this.computeIntelligence(projectId, canonicalAsOfDate, snapshot, activities, observations, rawEvents, recentDays, approachingDays);
+      });
+    }
+
+    const activities = activitiesRes;
+    const observations = new Map<string, ActivityProgress | null>();
+    for (const act of activities) {
+      const obsRes = this.activityProgressRepo.getLatestByActivityIdAsOfDate(act.id, projectId, canonicalAsOfDate);
+      if (obsRes instanceof Promise) {
+        return Promise.all(
+          activities.map(async (a) => {
+            const o = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(a.id, projectId, canonicalAsOfDate);
+            return { id: a.id, obs: o };
+          })
+        ).then((items) => {
+          const obsMap = new Map<string, ActivityProgress | null>();
+          for (const item of items) obsMap.set(item.id, item.obs);
+          return this.computeIntelligence(projectId, canonicalAsOfDate, snapshotRes, activities, obsMap, rawEventsRes, recentDays, approachingDays);
+        });
+      }
+      observations.set(act.id, obsRes);
+    }
+
+    return this.computeIntelligence(projectId, canonicalAsOfDate, snapshotRes, activities, observations, rawEventsRes, recentDays, approachingDays);
+  }
+
+  private computeIntelligence(
+    projectId: string,
+    canonicalAsOfDate: string,
+    snapshot: ProjectProgressSnapshot,
+    activities: Activity[],
+    observations: Map<string, ActivityProgress | null>,
+    rawEvents: ProjectEvent[],
+    recentDays: number,
+    approachingDays: number
+  ): ProjectIntelligence {
     const riskStatus = calculateProjectRiskStatus(snapshot);
 
-    // Fetch project activities for milestone and observation inspection
-    const activities = this.activityRepo.listByProjectId(projectId);
-
-    // 5. Query 1: Delayed activities (classification === 'DELAYED')
     const delayed: DelayedActivityFact[] = riskStatus.activities
       .filter((act) => act.classification === 'DELAYED')
       .map((act) => ({
@@ -197,7 +266,6 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
           a.activityId.localeCompare(b.activityId)
       );
 
-    // 6. Query 2: At-risk activities (classification === 'AT_RISK')
     const atRisk: AtRiskActivityFact[] = riskStatus.activities
       .filter((act) => act.classification === 'AT_RISK')
       .map((act) => ({
@@ -217,19 +285,9 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
           a.activityId.localeCompare(b.activityId)
       );
 
-    // 7. Query 3: Completed today (where activity's actualFinish === canonicalAsOfDate)
     const completedToday: CompletedActivityFact[] = [];
     for (const act of activities) {
-      const obs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
-        act.id,
-        projectId,
-        canonicalAsOfDate
-      );
-      // Semantic rule for completedToday:
-      // 1. Observation exists as of canonicalAsOfDate
-      // 2. Observation represents completion (status === 'completed' or actualPercent >= 100)
-      // 3. actualFinish is explicitly defined on the observation and matches canonicalAsOfDate
-      // (If actualFinish is missing/null, fallback is to exclude it rather than guessing)
+      const obs = observations.get(act.id);
       const isCompleted =
         Boolean(obs) && (obs!.status === 'completed' || obs!.actualPercent >= 100);
       const finishDate = obs?.actualFinish ? obs.actualFinish.slice(0, 10) : null;
@@ -253,7 +311,6 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
         a.activityId.localeCompare(b.activityId)
     );
 
-    // 8. Query 4: Behind-schedule activities (varianceState === 'behind')
     const behindSchedule: BehindScheduleActivityFact[] = snapshot.activities
       .filter((act) => act.varianceState === 'behind')
       .map((act) => ({
@@ -275,13 +332,11 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
           a.activityId.localeCompare(b.activityId)
       );
 
-    // 9. Query 5: Approaching milestones (plannedStart === plannedFinish within [asOfDate, asOfDate + approachingDays])
     const milestoneEndDate = addDaysToDate(canonicalAsOfDate, approachingDays);
     const snapshotItemMap = new Map(snapshot.activities.map((item) => [item.activityId, item]));
 
     const approachingMilestones: ApproachingMilestoneFact[] = [];
     for (const act of activities) {
-      // Milestone invariant: zero-duration activity
       if (act.plannedStart === act.plannedFinish) {
         if (
           act.plannedStart >= canonicalAsOfDate &&
@@ -308,16 +363,11 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
         a.activityId.localeCompare(b.activityId)
     );
 
-    // 10. Query 6: Stale activities (no observation or latest observation < asOfDate - recentDays)
     const staleCutoffDate = addDaysToDate(canonicalAsOfDate, -recentDays);
     const staleActivities: StaleActivityFact[] = [];
 
     for (const act of activities) {
-      const latestObs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
-        act.id,
-        projectId,
-        canonicalAsOfDate
-      );
+      const latestObs = observations.get(act.id);
 
       if (!latestObs) {
         staleActivities.push({
@@ -343,7 +393,6 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
       }
     }
 
-    // Sort: never-updated first (by externalId), then oldest observation timestamp first
     staleActivities.sort((a, b) => {
       const aHasObs = a.hasAnyUpdate;
       const bHasObs = b.hasAnyUpdate;
@@ -360,13 +409,6 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
         a.externalId.localeCompare(b.externalId) ||
         a.activityId.localeCompare(b.activityId)
       );
-    });
-
-    // 11. Query 7: Recent changes (bounded project events within [asOfDate - recentDays, asOfDate])
-    const rawEvents = this.projectEventRepo.listRecentByProject(projectId, {
-      asOfDate: canonicalAsOfDate,
-      sinceDate: staleCutoffDate,
-      limit
     });
 
     const recentChanges: RecentChangeFact[] = rawEvents.map((evt) => ({
@@ -400,3 +442,5 @@ export class DefaultProjectIntelligenceService implements ProjectIntelligenceSer
 
 export const projectIntelligenceService: ProjectIntelligenceService =
   new DefaultProjectIntelligenceService();
+
+export type { ProjectIntelligenceService };

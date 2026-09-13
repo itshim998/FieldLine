@@ -20,8 +20,8 @@ import { logger } from '../config/logger.js';
 
 export interface JobService {
   enqueueDocumentIngestion(projectId: string, evidenceId: string): Promise<ProcessingJob>;
-  getJob(projectId: string, jobId: string): ProcessingJob;
-  listJobs(projectId: string, jobType?: ProcessingJobType): ProcessingJob[];
+  getJob(projectId: string, jobId: string): Promise<ProcessingJob>;
+  listJobs(projectId: string, jobType?: ProcessingJobType): Promise<ProcessingJob[]>;
 }
 
 export class DefaultJobService implements JobService {
@@ -45,13 +45,13 @@ export class DefaultJobService implements JobService {
    */
   async enqueueDocumentIngestion(projectId: string, evidenceId: string): Promise<ProcessingJob> {
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     // 2. Verify evidence exists and belongs to project
-    const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
+    const evidence = await this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
     if (!evidence) {
       throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
     }
@@ -84,13 +84,13 @@ export class DefaultJobService implements JobService {
   /**
    * Retrieves a single job by ID ensuring project isolation.
    */
-  getJob(projectId: string, jobId: string): ProcessingJob {
-    const project = this.projectRepo.getById(projectId);
+  async getJob(projectId: string, jobId: string): Promise<ProcessingJob> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const job = this.jobRepo.getByIdAndProjectId(jobId, projectId);
+    const job = await this.jobRepo.getByIdAndProjectId(jobId, projectId);
     if (!job) {
       throw new NotFoundError(`Processing job '${jobId}' not found for project '${projectId}'`);
     }
@@ -101,13 +101,13 @@ export class DefaultJobService implements JobService {
   /**
    * Lists all jobs for a project, optionally filtered by job type.
    */
-  listJobs(projectId: string, jobType?: ProcessingJobType): ProcessingJob[] {
-    const project = this.projectRepo.getById(projectId);
+  async listJobs(projectId: string, jobType?: ProcessingJobType): Promise<ProcessingJob[]> {
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    return this.jobRepo.listByProjectId(projectId, jobType);
+    return await this.jobRepo.listByProjectId(projectId, jobType);
   }
 }
 

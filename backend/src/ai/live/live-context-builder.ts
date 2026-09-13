@@ -42,7 +42,8 @@ export function buildLiveSystemInstruction(
   const topAtRisk: string[] = [];
 
   try {
-    const snapshot = snapshotService.getProgressSnapshot(project.id, today);
+    const rawSnapshot = snapshotService.getProgressSnapshot(project.id, today);
+    const snapshot = rawSnapshot instanceof Promise ? null : rawSnapshot;
     if (snapshot && snapshot.summary) {
       overallActualProgress = snapshot.summary.overallActualProgress;
       overallPlannedProgress = snapshot.summary.overallPlannedProgress;
@@ -54,7 +55,8 @@ export function buildLiveSystemInstruction(
   }
 
   try {
-    const intelligence = intelligenceService.getIntelligence(project.id, { asOfDate: today });
+    const rawIntelligence = intelligenceService.getIntelligence(project.id, { asOfDate: today });
+    const intelligence = rawIntelligence instanceof Promise ? null : rawIntelligence;
     if (intelligence) {
       delayedCount = intelligence.delayed?.length || 0;
       atRiskCount = intelligence.atRisk?.length || 0;
@@ -71,7 +73,7 @@ export function buildLiveSystemInstruction(
 
     if (intelligence && Array.isArray(intelligence.delayed)) {
       for (const d of intelligence.delayed.slice(0, 4)) {
-        const reasonsStr = d.reasons.map((r) => r.message).join('; ');
+        const reasonsStr = d.reasons.map((r: { message: string }) => r.message).join('; ');
         topDelayed.push(
           `- ${d.name} (${d.externalId}): planned finish ${d.plannedFinish}, ${d.progressVariance}% variance (${d.overdue ? 'overdue' : 'behind'}). Reason: ${reasonsStr}`
         );
@@ -80,7 +82,7 @@ export function buildLiveSystemInstruction(
 
     if (intelligence && Array.isArray(intelligence.atRisk)) {
       for (const r of intelligence.atRisk.slice(0, 3)) {
-        const reasonsStr = r.reasons.map((re) => re.message).join('; ');
+        const reasonsStr = r.reasons.map((re: { message: string }) => re.message).join('; ');
         topAtRisk.push(
           `- ${r.name} (${r.externalId}): ${r.progressVariance}% variance. Risk: ${reasonsStr}`
         );

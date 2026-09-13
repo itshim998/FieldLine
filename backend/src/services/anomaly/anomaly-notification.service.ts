@@ -22,6 +22,7 @@ import type {
   NotificationOutboxItem,
   NotificationOutboxPayload
 } from './notification-outbox.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export interface NotifyAnomalyAlertInput {
   prediction: AnomalyPrediction | null | undefined;
@@ -56,7 +57,7 @@ export interface AnomalyNotificationService {
   /**
    * Records notification intent into the outbox idempotently without delivering immediately.
    */
-  recordNotificationIntent(input: NotifyAnomalyAlertInput): NotificationOutboxItem | null;
+  recordNotificationIntent(input: NotifyAnomalyAlertInput): MaybePromise<NotificationOutboxItem | null>;
 }
 
 /**
@@ -85,8 +86,10 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
       });
   }
 
-  recordNotificationIntent(input: NotifyAnomalyAlertInput): NotificationOutboxItem | null {
+  recordNotificationIntent(input: NotifyAnomalyAlertInput): MaybePromise<NotificationOutboxItem | null> {
     const { prediction, context } = input;
+
+    // 1. Strict Anomaly Invariant: normal and cold-start observations are never alerted
     if (!isEligibleForAnomalyAlert(prediction)) {
       return null;
     }
@@ -106,14 +109,28 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
     }
 
     const existing = this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email');
+    if (existing instanceof Promise) {
+      return existing.then((res) => {
+        if (res) return res;
+        return this.createIntentOutboxItem(context, messageInput);
+      });
+    }
+
     if (existing) {
       return existing;
     }
 
+    return this.createIntentOutboxItem(context, messageInput);
+  }
+
+  private createIntentOutboxItem(
+    context: AdaptAnomalyEvaluationOptions,
+    messageInput: any
+  ): MaybePromise<NotificationOutboxItem | null> {
     try {
-      return this.outboxRepo.create({
-        projectId: context.projectId,
-        activityMatchId: context.activityMatchId,
+      const created = this.outboxRepo.create({
+        projectId: context.projectId!,
+        activityMatchId: context.activityMatchId!,
         notificationType: 'anomaly_alert',
         channel: 'email',
         payload: {
@@ -122,9 +139,16 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
         },
         idempotencyKey: `fieldline-anomaly-alert:${context.activityMatchId}`
       });
+      if (created instanceof Promise) {
+        return created.catch((err) => {
+          logger.warn(`AnomalyNotificationService: Intent creation notice: ${err}`);
+          return this.outboxRepo.getByActivityMatchId(context.activityMatchId!, 'email');
+        });
+      }
+      return created;
     } catch (err) {
       logger.warn(`AnomalyNotificationService: Intent creation notice: ${err}`);
-      return this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email');
+      return this.outboxRepo.getByActivityMatchId(context.activityMatchId!, 'email');
     }
   }
 
@@ -154,12 +178,12 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
     try {
       // 4. Ensure durable outbox row exists (idempotent lookup or creation)
       let outboxItem: NotificationOutboxItem | null =
-        await (this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email') as any);
+        await this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email');
 
       if (!outboxItem) {
         const idempotencyKey = `fieldline-anomaly-alert:${context.activityMatchId}`;
         try {
-          outboxItem = await (this.outboxRepo.create({
+          outboxItem = await this.outboxRepo.create({
             projectId: context.projectId,
             activityMatchId: context.activityMatchId,
             notificationType: 'anomaly_alert',
@@ -169,9 +193,9 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
               message: null
             },
             idempotencyKey
-          }) as any);
+          });
         } catch {
-          outboxItem = await (this.outboxRepo.findByIdempotencyKey(idempotencyKey) as any);
+          outboxItem = await this.outboxRepo.findByIdempotencyKey(idempotencyKey);
         }
       }
 
@@ -181,14 +205,14 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
 
       // 5. Claim the item so attempt_count increments and lease is locked, then process through worker
       const claimedItem =
-        (await (this.outboxRepo.claimById(outboxItem.id) as any)) ||
-        (await (this.outboxRepo.getById(outboxItem.id) as any)) ||
+        (await this.outboxRepo.claimById(outboxItem.id)) ||
+        (await this.outboxRepo.getById(outboxItem.id)) ||
         outboxItem;
 
       await this.notificationWorker.processNotification(claimedItem);
 
       // 6. Reload updated outbox row
-      const updatedItem = (await (this.outboxRepo.getById(outboxItem.id) as any)) || outboxItem;
+      const updatedItem = (await this.outboxRepo.getById(outboxItem.id)) || outboxItem;
       let alertMsg: AnomalyAlertMessage | null = null;
       try {
         const parsed = JSON.parse(updatedItem.payloadJson) as NotificationOutboxPayload;

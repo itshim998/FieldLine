@@ -71,7 +71,7 @@ function mapRowToActivity(row: ActivityDbRow): Activity {
   };
 }
 
-export class PostgresScheduleRepository {
+export class PostgresScheduleRepository implements ScheduleRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

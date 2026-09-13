@@ -11,9 +11,11 @@ import { buildLiveSystemInstruction } from './live-context-builder.js';
 import { createLiveToolExecutor, LiveToolExecutionContext } from './live-tool-handlers.js';
 import { authService } from '../../services/auth.service.js';
 
+type MaybePromise<T> = T | Promise<T>;
+
 export interface ProjectResolver {
-  getById(id: string): Project | null;
-  getByCode(code: string): Project | null;
+  getById(id: string): MaybePromise<Project | null>;
+  getByCode(code: string): MaybePromise<Project | null>;
 }
 
 export type LiveToolExecutor = (
@@ -574,7 +576,7 @@ export class GeminiLiveGateway {
    * Handles incoming client WebSocket connection.
    * Validates `projectId` query parameter and verifies project existence in database.
    */
-  handleClientConnection(clientWs: WebSocket, req: http.IncomingMessage): void {
+  handleClientConnection(clientWs: WebSocket, req: http.IncomingMessage): MaybePromise<void> {
     const parsedUrl = new URL(req.url || '/', 'http://localhost');
     const projectIdParam = parsedUrl.searchParams.get('projectId');
 
@@ -591,29 +593,82 @@ export class GeminiLiveGateway {
     }
 
     const trimmedParam = projectIdParam.trim();
-    let project: Project | null = null;
-    if (this.projectResolver) {
-      try {
-        project = this.projectResolver.getById(trimmedParam) || this.projectResolver.getByCode(trimmedParam);
-      } catch (dbErr: any) {
-        logger.error(`GeminiLiveGateway: Project lookup failed for project [${trimmedParam}]: ${dbErr.message}`);
-      }
-    }
-
-    if (!project) {
-      logger.warn(`GeminiLiveGateway: Client connection rejected: Project [${trimmedParam}] not found.`);
-      clientWs.send(
-        JSON.stringify({
-          type: 'error',
-          message: `Connection rejected: Project "${trimmedParam}" does not exist.`
-        })
-      );
-      clientWs.close(4404, 'Project not found');
+    if (!this.projectResolver) {
+      this.rejectProjectNotFound(clientWs, trimmedParam);
       return;
     }
 
+    const projectOrPromise = this.resolveProject(trimmedParam);
+    if (projectOrPromise instanceof Promise) {
+      return projectOrPromise.then((project) => {
+        if (!project) {
+          this.rejectProjectNotFound(clientWs, trimmedParam);
+          return;
+        }
+        this.initializeSession(clientWs, parsedUrl, project);
+      });
+    }
+
+    if (!projectOrPromise) {
+      this.rejectProjectNotFound(clientWs, trimmedParam);
+      return;
+    }
+
+    this.initializeSession(clientWs, parsedUrl, projectOrPromise);
+  }
+
+  private resolveProject(trimmedParam: string): MaybePromise<Project | null> {
+    if (!this.projectResolver) return null;
+    try {
+      const byIdRes = this.projectResolver.getById(trimmedParam);
+      if (byIdRes instanceof Promise) {
+        return byIdRes
+          .then((p) => {
+            if (p) return p;
+            return this.projectResolver!.getByCode(trimmedParam);
+          })
+          .catch((dbErr: unknown) => {
+            const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+            logger.error(`GeminiLiveGateway: Project lookup failed for project [${trimmedParam}]: ${msg}`);
+            return null;
+          });
+      }
+
+      if (byIdRes) return byIdRes;
+
+      const byCodeRes = this.projectResolver.getByCode(trimmedParam);
+      if (byCodeRes instanceof Promise) {
+        return byCodeRes.catch((dbErr: unknown) => {
+          const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+          logger.error(`GeminiLiveGateway: Project lookup failed for project [${trimmedParam}]: ${msg}`);
+          return null;
+        });
+      }
+      return byCodeRes;
+    } catch (dbErr: unknown) {
+      const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+      logger.error(`GeminiLiveGateway: Project lookup failed for project [${trimmedParam}]: ${msg}`);
+      return null;
+    }
+  }
+
+  private rejectProjectNotFound(clientWs: WebSocket, trimmedParam: string): void {
+    logger.warn(`GeminiLiveGateway: Client connection rejected: Project [${trimmedParam}] not found.`);
+    clientWs.send(
+      JSON.stringify({
+        type: 'error',
+        message: `Connection rejected: Project "${trimmedParam}" does not exist.`
+      })
+    );
+    clientWs.close(4404, 'Project not found');
+  }
+
+  private initializeSession(
+    clientWs: WebSocket,
+    parsedUrl: URL,
+    project: Project
+  ): void {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const roleParam = parsedUrl.searchParams.get('role') || parsedUrl.searchParams.get('sessionRole');
     const tokenParam = parsedUrl.searchParams.get('token');
     let sessionRole: 'worker' | 'admin' = 'worker';
 
@@ -632,19 +687,19 @@ export class GeminiLiveGateway {
           return;
         }
         sessionRole = verified.accountType;
-      } catch (err: any) {
-        logger.warn(`GeminiLiveGateway: Invalid token in WebSocket connection: ${err.message}`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`GeminiLiveGateway: Invalid token in WebSocket connection: ${msg}`);
         clientWs.send(
           JSON.stringify({
             type: 'error',
-            message: `Connection rejected: Invalid session token (${err.message}).`
+            message: `Connection rejected: Invalid session token (${msg}).`
           })
         );
         clientWs.close(4403, 'Invalid token');
         return;
       }
     } else {
-      // Unauthenticated session: strictly enforce 'worker' role (never grant 'admin' without valid token)
       sessionRole = 'worker';
     }
 

@@ -58,7 +58,16 @@ import {
 import { classifyActivityRisk } from '../risk/risk-classification.calculator.js';
 import { diffInCalendarDays } from '../snapshot/progress-snapshot.calculator.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
-import { ActivityRiskClassification } from '../../models/domain.types.js';
+import {
+  ActivityRiskClassification,
+  Project,
+  Activity,
+  ActivityMatch,
+  ActivityProgress,
+  ProgressUpdate,
+} from '../../models/domain.types.js';
+import type { MaybePromise } from '../../database/provider.js';
+import type { ProjectProgressSnapshot } from '../snapshot/progress-snapshot.types.js';
 import {
   OperationalTaskItem,
   OperationalTaskListResponse,
@@ -73,7 +82,7 @@ export interface WorkerOperationalService {
   getOperationalTasks(
     projectId: string,
     query?: Partial<WorkerOperationalQueryDto>
-  ): OperationalTaskListResponse;
+  ): MaybePromise<OperationalTaskListResponse>;
   recordQuickReport(
     projectId: string,
     input: WorkerQuickReportDto
@@ -149,28 +158,58 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   getOperationalTasks(
     projectId: string,
     query: Partial<WorkerOperationalQueryDto> = {}
-  ): OperationalTaskListResponse {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
-      throw new NotFoundError(`Project with ID '${projectId}' not found`);
-    }
-
-    // 2. Resolve canonical evaluation date
+  ): MaybePromise<OperationalTaskListResponse> {
     const asOfDate = query.asOfDate
       ? validateSnapshotDate(query.asOfDate)
       : getTodayDateString();
 
+    const projectRes = this.projectRepo.getById(projectId);
+    const snapshotRes = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+    const activitiesRes = this.activityRepo.listByProjectId(projectId);
+
+    if (
+      projectRes instanceof Promise ||
+      snapshotRes instanceof Promise ||
+      activitiesRes instanceof Promise
+    ) {
+      return Promise.all([
+        Promise.resolve(projectRes),
+        Promise.resolve(snapshotRes),
+        Promise.resolve(activitiesRes)
+      ]).then(([project, snapshot, activities]) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.computeOperationalTasks(projectId, asOfDate, query, snapshot, activities);
+      });
+    }
+
+    if (!projectRes) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
+    return this.computeOperationalTasks(
+      projectId,
+      asOfDate,
+      query,
+      snapshotRes,
+      activitiesRes
+    );
+  }
+
+  private computeOperationalTasks(
+    projectId: string,
+    asOfDate: string,
+    query: Partial<WorkerOperationalQueryDto>,
+    snapshot: ProjectProgressSnapshot,
+    activities: Activity[]
+  ): OperationalTaskListResponse {
     const horizonDays = query.horizonDays ?? 3;
     const scope = query.scope || 'horizon';
     const locationFilter = query.locationFilter?.trim().toLowerCase();
     const statusFilter = query.statusFilter && query.statusFilter !== 'ALL' ? query.statusFilter : null;
 
-    // 3. Obtain canonical progress snapshot as of evaluation date
-    const snapshot = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
-
     // 4. Retrieve project activities for physical scope enrichment (target quantity, unit, description)
-    const activities = this.activityRepo.listByProjectId(projectId);
     const activityMap = new Map(activities.map((a) => [a.id, a]));
 
     // 5. Build operational task items
@@ -315,7 +354,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     projectId: string,
     input: WorkerQuickReportDto
   ): Promise<WorkerQuickReportResponseDto> {
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
@@ -331,7 +370,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
 
     // Case 1: Specific activity is targeted directly from task card / picker
     if (input.activityId) {
-      const activity = this.activityRepo.getById(input.activityId);
+      const activity = await this.activityRepo.getById(input.activityId);
       if (!activity || activity.projectId !== projectId) {
         throw new NotFoundError(`Activity '${input.activityId}' not found in project '${projectId}'`);
       }
@@ -367,7 +406,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
       let anomaly: AnomalyPrediction | null = null;
       let previousPercent: number | null = null;
       if (reportedPercent !== null) {
-        const priorObservation = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+        const priorObservation = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(
           activity.id,
           projectId,
           reportDate
@@ -376,7 +415,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
           previousPercent = priorObservation.actualPercent;
         }
 
-        anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+        anomaly = await this.anomalyEvaluationService.evaluateProgressAnomaly({
           projectId,
           activityId: activity.id,
           activity,
@@ -385,20 +424,8 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
         });
       }
 
-      const runTx = <T>(fn: () => T): T => {
-        if (typeof this.activityMatchRepo.runInTransaction === 'function') {
-          return this.activityMatchRepo.runInTransaction(fn);
-        }
-        if (this.notificationOutboxRepo && typeof this.notificationOutboxRepo.runInTransaction === 'function') {
-          return this.notificationOutboxRepo.runInTransaction(fn);
-        }
-        return fn();
-      };
-
-      // Execute progress persistence AND outbox record creation atomically in a single SQLite transaction
-      const { updateRecord, match, recorded } = runTx(() => {
-        // 1. Create progress record with attribution
-        const updateRec = this.progressUpdateRepo.create({
+      const executeTx = () => {
+        const updateRecRes = this.progressUpdateRepo.create({
           projectId,
           reportDate,
           rawText: descText,
@@ -408,8 +435,80 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
           status: 'received'
         });
 
-        // 2. Create auto-confirmed match record with anomaly advisory metadata
-        const matchRec = this.activityMatchRepo.create({
+        if (updateRecRes instanceof Promise) {
+          return (async () => {
+            const updateRec = await updateRecRes;
+            const matchRec = await this.activityMatchRepo.create({
+              projectId,
+              progressUpdateId: updateRec.id,
+              activityId: activity.id,
+              confidenceScore: 1.0,
+              matchMethod: 'exact_id',
+              matchedText: activity.name,
+              rationale: 'Direct worker selection from operational cockpit',
+              status: 'confirmed',
+              confidenceTier: 'high',
+              reviewState: 'resolved',
+              reviewedBy: reporterName,
+              reviewedAt: new Date().toISOString(),
+              anomalyScore: anomaly?.anomalyScore ?? null,
+              anomalySeverity: anomaly?.severity ?? null,
+              anomalyReasonsJson:
+                anomaly?.reasons && anomaly.reasons.length > 0
+                  ? JSON.stringify(anomaly.reasons)
+                  : null
+            });
+
+            const rec = await this.progressService.normalizeAndRecordProgress({
+              projectId,
+              updateId: updateRec.id,
+              matchId: matchRec.id,
+              fact: {
+                reference: activity.externalId,
+                location: activity.location || null,
+                progress_percent: input.progressPercent ?? null,
+                status: (input.progressPercent != null && input.progressPercent >= 100) ? 'completed' : 'in_progress'
+              },
+              actualQuantity: input.actualQuantity ?? null,
+              quantityUnit: input.quantityUnit || activity.unit || null,
+              asOfDate: reportDate,
+              allowSuggested: false
+            });
+
+            if (anomaly && isEligibleForAnomalyAlert(anomaly) && reportedPercent !== null) {
+              const messageInput = toAnomalyMessageInput(anomaly, {
+                projectName: project.name,
+                activityExternalId: activity.externalId,
+                activityName: activity.name,
+                activityLocation: activity.location || null,
+                reportDate,
+                reporterName,
+                previousPercent,
+                reportedPercent,
+                activityMatchId: matchRec.id
+              });
+
+              if (messageInput) {
+                await this.notificationOutboxRepo.create({
+                  projectId,
+                  activityMatchId: matchRec.id,
+                  notificationType: 'anomaly_alert',
+                  channel: 'email',
+                  payload: {
+                    messageInput,
+                    message: null
+                  },
+                  idempotencyKey: `fieldline-anomaly-alert:${matchRec.id}`
+                });
+              }
+            }
+
+            return { updateRecord: updateRec, match: matchRec, recorded: rec };
+          })();
+        }
+
+        const updateRec = updateRecRes;
+        const matchRecRes = this.activityMatchRepo.create({
           projectId,
           progressUpdateId: updateRec.id,
           activityId: activity.id,
@@ -430,11 +529,10 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
               : null
         });
 
-        // 3. Normalize and record progress deterministically
-        const rec = this.progressService.normalizeAndRecordProgress({
+        const recRes = this.progressService.normalizeAndRecordProgress({
           projectId,
           updateId: updateRec.id,
-          matchId: matchRec.id,
+          matchId: (matchRecRes as ActivityMatch).id,
           fact: {
             reference: activity.externalId,
             location: activity.location || null,
@@ -447,7 +545,6 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
           allowSuggested: false
         });
 
-        // 4. Phase 4: Atomically record notification intent if anomalous
         if (anomaly && isEligibleForAnomalyAlert(anomaly) && reportedPercent !== null) {
           const messageInput = toAnomalyMessageInput(anomaly, {
             projectName: project.name,
@@ -458,26 +555,35 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
             reporterName,
             previousPercent,
             reportedPercent,
-            activityMatchId: matchRec.id
+            activityMatchId: (matchRecRes as ActivityMatch).id
           });
 
           if (messageInput) {
             this.notificationOutboxRepo.create({
               projectId,
-              activityMatchId: matchRec.id,
+              activityMatchId: (matchRecRes as ActivityMatch).id,
               notificationType: 'anomaly_alert',
               channel: 'email',
               payload: {
                 messageInput,
                 message: null
               },
-              idempotencyKey: `fieldline-anomaly-alert:${matchRec.id}`
+              idempotencyKey: `fieldline-anomaly-alert:${(matchRecRes as ActivityMatch).id}`
             });
           }
         }
 
-        return { updateRecord: updateRec, match: matchRec, recorded: rec };
-      });
+        return {
+          updateRecord: updateRec,
+          match: matchRecRes as ActivityMatch,
+          recorded: recRes as ActivityProgress
+        };
+      };
+
+      const txResult = typeof this.activityMatchRepo.runInTransaction === 'function'
+        ? this.activityMatchRepo.runInTransaction(executeTx)
+        : executeTx();
+      const { updateRecord, match, recorded } = await txResult;
 
       logger.info(
         `WorkerOperationalService: Quick report recorded for activity '${activity.externalId}' by '${reporterName}'. Actual percent: ${recorded.actualPercent}%.`
@@ -535,7 +641,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     }
 
     // 1. Create progress record
-    const updateRecord = this.progressUpdateRepo.create({
+    const updateRecord = await this.progressUpdateRepo.create({
       projectId,
       reportDate,
       rawText: canonicalNotes,
@@ -556,17 +662,17 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
           { persist: true }
         );
 
-        const persistedMatches = this.activityMatchRepo.listByProgressUpdateId(updateRecord.id, projectId);
+        const persistedMatches = await this.activityMatchRepo.listByProgressUpdateId(updateRecord.id, projectId);
         let hasConfirmed = false;
         let hasAwaitingReview = false;
         let lastProgress: any = null;
 
         for (const item of extraction.items) {
-          const matchCandidate = persistedMatches.find((m) => m.progressUpdateId === updateRecord.id);
+          const matchCandidate = persistedMatches.find((m: ActivityMatch) => m.progressUpdateId === updateRecord.id);
           if (matchCandidate) {
             if (matchCandidate.status === 'confirmed') {
               hasConfirmed = true;
-              lastProgress = this.progressService.normalizeAndRecordProgress({
+              lastProgress = await this.progressService.normalizeAndRecordProgress({
                 projectId,
                 updateId: updateRecord.id,
                 matchId: matchCandidate.id,

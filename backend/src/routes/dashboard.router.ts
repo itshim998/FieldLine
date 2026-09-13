@@ -23,12 +23,12 @@ export function createDashboardRouter(
       params: dashboardParamsSchema,
       query: dashboardQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
         const query = req.query as unknown as DashboardQueryDto;
 
-        const dashboard = service.getDashboard(projectId, {
+        const dashboard = await service.getDashboard(projectId, {
           asOfDate: query.asOfDate,
           recentLimit: query.recentLimit,
           recentDays: query.recentDays,

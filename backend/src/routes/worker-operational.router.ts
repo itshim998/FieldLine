@@ -28,12 +28,12 @@ export function createWorkerOperationalRouter(
       params: workerOperationalParamsSchema,
       query: workerOperationalQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params as unknown as WorkerOperationalParamsDto;
         const query = req.query as unknown as WorkerOperationalQueryDto;
 
-        const result = service.getOperationalTasks(projectId, query);
+        const result = await service.getOperationalTasks(projectId, query);
         res.status(200).json(result);
       } catch (error) {
         next(error);

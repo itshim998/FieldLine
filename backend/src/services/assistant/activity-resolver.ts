@@ -7,6 +7,7 @@ import {
   ActivityResolutionResult,
   ResolvedActivityInfo
 } from './assistant.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 function mapToResolvedInfo(activity: Activity): ResolvedActivityInfo {
   return {
@@ -315,7 +316,7 @@ export class DeterministicActivityResolver {
    * 3. Exact name + location (case-insensitive normalized)
    * 4. Unique deterministic textual & morphological match
    */
-  resolve(projectId: string, query: string): ActivityResolutionResult {
+  resolve(projectId: string, query: string): MaybePromise<ActivityResolutionResult> {
     const rawQuery = (query || '').trim();
     if (!rawQuery) {
       return { status: 'not_found', activity: null, candidates: [] };
@@ -328,6 +329,19 @@ export class DeterministicActivityResolver {
 
     // Strictly list activities belonging to the specified project only
     const rawActivities = this.activityRepo.listByProjectId(projectId);
+    if (rawActivities instanceof Promise) {
+      return rawActivities.then((activities) =>
+        this.resolveWithActivities(activities, normQuery, rawQuery)
+      );
+    }
+    return this.resolveWithActivities(rawActivities, normQuery, rawQuery);
+  }
+
+  private resolveWithActivities(
+    rawActivities: Activity[],
+    normQuery: string,
+    rawQuery: string
+  ): ActivityResolutionResult {
     if (rawActivities.length === 0) {
       return { status: 'not_found', activity: null, candidates: [] };
     }

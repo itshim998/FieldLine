@@ -11,8 +11,9 @@ import {
   OperationalBlockerRepository,
   operationalBlockerRepository as defaultBlockerRepo
 } from '../../repositories/operational-blocker.repository.js';
-import { OperationalBlocker } from '../../models/domain.types.js';
+import { OperationalBlocker, ProjectProgressSnapshot } from '../../models/domain.types.js';
 import { logger } from '../../config/logger.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export type { RiskClassificationService };
 
@@ -28,12 +29,24 @@ export class DefaultRiskClassificationService implements RiskClassificationServi
     this.blockerRepo = dependencies?.blockerRepo || defaultBlockerRepo;
   }
 
-  getProjectRiskStatus(projectId: string, asOfDate?: string): ProjectRiskStatus {
-    // 1. Obtain authoritative, validated Pass 11 snapshot (validates project existence & asOfDate)
-    const snapshot = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+  getProjectRiskStatus(projectId: string, asOfDate?: string): MaybePromise<ProjectRiskStatus> {
+    const snapshotRes = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+    const blockersRes = this.blockerRepo.listActiveByProject(projectId);
 
-    // 2. Fetch active operational blockers for this project
-    const activeBlockers = this.blockerRepo.listActiveByProject(projectId);
+    if (snapshotRes instanceof Promise || blockersRes instanceof Promise) {
+      return Promise.all([Promise.resolve(snapshotRes), Promise.resolve(blockersRes)]).then(
+        ([snapshot, activeBlockers]) => this.calculateRisk(projectId, snapshot, activeBlockers)
+      );
+    }
+
+    return this.calculateRisk(projectId, snapshotRes, blockersRes);
+  }
+
+  private calculateRisk(
+    projectId: string,
+    snapshot: ProjectProgressSnapshot,
+    activeBlockers: OperationalBlocker[]
+  ): ProjectRiskStatus {
     const activeBlockersMap = new Map<string, OperationalBlocker[]>();
 
     for (const blocker of activeBlockers) {
@@ -44,7 +57,6 @@ export class DefaultRiskClassificationService implements RiskClassificationServi
       }
     }
 
-    // 3. Perform deterministic risk classification calculation incorporating operational blockers
     const riskStatus = calculateProjectRiskStatus(snapshot, undefined, activeBlockersMap);
 
     logger.info(

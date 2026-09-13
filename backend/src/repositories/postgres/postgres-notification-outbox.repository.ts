@@ -59,7 +59,7 @@ function mapRowToNotificationOutbox(row: NotificationOutboxDbRow): NotificationO
   };
 }
 
-export class PostgresNotificationOutboxRepository {
+export class PostgresNotificationOutboxRepository implements NotificationOutboxRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {
@@ -91,12 +91,11 @@ export class PostgresNotificationOutboxRepository {
       input.idempotencyKey || `fieldline-anomaly-alert:${input.activityMatchId}`;
     const maxAttempts = input.maxAttempts ?? env.NOTIFICATION_MAX_ATTEMPTS ?? 5;
     const payloadJson =
-      (input as any).payloadJson ||
-      (typeof (input as any).payload === 'string'
-        ? (input as any).payload
-        : (input as any).payload
-          ? JSON.stringify((input as any).payload)
-          : JSON.stringify({}));
+      typeof input.payload === 'string'
+        ? input.payload
+        : input.payload
+          ? JSON.stringify(input.payload)
+          : JSON.stringify({});
 
     const sql = `
       INSERT INTO notification_outbox (

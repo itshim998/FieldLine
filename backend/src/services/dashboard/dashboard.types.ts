@@ -175,9 +175,11 @@ export interface ProjectDashboardQueryOptions {
   approachingDays?: number;
 }
 
+import type { MaybePromise } from '../../database/provider.js';
+
 export interface ProjectDashboardService {
   getDashboard(
     projectId: string,
     options?: ProjectDashboardQueryOptions
-  ): ProjectDashboard;
+  ): MaybePromise<ProjectDashboard>;
 }

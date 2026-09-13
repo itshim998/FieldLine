@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import { env } from '../config/env.js';
+import type { MaybePromise } from '../database/provider.js';
 import {
   AccountType,
+  Project,
   ProjectAccount,
   ProjectAccountPublic,
   SessionIdentity,
@@ -184,9 +186,9 @@ export class AuthService {
     // 1. Resolve project
     let project = null;
     if (input.projectId) {
-      project = this.projectRepo.getById(input.projectId);
+      project = await this.projectRepo.getById(input.projectId);
     } else if (input.projectCode) {
-      project = this.projectRepo.getByCode(input.projectCode);
+      project = await this.projectRepo.getByCode(input.projectCode);
     } else {
       throw new ValidationError('Either projectId or projectCode must be provided for authentication');
     }
@@ -196,7 +198,7 @@ export class AuthService {
     }
 
     // 2. Resolve account for this project & account type
-    const account = this.accountRepo.findByProjectAndType(project.id, input.accountType);
+    const account = await this.accountRepo.findByProjectAndType(project.id, input.accountType);
     if (!account) {
       throw new AuthenticationError('Invalid project credentials');
     }
@@ -242,8 +244,53 @@ export class AuthService {
       adminDisplayName?: string;
       replaceExisting?: boolean;
     } = {}
-  ): { worker: ProjectAccount; admin: ProjectAccount } {
-    const project = this.projectRepo.getById(projectId);
+  ): MaybePromise<{ worker: ProjectAccount; admin: ProjectAccount }> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return (async () => {
+        const project = await projectRes;
+        if (!project) {
+          throw new NotFoundError(`Project not found: ${projectId}`);
+        }
+
+        const workerPin = options.workerPin || '4444';
+        const adminPassword = options.adminPassword || 'RefineryAdmin2026!';
+        const workerDisplayName = options.workerDisplayName || 'Field Operations Crew';
+        const adminDisplayName = options.adminDisplayName || 'Project Superintendent';
+
+        // 1. Worker Account
+        let worker = await this.accountRepo.findByProjectAndType(projectId, 'worker');
+        if (!worker) {
+          worker = await this.accountRepo.create({
+            projectId,
+            accountType: 'worker',
+            credentialHash: this.hashPasscode(workerPin),
+            displayName: workerDisplayName
+          });
+        } else if (options.replaceExisting) {
+          await this.accountRepo.updateCredential(worker.id, this.hashPasscode(workerPin));
+          worker = (await this.accountRepo.findById(worker.id))!;
+        }
+
+        // 2. Admin Account
+        let admin = await this.accountRepo.findByProjectAndType(projectId, 'admin');
+        if (!admin) {
+          admin = await this.accountRepo.create({
+            projectId,
+            accountType: 'admin',
+            credentialHash: this.hashPasscode(adminPassword),
+            displayName: adminDisplayName
+          });
+        } else if (options.replaceExisting) {
+          await this.accountRepo.updateCredential(admin.id, this.hashPasscode(adminPassword));
+          admin = (await this.accountRepo.findById(admin.id))!;
+        }
+
+        return { worker, admin };
+      })();
+    }
+
+    const project = projectRes as Project | null;
     if (!project) {
       throw new NotFoundError(`Project not found: ${projectId}`);
     }
@@ -254,31 +301,31 @@ export class AuthService {
     const adminDisplayName = options.adminDisplayName || 'Project Superintendent';
 
     // 1. Worker Account
-    let worker = this.accountRepo.findByProjectAndType(projectId, 'worker');
+    let worker = this.accountRepo.findByProjectAndType(projectId, 'worker') as ProjectAccount | null;
     if (!worker) {
       worker = this.accountRepo.create({
         projectId,
         accountType: 'worker',
         credentialHash: this.hashPasscode(workerPin),
         displayName: workerDisplayName
-      });
+      }) as ProjectAccount;
     } else if (options.replaceExisting) {
       this.accountRepo.updateCredential(worker.id, this.hashPasscode(workerPin));
-      worker = this.accountRepo.findById(worker.id)!;
+      worker = this.accountRepo.findById(worker.id) as ProjectAccount;
     }
 
     // 2. Admin Account
-    let admin = this.accountRepo.findByProjectAndType(projectId, 'admin');
+    let admin = this.accountRepo.findByProjectAndType(projectId, 'admin') as ProjectAccount | null;
     if (!admin) {
       admin = this.accountRepo.create({
         projectId,
         accountType: 'admin',
         credentialHash: this.hashPasscode(adminPassword),
         displayName: adminDisplayName
-      });
+      }) as ProjectAccount;
     } else if (options.replaceExisting) {
       this.accountRepo.updateCredential(admin.id, this.hashPasscode(adminPassword));
-      admin = this.accountRepo.findById(admin.id)!;
+      admin = this.accountRepo.findById(admin.id) as ProjectAccount;
     }
 
     return { worker, admin };
@@ -287,7 +334,7 @@ export class AuthService {
   /**
    * Retrieves sanitized public account profiles for a project.
    */
-  getPublicAccounts(projectId: string): ProjectAccountPublic[] {
+  getPublicAccounts(projectId: string): MaybePromise<ProjectAccountPublic[]> {
     return this.accountRepo.listPublicByProjectId(projectId);
   }
 }

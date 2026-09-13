@@ -27,6 +27,8 @@ import {
 import { NotFoundError, ValidationError } from '../errors/AppError.js';
 import { logger } from '../config/logger.js';
 
+import type { MaybePromise } from '../database/provider.js';
+
 export type ProgressUpdateEntity = ProgressUpdate;
 
 export interface CreateManualUpdateInput {
@@ -39,13 +41,13 @@ export interface CreateManualUpdateInput {
 }
 
 export interface ProgressUpdateService {
-  createManualUpdate(input: CreateManualUpdateInput): ProgressUpdateEntity;
+  createManualUpdate(input: CreateManualUpdateInput): MaybePromise<ProgressUpdateEntity>;
   createAndProcessManualUpdate(input: CreateManualUpdateInput): Promise<{
     progressUpdate: ProgressUpdateEntity;
     matches: ActivityMatch[];
   }>;
-  listProjectUpdates(projectId: string): ProgressUpdateEntity[];
-  getProjectUpdate(projectId: string, updateId: string): ProgressUpdateEntity;
+  listProjectUpdates(projectId: string): MaybePromise<ProgressUpdateEntity[]>;
+  getProjectUpdate(projectId: string, updateId: string): MaybePromise<ProgressUpdateEntity>;
 }
 
 export class DefaultProgressUpdateService implements ProgressUpdateService {
@@ -74,7 +76,7 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
     matches: ActivityMatch[];
   }> {
     // 1. Persist progress report record
-    const progressRecord = this.createManualUpdate(input);
+    const progressRecord = await this.createManualUpdate(input);
 
     let matches: ActivityMatch[] = [];
 
@@ -101,7 +103,7 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
     }
 
     // 3. Query all persisted matches for this report
-    matches = this.activityMatchRepo.listByProgressUpdateId(progressRecord.id, input.projectId);
+    matches = await this.activityMatchRepo.listByProgressUpdateId(progressRecord.id, input.projectId);
 
     return {
       progressUpdate: progressRecord,
@@ -109,14 +111,8 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
     };
   }
 
-  createManualUpdate(input: CreateManualUpdateInput): ProgressUpdateEntity {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(input.projectId);
-    if (!project) {
-      throw new NotFoundError(`Project with ID '${input.projectId}' not found`);
-    }
-
-    // 2. Validate raw text is non-empty
+  createManualUpdate(input: CreateManualUpdateInput): MaybePromise<ProgressUpdateEntity> {
+    // 1. Validate raw text is non-empty
     if (!input.rawText || input.rawText.trim().length === 0) {
       throw new ValidationError('Report text cannot be empty or whitespace only');
     }
@@ -125,17 +121,17 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
       throw new ValidationError('Report text must not exceed 50,000 characters');
     }
 
-    // 3. Validate report date format
+    // 2. Validate report date format
     if (!input.reportDate || !/^\d{4}-\d{2}-\d{2}$/.test(input.reportDate)) {
       throw new ValidationError('Report date must be a valid date in YYYY-MM-DD format');
     }
 
-    // 4. Validate reporter name if provided
+    // 3. Validate reporter name if provided
     if (input.reporterName !== undefined && input.reporterName !== null && input.reporterName.length > 0 && input.reporterName.trim().length === 0) {
       throw new ValidationError('Reporter name cannot be whitespace only');
     }
 
-    // 5. Default sourceType to "manual" if unspecified and status = "received", preserve rawText verbatim
+    // 4. Default sourceType to "manual" if unspecified and status = "received", preserve rawText verbatim
     const createInput: CreateProgressUpdateInput = {
       projectId: input.projectId,
       reportDate: input.reportDate,
@@ -146,33 +142,79 @@ export class DefaultProgressUpdateService implements ProgressUpdateService {
       status: 'received'
     };
 
+    // 5. Verify project exists
+    const projectRes = this.projectRepo.getById(input.projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${input.projectId}' not found`);
+        }
+        return this.progressUpdateRepo.create(createInput);
+      });
+    }
+
+    if (!projectRes) {
+      throw new NotFoundError(`Project with ID '${input.projectId}' not found`);
+    }
+
     return this.progressUpdateRepo.create(createInput);
   }
 
-  listProjectUpdates(projectId: string): ProgressUpdateEntity[] {
+  listProjectUpdates(projectId: string): MaybePromise<ProgressUpdateEntity[]> {
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.progressUpdateRepo.listByProjectId(projectId);
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     return this.progressUpdateRepo.listByProjectId(projectId);
   }
 
-  getProjectUpdate(projectId: string, updateId: string): ProgressUpdateEntity {
+  getProjectUpdate(projectId: string, updateId: string): MaybePromise<ProgressUpdateEntity> {
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const record = await this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+        if (!record) {
+          throw new NotFoundError(`Progress report with ID '${updateId}' not found for project '${projectId}'`);
+        }
+        return record;
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     // 2. Query scoped strictly to the given project
-    const record = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
-    if (!record) {
+    const recordRes = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+    if (recordRes instanceof Promise) {
+      return recordRes.then((record) => {
+        if (!record) {
+          throw new NotFoundError(`Progress report with ID '${updateId}' not found for project '${projectId}'`);
+        }
+        return record;
+      });
+    }
+
+    if (!recordRes) {
       throw new NotFoundError(`Progress report with ID '${updateId}' not found for project '${projectId}'`);
     }
 
-    return record;
+    return recordRes;
   }
 }
 

@@ -106,9 +106,11 @@ export interface ProjectIntelligenceQueryOptions {
   limit?: number;
 }
 
+import { MaybePromise } from '../../database/provider.js';
+
 export interface ProjectIntelligenceService {
   getIntelligence(
     projectId: string,
     options?: ProjectIntelligenceQueryOptions
-  ): ProjectIntelligence;
+  ): MaybePromise<ProjectIntelligence>;
 }

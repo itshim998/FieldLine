@@ -25,12 +25,12 @@ export function createProgressRouter(
       params: normalizeProgressParamsSchema,
       body: normalizeProgressRequestSchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, updateId } = req.params;
         const { matchId, fact, actualQuantity, quantityUnit, asOfDate, allowSuggested } = req.body;
 
-        const progress = service.normalizeAndRecordProgress({
+        const progress = await service.normalizeAndRecordProgress({
           projectId,
           updateId,
           matchId,
@@ -54,10 +54,10 @@ export function createProgressRouter(
     '/projects/:projectId/activities/:activityId/progress',
     optionalAuthenticateSession,
     validateParams(activityProgressParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, activityId } = req.params;
-        const progress = service.listActivityProgress(projectId, activityId);
+        const progress = await service.listActivityProgress(projectId, activityId);
 
         res.status(200).json({ progress });
       } catch (error) {
@@ -72,10 +72,10 @@ export function createProgressRouter(
     '/projects/:projectId/activities/:activityId/progress/latest',
     optionalAuthenticateSession,
     validateParams(activityProgressParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, activityId } = req.params;
-        const progress = service.getLatestActivityProgress(projectId, activityId);
+        const progress = await service.getLatestActivityProgress(projectId, activityId);
 
         res.status(200).json({ progress });
       } catch (error) {

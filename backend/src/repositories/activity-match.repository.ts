@@ -63,24 +63,26 @@ export interface PersistMatchesAndEventsAtomicInput {
   notifications?: CreateNotificationOutboxInput[];
 }
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ActivityMatchRepository {
-  create(input: CreateActivityMatchInput): ActivityMatch;
-  createMany(inputs: CreateActivityMatchInput[]): ActivityMatch[];
-  getById(id: string): ActivityMatch | null;
-  getByIdAndProjectId(id: string, projectId: string): ActivityMatch | null;
-  listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityMatch[];
-  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityMatch[];
-  listByActivityId(activityId: string, projectId: string): ActivityMatch[];
-  listByProjectId(projectId: string): ActivityMatch[];
-  updateMatchReview(input: UpdateMatchReviewInput): ActivityMatch | null;
-  confirmMatchAtomically(input: ConfirmMatchAtomicInput): ActivityMatch;
-  rejectMatchAtomically(input: RejectMatchAtomicInput): ActivityMatch;
-  resolveMatchAtomically(input: ResolveMatchAtomicInput): ActivityMatch;
-  persistMatchesAndEventsAtomically(input: PersistMatchesAndEventsAtomicInput): ActivityMatch[];
-  delete(id: string, projectId?: string): boolean;
-  deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): number;
-  deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): number;
-  runInTransaction?<T>(fn: () => T): T;
+  create(input: CreateActivityMatchInput): MaybePromise<ActivityMatch>;
+  createMany(inputs: CreateActivityMatchInput[]): MaybePromise<ActivityMatch[]>;
+  getById(id: string): MaybePromise<ActivityMatch | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<ActivityMatch | null>;
+  listByProgressUpdateId(progressUpdateId: string, projectId?: string): MaybePromise<ActivityMatch[]>;
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): MaybePromise<ActivityMatch[]>;
+  listByActivityId(activityId: string, projectId: string): MaybePromise<ActivityMatch[]>;
+  listByProjectId(projectId: string): MaybePromise<ActivityMatch[]>;
+  updateMatchReview(input: UpdateMatchReviewInput): MaybePromise<ActivityMatch | null>;
+  confirmMatchAtomically(input: ConfirmMatchAtomicInput): MaybePromise<ActivityMatch>;
+  rejectMatchAtomically(input: RejectMatchAtomicInput): MaybePromise<ActivityMatch>;
+  resolveMatchAtomically(input: ResolveMatchAtomicInput): MaybePromise<ActivityMatch>;
+  persistMatchesAndEventsAtomically(input: PersistMatchesAndEventsAtomicInput): MaybePromise<ActivityMatch[]>;
+  delete(id: string, projectId?: string): MaybePromise<boolean>;
+  deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): MaybePromise<number>;
+  deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): MaybePromise<number>;
+  runInTransaction?<T>(fn: () => MaybePromise<T>): MaybePromise<T>;
 }
 
 interface ActivityMatchDbRow {

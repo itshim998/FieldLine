@@ -19,7 +19,9 @@ import type {
   ActivityMatchRepository,
   PersistMatchesAndEventsAtomicInput,
   ResolveMatchAtomicInput,
-  RejectMatchAtomicInput
+  RejectMatchAtomicInput,
+  ConfirmMatchAtomicInput,
+  UpdateMatchReviewInput
 } from '../activity-match.repository.js';
 
 export interface UpdateActivityMatchInput {
@@ -93,7 +95,7 @@ function mapRowToActivityMatch(row: ActivityMatchDbRow): ActivityMatch {
   };
 }
 
-export class PostgresActivityMatchRepository {
+export class PostgresActivityMatchRepository implements ActivityMatchRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {
@@ -648,13 +650,283 @@ export class PostgresActivityMatchRepository {
     }
   }
 
-  async delete(id: string, projectId: string): Promise<boolean> {
+  async delete(id: string, projectId?: string): Promise<boolean> {
     try {
       const pool = this.getPool();
-      const res = await pool.query('DELETE FROM activity_matches WHERE id = $1 AND project_id = $2', [id, projectId]);
+      let res;
+      if (projectId) {
+        res = await pool.query('DELETE FROM activity_matches WHERE id = $1 AND project_id = $2', [id, projectId]);
+      } else {
+        res = await pool.query('DELETE FROM activity_matches WHERE id = $1', [id]);
+      }
       return (res.rowCount ?? 0) > 0;
     } catch (err: unknown) {
       throw new DatabaseError(`Failed to delete activity match: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async createMany(inputs: CreateActivityMatchInput[]): Promise<ActivityMatch[]> {
+    if (!inputs || inputs.length === 0) return [];
+    const pool = this.getPool();
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const results: ActivityMatch[] = [];
+      for (const input of inputs) {
+        const item = await this.create(input, client);
+        results.push(item);
+      }
+      await client.query('COMMIT');
+      return results;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): Promise<ActivityMatch[]> {
+    if (!progressUpdateIds || progressUpdateIds.length === 0) return [];
+    const pool = this.getPool();
+    try {
+      const res = await pool.query(
+        `SELECT * FROM activity_matches WHERE project_id = $1 AND progress_update_id = ANY($2::text[]) ORDER BY created_at ASC`,
+        [projectId, progressUpdateIds]
+      );
+      return res.rows.map(mapRowToActivityMatch);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list activity matches by progress update IDs: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  async listByActivityId(activityId: string, projectId: string): Promise<ActivityMatch[]> {
+    const pool = this.getPool();
+    try {
+      const res = await pool.query(
+        `SELECT * FROM activity_matches WHERE activity_id = $1 AND project_id = $2 ORDER BY created_at DESC`,
+        [activityId, projectId]
+      );
+      return res.rows.map(mapRowToActivityMatch);
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to list activity matches for activity: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  async confirmMatchAtomically(input: ConfirmMatchAtomicInput): Promise<ActivityMatch> {
+    const pool = this.getPool();
+    const client = await pool.connect();
+    const eventId = crypto.randomUUID();
+
+    try {
+      await client.query('BEGIN');
+
+      const matchRes = await client.query(
+        'SELECT * FROM activity_matches WHERE id = $1 AND project_id = $2 FOR UPDATE',
+        [input.id, input.projectId]
+      );
+
+      if (matchRes.rows.length === 0) {
+        throw new NotFoundError(
+          `Activity match with ID '${input.id}' not found for project '${input.projectId}'`
+        );
+      }
+
+      const existing = matchRes.rows[0];
+      if (existing.status === 'confirmed') {
+        throw new ValidationError(
+          `Cannot confirm match '${input.id}'. Confirmed match history is immutable.`
+        );
+      }
+      if (existing.status === 'rejected') {
+        throw new ValidationError(
+          `Cannot confirm match '${input.id}'. Rejected match history is immutable.`
+        );
+      }
+      if (existing.review_state === 'unresolved') {
+        throw new ValidationError(
+          `Cannot confirm unresolved match '${input.id}' without selecting an activity. Use resolve to assign a specific activity.`
+        );
+      }
+
+      const updateRes = await client.query(
+        `
+        UPDATE activity_matches
+        SET
+          status = 'confirmed',
+          review_state = 'resolved',
+          reviewed_by = $1,
+          reviewed_at = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3 AND project_id = $4 AND status = 'suggested'
+        RETURNING *
+      `,
+        [input.reviewer, input.nowIso, input.id, input.projectId]
+      );
+
+      if ((updateRes.rowCount ?? 0) === 0) {
+        throw new ValidationError(
+          `Failed to confirm match '${input.id}': State may have changed concurrently.`
+        );
+      }
+
+      const payload = JSON.stringify({
+        matchId: input.id,
+        progressUpdateId: existing.progress_update_id,
+        activityId: existing.activity_id,
+        confidenceScore: Number(existing.confidence_score),
+        confidenceTier: existing.confidence_tier,
+        reviewSource: 'human',
+        reviewer: input.reviewer
+      });
+
+      await client.query(
+        `
+        INSERT INTO project_events (
+          id, project_id, event_type, entity_type, entity_id, summary, payload_json, created_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8
+        )
+      `,
+        [
+          eventId,
+          input.projectId,
+          'match_confirmed',
+          'activity_matches',
+          input.id,
+          `Activity match confirmed by reviewer '${input.reviewer}' for activity '${existing.activity_id}'`,
+          payload,
+          input.nowIso
+        ]
+      );
+
+      await client.query('COMMIT');
+      return mapRowToActivityMatch(updateRes.rows[0]);
+    } catch (err: unknown) {
+      await client.query('ROLLBACK');
+      if (err instanceof NotFoundError || err instanceof ValidationError) {
+        throw err;
+      }
+      throw new DatabaseError(
+        `Failed to confirm activity match atomically: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      client.release();
+    }
+  }
+
+  async updateMatchReview(input: UpdateMatchReviewInput): Promise<ActivityMatch | null> {
+    const pool = this.getPool();
+    const existing = await this.getByIdAndProjectId(input.id, input.projectId);
+    if (!existing) {
+      return null;
+    }
+
+    if (existing.status === 'confirmed') {
+      throw new ValidationError(
+        `Cannot update match '${input.id}'. Confirmed match history is immutable.`
+      );
+    }
+    if (existing.status === 'rejected') {
+      throw new ValidationError(
+        `Cannot update match '${input.id}'. Rejected match history is immutable.`
+      );
+    }
+
+    const updatedActivityId = input.activityId ?? existing.activityId;
+    const updatedMatchMethod = input.matchMethod ?? existing.matchMethod;
+    const updatedRationale = input.rationale !== undefined ? input.rationale : existing.rationale;
+    const updatedReviewState = input.reviewState !== undefined ? input.reviewState : existing.reviewState;
+
+    const sql = `
+      UPDATE activity_matches
+      SET
+        activity_id = $1,
+        status = $2,
+        match_method = $3,
+        rationale = $4,
+        review_state = $5,
+        reviewed_by = $6,
+        reviewed_at = $7,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $8 AND project_id = $9 AND status = 'suggested'
+      RETURNING *
+    `;
+
+    try {
+      const res = await pool.query(sql, [
+        updatedActivityId,
+        input.status,
+        updatedMatchMethod,
+        updatedRationale,
+        updatedReviewState,
+        input.reviewedBy ?? null,
+        input.reviewedAt ?? null,
+        input.id,
+        input.projectId
+      ]);
+
+      if (res.rowCount === 0) {
+        throw new ValidationError(
+          `Failed to update match '${input.id}': State may have changed concurrently.`
+        );
+      }
+
+      return mapRowToActivityMatch(res.rows[0]);
+    } catch (err: unknown) {
+      if (err instanceof ValidationError) {
+        throw err;
+      }
+      if (err instanceof Error && 'code' in err && (err as { code: string }).code === '23503') {
+        throw new DatabaseError(
+          `Failed to update activity match review due to foreign key constraint: ${err.message}`
+        );
+      }
+      throw new DatabaseError(
+        `Failed to update activity match review: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  async deleteByProgressUpdateId(progressUpdateId: string, projectId?: string): Promise<number> {
+    const pool = this.getPool();
+    try {
+      let res;
+      if (projectId) {
+        res = await pool.query(
+          'DELETE FROM activity_matches WHERE progress_update_id = $1 AND project_id = $2',
+          [progressUpdateId, projectId]
+        );
+      } else {
+        res = await pool.query(
+          'DELETE FROM activity_matches WHERE progress_update_id = $1',
+          [progressUpdateId]
+        );
+      }
+      return res.rowCount ?? 0;
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to delete activity matches for progress update: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  async deleteSuggestedByProgressUpdateId(progressUpdateId: string, projectId: string): Promise<number> {
+    const pool = this.getPool();
+    try {
+      const res = await pool.query(
+        `DELETE FROM activity_matches WHERE progress_update_id = $1 AND project_id = $2 AND status = 'suggested'`,
+        [progressUpdateId, projectId]
+      );
+      return res.rowCount ?? 0;
+    } catch (err: unknown) {
+      throw new DatabaseError(
+        `Failed to delete suggested activity matches for progress report: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 }

@@ -47,10 +47,10 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
     '/projects/:projectId/progress-updates',
     optionalAuthenticateSession,
     validateParams(progressUpdateProjectIdParamSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        const progressUpdates = service.listProjectUpdates(projectId);
+        const progressUpdates = await service.listProjectUpdates(projectId);
         res.status(200).json({ progressUpdates });
       } catch (error) {
         next(error);
@@ -63,10 +63,10 @@ export function createProgressUpdateRouter(service: ProgressUpdateService = prog
     '/projects/:projectId/progress-updates/:updateId',
     optionalAuthenticateSession,
     validateParams(progressUpdateParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, updateId } = req.params;
-        const progressUpdate = service.getProjectUpdate(projectId, updateId);
+        const progressUpdate = await service.getProjectUpdate(projectId, updateId);
         res.status(200).json({ progressUpdate });
       } catch (error) {
         next(error);

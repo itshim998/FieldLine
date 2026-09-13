@@ -30,12 +30,12 @@ export function createBlockerRouter(service: BlockerService = defaultBlockerServ
       params: blockerParamsSchema,
       body: createBlockerSchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params as unknown as BlockerParamsDto;
         const body = req.body as CreateBlockerDto;
 
-        const blocker = service.reportBlocker(projectId, body, req.session);
+        const blocker = await service.reportBlocker(projectId, body, req.session);
         res.status(201).json({ blocker });
       } catch (error) {
         next(error);
@@ -52,12 +52,12 @@ export function createBlockerRouter(service: BlockerService = defaultBlockerServ
       params: blockerParamsSchema,
       query: blockerQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params as unknown as BlockerParamsDto;
         const query = req.query as unknown as BlockerQueryDto;
 
-        const blockers = service.listByProject(projectId, query);
+        const blockers = await service.listByProject(projectId, query);
         res.status(200).json({ blockers });
       } catch (error) {
         next(error);
@@ -74,12 +74,12 @@ export function createBlockerRouter(service: BlockerService = defaultBlockerServ
       params: blockerParamsSchema,
       body: resolveBlockerSchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, id } = req.params as unknown as BlockerParamsDto;
         const body = req.body as ResolveBlockerDto;
 
-        const blocker = service.resolveBlocker(projectId, id!, body, req.session);
+        const blocker = await service.resolveBlocker(projectId, id!, body, req.session);
         res.status(200).json({ blocker });
       } catch (error) {
         next(error);
@@ -89,12 +89,12 @@ export function createBlockerRouter(service: BlockerService = defaultBlockerServ
 
   // POST /projects/:projectId/safety/hazards
   // Report site safety hazard / near miss observation
-  const handleReportHazard = (req: Request, res: Response, next: NextFunction): void => {
+  const handleReportHazard = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { projectId } = req.params as unknown as BlockerParamsDto;
       const body = req.body as ReportHazardDto;
 
-      const event = service.reportSafetyHazard(projectId, body, req.session);
+      const event = await service.reportSafetyHazard(projectId, body, req.session);
       res.status(201).json({ event });
     } catch (error) {
       next(error);

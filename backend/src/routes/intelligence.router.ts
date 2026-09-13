@@ -23,12 +23,12 @@ export function createIntelligenceRouter(
       params: intelligenceParamsSchema,
       query: intelligenceQuerySchema
     }),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
         const query = req.query as unknown as IntelligenceQueryDto;
 
-        const intelligence = service.getIntelligence(projectId, {
+        const intelligence = await service.getIntelligence(projectId, {
           asOfDate: query.asOfDate,
           recentDays: query.recentDays,
           approachingDays: query.approachingDays,

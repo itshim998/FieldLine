@@ -40,6 +40,7 @@ import {
 import {
   normalizeDate
 } from '../normalization/date-normalizer.js';
+import { AnomalyPrediction } from '../../ml/types.js';
 import {
   validateSnapshotDate,
   getTodayDateString
@@ -495,7 +496,7 @@ export class AssistantService {
     }
 
     // 2. Verify project exists (enforce project isolation)
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
@@ -570,7 +571,7 @@ export class AssistantService {
     let resolvedActivity: ResolvedActivityInfo | null = null;
     const activityQueryTarget = intent.activityQuery || trimmedQuestion;
     if (activityQueryTarget) {
-      const resolution = this.resolver.resolve(projectId, activityQueryTarget);
+      const resolution = await this.resolver.resolve(projectId, activityQueryTarget);
 
       if (resolution.status === 'not_found' && intent.activityQuery) {
         return {
@@ -630,7 +631,7 @@ export class AssistantService {
           options?.userRole ||
           (options?.role === 'worker' ? 'Field Operations Crew' : 'Field Engineer');
 
-        const updateRecord = this.progressUpdateService.createManualUpdate({
+        const updateRecord = await this.progressUpdateService.createManualUpdate({
           projectId,
           reportDate: canonicalDate,
           rawText: trimmedQuestion,
@@ -640,9 +641,9 @@ export class AssistantService {
         });
 
         // Evaluate anomaly before recording progress
-        let anomaly = null;
+        let anomaly: AnomalyPrediction | null = null;
         if (progressPercent !== null && progressPercent !== undefined) {
-          anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+          anomaly = await this.anomalyEvaluationService.evaluateProgressAnomaly({
             projectId,
             activityId: resolvedActivity.id,
             reportedPercent: progressPercent,
@@ -650,7 +651,7 @@ export class AssistantService {
           });
         }
 
-        const match = this.activityMatchRepo.create({
+        const match = await this.activityMatchRepo.create({
           projectId,
           progressUpdateId: updateRecord.id,
           activityId: resolvedActivity.id,
@@ -671,7 +672,7 @@ export class AssistantService {
               : null
         });
 
-        this.progressService.normalizeAndRecordProgress({
+        await this.progressService.normalizeAndRecordProgress({
           projectId,
           updateId: updateRecord.id,
           matchId: match.id,
@@ -766,7 +767,7 @@ export class AssistantService {
     }
 
     // 7. Compile verified facts from Project Intelligence layer
-    const facts = this.factBuilder.buildFacts(projectId, intent, canonicalDate, resolvedActivity);
+    const facts = await this.factBuilder.buildFacts(projectId, intent, canonicalDate, resolvedActivity);
 
     // Sanitize facts for worker role (omit systemic variance metrics)
     if (options?.role === 'worker') {

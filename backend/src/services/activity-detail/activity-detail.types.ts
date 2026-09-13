@@ -108,10 +108,12 @@ export interface ActivityDetailQueryOptions {
   asOfDate?: string;
 }
 
+import { MaybePromise } from '../../database/provider.js';
+
 export interface ActivityDetailService {
   getActivityDetail(
     projectId: string,
     activityId: string,
     options?: ActivityDetailQueryOptions
-  ): ActivityDetail;
+  ): MaybePromise<ActivityDetail>;
 }

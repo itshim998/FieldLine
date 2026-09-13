@@ -57,11 +57,11 @@ authRouter.post('/auth/login', async (req: Request, res: Response, next: NextFun
  * GET /api/auth/session
  * Validates the current Bearer token and returns authenticated session identity.
  */
-authRouter.get('/auth/session', (req: Request, res: Response, next: NextFunction) => {
+authRouter.get('/auth/session', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = extractBearerToken(req);
     const session = authService.verifySessionToken(token);
-    const project = projectRepository.getById(session.projectId);
+    const project = await projectRepository.getById(session.projectId);
 
     if (!project) {
       throw new AuthenticationError('Associated project not found');
@@ -106,15 +106,15 @@ authRouter.post('/auth/verify', (req: Request, res: Response, next: NextFunction
  * GET /api/projects/:projectId/accounts
  * Returns public account profiles (without credential hashes) for a project.
  */
-authRouter.get('/projects/:projectId/accounts', (req: Request, res: Response, next: NextFunction) => {
+authRouter.get('/projects/:projectId/accounts', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { projectId } = req.params;
-    const project = projectRepository.getById(projectId);
+    const project = await projectRepository.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project not found: ${projectId}`);
     }
 
-    const accounts = authService.getPublicAccounts(projectId);
+    const accounts = await authService.getPublicAccounts(projectId);
 
     res.status(200).json({
       success: true,

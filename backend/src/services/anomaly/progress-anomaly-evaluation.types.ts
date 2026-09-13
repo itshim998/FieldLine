@@ -1,5 +1,6 @@
 import { AnomalyPrediction } from '../../ml/types.js';
 import { Activity } from '../../models/domain.types.js';
+import { MaybePromise } from '../../database/provider.js';
 
 export interface EvaluateProgressAnomalyInput {
   projectId: string;
@@ -30,5 +31,5 @@ export interface ProgressAnomalyEvaluationService {
    * 3. Read-Only: Never mutates activity_progress or canonical truth.
    * 4. Error Resilience: Catches internal failures and falls back to safe cold-start rather than aborting the caller.
    */
-  evaluateProgressAnomaly(input: EvaluateProgressAnomalyInput): AnomalyPrediction | null;
+  evaluateProgressAnomaly(input: EvaluateProgressAnomalyInput): MaybePromise<AnomalyPrediction | null>;
 }

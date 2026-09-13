@@ -43,7 +43,7 @@ function mapRowToActivity(row: ActivityDbRow): Activity {
   };
 }
 
-export class PostgresActivityRepository {
+export class PostgresActivityRepository implements ActivityRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

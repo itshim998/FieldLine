@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { CreateActivityMatchInput } from '../../models/domain.types.js';
 import {
   EvidenceRepository,
   evidenceRepository as defaultEvidenceRepo
@@ -9,7 +10,8 @@ import {
 } from '../../repositories/project.repository.js';
 import {
   ProgressUpdateRepository,
-  progressUpdateRepository as defaultProgressUpdateRepo
+  progressUpdateRepository as defaultProgressUpdateRepo,
+  DocumentProcessingTxInput
 } from '../../repositories/progress-update.repository.js';
 import {
   ActivityMatchRepository,
@@ -83,24 +85,32 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
     ];
   }
 
+  private resolveReportDate(normalizedDoc: NormalizedDocument, evidence: any): string {
+    return (
+      (normalizedDoc.metadata?.reportDate as string) ||
+      extractReportDate(normalizedDoc.text) ||
+      new Date().toISOString().slice(0, 10)
+    );
+  }
+
   /**
    * Extracts normalized text content from a stored evidence document without mutating database state.
    */
   async extractDocument(projectId: string, evidenceId: string): Promise<NormalizedDocument> {
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     // 2. Verify evidence exists and belongs to the project
-    const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
+    const evidence = await this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
     if (!evidence) {
       throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
     }
 
     // 3. Safely load physical file content
-    const contentResult = this.evidenceService.getEvidenceContent(projectId, evidenceId);
+    const contentResult = await this.evidenceService.getEvidenceContent(projectId, evidenceId);
     let fileBuffer: Buffer;
     try {
       fileBuffer = fs.readFileSync(contentResult.absoluteFilePath);
@@ -147,25 +157,25 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
    */
   async processEvidence(projectId: string, evidenceId: string): Promise<ProcessEvidenceResult> {
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     // 2. Verify evidence exists and belongs to project
-    const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
+    const evidence = await this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
     if (!evidence) {
       throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
     }
 
     // 3. Durable Idempotency: check if evidence is ALREADY linked to an existing progress report
     if (evidence.progressUpdateId) {
-      const priorProgress = this.progressUpdateRepo.getByIdAndProjectId(evidence.progressUpdateId, projectId);
+      const priorProgress = await this.progressUpdateRepo.getByIdAndProjectId(evidence.progressUpdateId, projectId);
       if (priorProgress) {
         logger.debug(
           `DocumentIngestionService: Evidence ${evidenceId} already has durable report ${evidence.progressUpdateId}. Reusing existing project state.`
         );
-        const existingMatches = this.activityMatchRepo.listByProgressUpdateId(priorProgress.id, projectId);
+        const existingMatches = await this.activityMatchRepo.listByProgressUpdateId(priorProgress.id, projectId);
         return {
           evidence,
           progressUpdate: priorProgress,
@@ -175,73 +185,80 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
             metadata: {}
           },
           extraction: { items: [] },
-          matches: existingMatches.map((m) => ({
+          matches: existingMatches.map((m): FieldFactMatchResult => ({
             fact: {
               reference: m.matchedText || m.activityId,
               location: null,
               progress_percent: null,
-              status: 'in_progress' as const
+              status: 'in_progress'
             },
             bestMatch: {
               activityId: m.activityId,
-              activityExternalId: m.activityId,
-              activityName: m.activityId,
+              activityExternalId: m.matchedText || m.activityId,
+              activityName: m.matchedText || m.activityId,
               confidenceScore: m.confidenceScore,
               matchMethod: m.matchMethod,
-              matchedText: m.matchedText || '',
-              rationale: m.rationale || ''
+              rationale: m.rationale || 'Durable matched fact',
+              matchedText: m.matchedText
             },
-            alternatives: []
+            alternatives: [],
+            confidenceTier: m.confidenceTier || undefined,
+            reviewDecision: {
+              tier: m.confidenceTier || 'medium',
+              reviewState: m.reviewState || 'awaiting_review',
+              autoConfirm: m.status === 'confirmed',
+              reason: 'Reused from existing processed evidence record'
+            }
           }))
         };
       }
     }
 
-    // 4. Extract and normalize document content
+    // 4. Extract normalized text content
     const normalizedDoc = await this.extractDocument(projectId, evidenceId);
-
     if (!normalizedDoc.text || normalizedDoc.text.trim().length === 0) {
-      throw new ValidationError('Extracted document content is empty or contains only whitespace');
+      throw new ValidationError(
+        `Document '${evidence.fileName}' contains no readable or extracted text`
+      );
     }
 
-    // 4. Determine report date (explicit date in document preferred over today fallback)
-    const reportDateStr =
-      extractReportDate(normalizedDoc.text) || new Date().toISOString().slice(0, 10);
-
-    // 5. Invoke downstream AI fact extraction before persisting database records
-    logger.debug('DocumentIngestionService: Invoking downstream FieldProgressExtractionService');
+    // 5. Extract structured facts from text using AI
     const extraction = await this.extractionService.extractFromReport(normalizedDoc.text);
 
-    // 6. Compute candidate matches outside transaction
-    logger.debug('DocumentIngestionService: Computing candidate matches via ActivityMatchingService');
+    // 6. Determine canonical report date
+    const reportDateStr = this.resolveReportDate(normalizedDoc, evidence);
+
+    // 7. Compute candidate matches without mutating database
     const matchResults = await this.matchingService.computeMatches(projectId, extraction, {
       asOfDate: reportDateStr
     });
 
-    // 7. Atomic transaction: create progress report, link evidence, and persist matches
+    // 8. Commit atomic transaction creating progress record, linking evidence, and persisting matches
     const mappedSourceType = mapSourceTypeToProgressUpdateType(normalizedDoc.sourceType);
     const nowIso = new Date().toISOString();
-    const toPersist = matchResults
-      .filter((r): r is FieldFactMatchResult & { bestMatch: CandidateMatch } => r.bestMatch !== null)
-      .map(r => {
-        const isAutoConfirm = r.reviewDecision?.autoConfirm ?? false;
-        const anomalyScore = r.bestMatch.anomalyScore ?? r.bestMatch.anomaly?.anomalyScore ?? null;
-        const anomalySeverity = r.bestMatch.anomalySeverity ?? r.bestMatch.anomaly?.severity ?? null;
-        const anomalyReasons = r.bestMatch.anomalyReasons ?? r.bestMatch.anomaly?.reasons ?? null;
+
+    const toPersist: DocumentProcessingTxInput['suggestedMatches'] = matchResults
+      .filter((r) => r.bestMatch !== null)
+      .map((r) => {
+        const isAutoConfirm = r.reviewDecision ? r.reviewDecision.autoConfirm : false;
+        const anomalyScore = r.bestMatch!.anomalyScore ?? r.bestMatch!.anomaly?.anomalyScore ?? null;
+        const anomalySeverity = r.bestMatch!.anomalySeverity ?? r.bestMatch!.anomaly?.severity ?? null;
+        const anomalyReasons = r.bestMatch!.anomalyReasons ?? r.bestMatch!.anomaly?.reasons ?? null;
+
         return {
+          id: crypto.randomUUID(),
           projectId,
-          evidenceId,
-          activityId: r.bestMatch.activityId,
-          confidenceScore: r.bestMatch.confidenceScore,
-          matchMethod: r.bestMatch.matchMethod,
-          matchedText: r.bestMatch.matchedText,
-          rationale: r.bestMatch.rationale,
+          activityId: r.bestMatch!.activityId,
+          confidenceScore: r.bestMatch!.finalScore ?? r.bestMatch!.confidenceScore,
+          matchMethod: r.bestMatch!.matchMethod,
+          matchedText: r.fact.reference,
+          rationale: r.bestMatch!.rationale,
           status: isAutoConfirm ? ('confirmed' as const) : ('suggested' as const),
           confidenceTier: r.confidenceTier || (isAutoConfirm ? 'high' : 'medium'),
           reviewState: r.reviewDecision?.reviewState || (isAutoConfirm ? 'resolved' : 'awaiting_review'),
           reviewedBy: isAutoConfirm ? 'system' : null,
           reviewedAt: isAutoConfirm ? nowIso : null,
-          mlConfidence: r.bestMatch.mlConfidence ?? null,
+          mlConfidence: r.bestMatch!.mlConfidence ?? null,
           anomalyScore,
           anomalySeverity,
           anomalyReasonsJson:
@@ -249,7 +266,7 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
         };
       });
 
-    const txResult = this.progressUpdateRepo.commitDocumentIngestionTransaction({
+    const txResult = await this.progressUpdateRepo.commitDocumentIngestionTransaction({
       progressUpdate: {
         projectId,
         reportDate: reportDateStr,
@@ -263,7 +280,7 @@ export class DefaultDocumentIngestionService implements DocumentIngestionService
       suggestedMatches: toPersist
     });
 
-    const refreshedEvidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId) || evidence;
+    const refreshedEvidence = (await this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId)) || evidence;
 
     return {
       evidence: refreshedEvidence,

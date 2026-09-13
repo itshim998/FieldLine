@@ -20,16 +20,18 @@ export interface DocumentProcessingTxResult {
   matches: ActivityMatch[];
 }
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ProgressUpdateRepository {
-  create(input: CreateProgressUpdateInput): ProgressUpdate;
-  commitDocumentIngestionTransaction(input: DocumentProcessingTxInput): DocumentProcessingTxResult;
-  getById(id: string): ProgressUpdate | null;
-  getByIdAndProjectId(id: string, projectId: string): ProgressUpdate | null;
-  listByIds(ids: string[], projectId: string): ProgressUpdate[];
-  listByProjectId(projectId: string): ProgressUpdate[];
-  countByProjectId(projectId: string): number;
-  delete(id: string): boolean;
-  deleteByIdAndProjectId(id: string, projectId: string): boolean;
+  create(input: CreateProgressUpdateInput): MaybePromise<ProgressUpdate>;
+  commitDocumentIngestionTransaction(input: DocumentProcessingTxInput): MaybePromise<DocumentProcessingTxResult>;
+  getById(id: string): MaybePromise<ProgressUpdate | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<ProgressUpdate | null>;
+  listByIds(ids: string[], projectId: string): MaybePromise<ProgressUpdate[]>;
+  listByProjectId(projectId: string): MaybePromise<ProgressUpdate[]>;
+  countByProjectId(projectId: string): MaybePromise<number>;
+  delete(id: string): MaybePromise<boolean>;
+  deleteByIdAndProjectId(id: string, projectId: string): MaybePromise<boolean>;
 }
 
 interface ProgressUpdateDbRow {

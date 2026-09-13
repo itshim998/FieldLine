@@ -32,6 +32,7 @@ import {
 } from '../anomaly/index.js';
 import type { CreateNotificationOutboxInput } from '../anomaly/notification-outbox.types.js';
 import { AnomalyPrediction } from '../../ml/types.js';
+import type { MaybePromise } from '../../database/provider.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
 
@@ -113,13 +114,13 @@ export class ActivityMatchingService {
     } = options;
 
     // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
     // 2. Fetch scheduled activities for this project
-    const activities = this.activityRepo.listByProjectId(projectId);
+    const activities = await this.activityRepo.listByProjectId(projectId);
     logger.debug(`ActivityMatchingService: Loaded ${activities.length} activities for project ${projectId}`);
 
     const matchResults: FieldFactMatchResult[] = [];
@@ -159,88 +160,90 @@ export class ActivityMatchingService {
       const reportDate = options.asOfDate || new Date().toISOString().slice(0, 10);
 
       // Score candidates with Match Model (ML Reranker - Phase 10) & Anomaly Model (Phase 18)
-      const rankedWithMl: CandidateMatch[] = candidates.map((candidate, idx) => {
-        // Deterministic candidate separation:
-        // runnerUpScore = best deterministic competitor's score
-        // For candidate 0: runnerUp is candidate 1 (if exists)
-        // For candidate k > 0: best competitor is candidate 0
-        const runnerUp = idx === 0 ? candidates[1] : candidates[0];
-        const scoreGap = runnerUp
-          ? Math.max(0, candidate.confidenceScore - runnerUp.confidenceScore)
-          : 1.0;
+      const rankedWithMl: CandidateMatch[] = await Promise.all(
+        candidates.map(async (candidate, idx) => {
+          // Deterministic candidate separation:
+          // runnerUpScore = best deterministic competitor's score
+          // For candidate 0: runnerUp is candidate 1 (if exists)
+          // For candidate k > 0: best competitor is candidate 0
+          const runnerUp = idx === 0 ? candidates[1] : candidates[0];
+          const scoreGap = runnerUp
+            ? Math.max(0, candidate.confidenceScore - runnerUp.confidenceScore)
+            : 1.0;
 
-        let mlConfidence: number | undefined = undefined;
-        let finalScore = candidate.confidenceScore;
-        let rationale = candidate.rationale;
+          let mlConfidence: number | undefined = undefined;
+          let finalScore = candidate.confidenceScore;
+          let rationale = candidate.rationale;
 
-        const act = activityMap.get(candidate.activityId);
-        if (this.matchModelService.isAvailable() && act) {
-          const features = extractMatchFeatures(
-            { reference: fact.reference, location: fact.location },
-            {
-              externalId: act.externalId,
-              name: act.name,
-              description: act.description,
-              wbsCode: act.wbsCode,
-              location: act.location
-            },
-            scoreGap
-          );
-          mlConfidence = this.matchModelService.predict(features);
+          const act = activityMap.get(candidate.activityId);
+          if (this.matchModelService.isAvailable() && act) {
+            const features = extractMatchFeatures(
+              { reference: fact.reference, location: fact.location },
+              {
+                externalId: act.externalId,
+                name: act.name,
+                description: act.description,
+                wbsCode: act.wbsCode,
+                location: act.location
+              },
+              scoreGap
+            );
+            mlConfidence = this.matchModelService.predict(features);
 
-          if (candidate.matchMethod === 'exact_id') {
-            // Exact ID candidates retain deterministic exact-ID score behavior
-            finalScore = candidate.confidenceScore;
-          } else {
-            // Plan formula: 0.4 deterministic + 0.6 ML confidence
-            finalScore = Math.round((candidate.confidenceScore * 0.4 + mlConfidence * 0.6) * 1000) / 1000;
+            if (candidate.matchMethod === 'exact_id') {
+              // Exact ID candidates retain deterministic exact-ID score behavior
+              finalScore = candidate.confidenceScore;
+            } else {
+              // Plan formula: 0.4 deterministic + 0.6 ML confidence
+              finalScore = Math.round((candidate.confidenceScore * 0.4 + mlConfidence * 0.6) * 1000) / 1000;
+            }
+
+            if (!rationale.includes('Learned ML confidence')) {
+              rationale = `${candidate.rationale}; Learned ML confidence: ${Math.round(mlConfidence * 100)}%`;
+            }
           }
 
-          if (!rationale.includes('Learned ML confidence')) {
-            rationale = `${candidate.rationale}; Learned ML confidence: ${Math.round(mlConfidence * 100)}%`;
-          }
-        }
+          // Anomaly Evaluation (Review-Prioritization Assistant - Phase 1 & Phase 18)
+          // Evaluates candidates with non-null reported progress against prior canonical history
+          let anomaly: AnomalyPrediction | undefined = undefined;
+          let previousPercent: number | null = null;
+          if (fact.progress_percent !== null && fact.progress_percent !== undefined && act) {
+            const priorObs = await this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+              act.id,
+              projectId,
+              reportDate
+            );
+            if (priorObs) {
+              previousPercent = priorObs.actualPercent;
+            }
 
-        // Anomaly Evaluation (Review-Prioritization Assistant - Phase 1 & Phase 18)
-        // Evaluates candidates with non-null reported progress against prior canonical history
-        let anomaly: AnomalyPrediction | undefined = undefined;
-        let previousPercent: number | null = null;
-        if (fact.progress_percent !== null && fact.progress_percent !== undefined && act) {
-          const priorObs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
-            act.id,
-            projectId,
-            reportDate
-          );
-          if (priorObs) {
-            previousPercent = priorObs.actualPercent;
+            const evalResult = await this.anomalyEvaluationService.evaluateProgressAnomaly({
+              projectId,
+              activityId: act.id,
+              activity: act,
+              reportedPercent: fact.progress_percent,
+              reportDate
+            });
+            if (evalResult) {
+              anomaly = evalResult;
+            }
           }
 
-          const evalResult = this.anomalyEvaluationService.evaluateProgressAnomaly({
-            projectId,
-            activityId: act.id,
-            activity: act,
-            reportedPercent: fact.progress_percent,
-            reportDate
-          });
-          if (evalResult) {
-            anomaly = evalResult;
-          }
-        }
-
-        return {
-          ...candidate,
-          deterministicScore: candidate.confidenceScore,
-          rationale,
-          mlConfidence: mlConfidence ?? null,
-          finalScore,
-          scoreGap,
-          anomaly,
-          anomalyScore: anomaly ? anomaly.anomalyScore : null,
-          anomalySeverity: anomaly ? anomaly.severity : null,
-          anomalyReasons: anomaly ? anomaly.reasons : null,
-          previousPercent
-        };
-      });
+          return {
+            ...candidate,
+            deterministicScore: candidate.confidenceScore,
+            rationale,
+            mlConfidence: mlConfidence ?? null,
+            finalScore,
+            scoreGap,
+            anomaly,
+            anomalyScore: anomaly ? anomaly.anomalyScore : null,
+            anomalySeverity: anomaly ? anomaly.severity : null,
+            anomalyReasons: anomaly ? anomaly.reasons : null,
+            previousPercent
+          };
+        })
+      );
 
       // Rerank candidates by final score descending
       rankedWithMl.sort((a, b) => {
@@ -335,12 +338,12 @@ export class ActivityMatchingService {
     const { persist = true } = options;
 
     // 1. Verify project and progress report exist and belong to the specified project (strict isolation)
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
+    const progressRecord = await this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
     if (!progressRecord) {
       throw new NotFoundError(
         `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
@@ -369,7 +372,11 @@ export class ActivityMatchingService {
 
         const anomalyScore = r.bestMatch.anomalyScore ?? r.bestMatch.anomaly?.anomalyScore ?? null;
         const anomalySeverity = r.bestMatch.anomalySeverity ?? r.bestMatch.anomaly?.severity ?? null;
-        const anomalyReasons = r.bestMatch.anomalyReasons ?? r.bestMatch.anomaly?.reasons ?? null;
+        const anomalyReasonsJson = r.bestMatch.anomalyReasons
+          ? JSON.stringify(r.bestMatch.anomalyReasons)
+          : r.bestMatch.anomaly?.reasons
+            ? JSON.stringify(r.bestMatch.anomaly.reasons)
+            : null;
 
         toPersist.push({
           id: matchId,
@@ -378,36 +385,35 @@ export class ActivityMatchingService {
           activityId: r.bestMatch.activityId,
           confidenceScore: effectiveScore,
           matchMethod: r.bestMatch.matchMethod,
-          matchedText: r.bestMatch.matchedText,
-          rationale: r.bestMatch.rationale,
-          status: isAutoConfirm ? ('confirmed' as const) : ('suggested' as const),
+          status: isAutoConfirm ? 'confirmed' : 'suggested',
           confidenceTier: decision.tier,
           reviewState: decision.reviewState,
           reviewedBy: isAutoConfirm ? 'system' : null,
           reviewedAt: isAutoConfirm ? nowIso : null,
+          rationale: r.bestMatch.rationale,
+          matchedText: r.fact.reference,
+          evidenceId: null,
           mlConfidence: r.bestMatch.mlConfidence ?? null,
           anomalyScore,
           anomalySeverity,
-          anomalyReasonsJson: anomalyReasons && anomalyReasons.length > 0 ? JSON.stringify(anomalyReasons) : null
+          anomalyReasonsJson
         });
 
+        // Record project event for confirmed or flagged matches
         if (isAutoConfirm) {
           events.push({
             projectId,
             eventType: 'match_auto_confirmed',
             entityType: 'activity_matches',
             entityId: matchId,
-            summary: `Activity match automatically confirmed by system for activity '${r.bestMatch.activityId}' (${(effectiveScore * 100).toFixed(0)}% confidence)`,
+            summary: `Auto-confirmed match for activity '${r.bestMatch.activityExternalId}' (${r.bestMatch.activityName}) with score ${(effectiveScore * 100).toFixed(1)}%`,
             payloadJson: JSON.stringify({
-              matchId,
-              progressUpdateId,
               activityId: r.bestMatch.activityId,
+              activityExternalId: r.bestMatch.activityExternalId,
               confidenceScore: effectiveScore,
-              deterministicScore: r.bestMatch.confidenceScore,
-              mlConfidence: r.bestMatch.mlConfidence,
-              confidenceTier: decision.tier,
-              reviewSource: 'system',
-              anomaly: r.bestMatch.anomaly
+              tier: decision.tier,
+              anomaly: r.bestMatch.anomaly ?? (anomalyScore !== null ? { anomalyScore, severity: anomalySeverity, reasons: anomalyReasonsJson ? JSON.parse(anomalyReasonsJson) : [] } : undefined),
+              fact: r.fact
             })
           });
         } else {
@@ -416,17 +422,18 @@ export class ActivityMatchingService {
             eventType: 'match_suggested',
             entityType: 'activity_matches',
             entityId: matchId,
-            summary: `Activity match suggested for activity '${r.bestMatch.activityId}' (${(effectiveScore * 100).toFixed(0)}% confidence, ${decision.tier} tier, state: ${decision.reviewState})`,
+            summary: `Match for '${r.bestMatch.activityExternalId}' requires review: ${decision.reason} (score: ${(effectiveScore * 100).toFixed(1)}%)`,
             payloadJson: JSON.stringify({
-              matchId,
-              progressUpdateId,
               activityId: r.bestMatch.activityId,
+              activityExternalId: r.bestMatch.activityExternalId,
               confidenceScore: effectiveScore,
-              deterministicScore: r.bestMatch.confidenceScore,
-              mlConfidence: r.bestMatch.mlConfidence,
-              confidenceTier: decision.tier,
+              tier: decision.tier,
               reviewState: decision.reviewState,
-              anomaly: r.bestMatch.anomaly
+              reason: decision.reason,
+              anomaly: r.bestMatch.anomaly ?? (anomalyScore !== null ? { anomalyScore, severity: anomalySeverity, reasons: anomalyReasonsJson ? JSON.parse(anomalyReasonsJson) : [] } : undefined),
+              anomalyScore,
+              anomalySeverity,
+              fact: r.fact
             })
           });
         }
@@ -437,7 +444,7 @@ export class ActivityMatchingService {
       const notifications: CreateNotificationOutboxInput[] = [];
       for (const r of matchResults) {
         if (r.bestMatch && r.bestMatch.anomaly && isEligibleForAnomalyAlert(r.bestMatch.anomaly)) {
-          const act = this.activityRepo.getById(r.bestMatch.activityId);
+          const act = await this.activityRepo.getById(r.bestMatch.activityId);
           const persistedMatch = toPersist.find((m) => m.activityId === r.bestMatch!.activityId);
           if (persistedMatch && persistedMatch.id) {
             const messageInput = toAnomalyMessageInput(r.bestMatch.anomaly, {
@@ -469,7 +476,7 @@ export class ActivityMatchingService {
         }
       }
 
-      this.activityMatchRepo.persistMatchesAndEventsAtomically({
+      await this.activityMatchRepo.persistMatchesAndEventsAtomically({
         projectId,
         progressUpdateId,
         matches: toPersist,
@@ -481,7 +488,7 @@ export class ActivityMatchingService {
       // Phase 3 Anomaly Notification: Trigger alerts for persisted matches with eligible anomalies
       for (const r of matchResults) {
         if (r.bestMatch && r.bestMatch.anomaly && isEligibleForAnomalyAlert(r.bestMatch.anomaly)) {
-          const act = this.activityRepo.getById(r.bestMatch.activityId);
+          const act = await this.activityRepo.getById(r.bestMatch.activityId);
           const persistedMatch = toPersist.find((m) => m.activityId === r.bestMatch!.activityId);
           try {
             await this.anomalyNotificationService.notifyAnomalyAlert({
@@ -518,14 +525,40 @@ export class ActivityMatchingService {
   /**
    * Retrieves existing persisted matches for a given progress update.
    */
-  getMatchesForUpdate(projectId: string, progressUpdateId: string): ActivityMatch[] {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  getMatchesForUpdate(projectId: string, progressUpdateId: string): MaybePromise<ActivityMatch[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const progressRecord = await this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
+        if (!progressRecord) {
+          throw new NotFoundError(
+            `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
+          );
+        }
+        return this.activityMatchRepo.listByProgressUpdateId(progressUpdateId, projectId);
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
-    if (!progressRecord) {
+    const progressRecordRes = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
+    if (progressRecordRes instanceof Promise) {
+      return progressRecordRes.then((progressRecord) => {
+        if (!progressRecord) {
+          throw new NotFoundError(
+            `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
+          );
+        }
+        return this.activityMatchRepo.listByProgressUpdateId(progressUpdateId, projectId);
+      });
+    }
+
+    if (!progressRecordRes) {
       throw new NotFoundError(
         `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
       );
@@ -537,20 +570,46 @@ export class ActivityMatchingService {
   /**
    * Retrieves a single match by ID, ensuring strict project boundary.
    */
-  getMatchById(projectId: string, matchId: string): ActivityMatch {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  getMatchById(projectId: string, matchId: string): MaybePromise<ActivityMatch> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const match = await this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+        if (!match) {
+          throw new NotFoundError(
+            `Activity match with ID '${matchId}' not found for project '${projectId}'`
+          );
+        }
+        return match;
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const match = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
-    if (!match) {
+    const matchRes = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+    if (matchRes instanceof Promise) {
+      return matchRes.then((match) => {
+        if (!match) {
+          throw new NotFoundError(
+            `Activity match with ID '${matchId}' not found for project '${projectId}'`
+          );
+        }
+        return match;
+      });
+    }
+
+    if (!matchRes) {
       throw new NotFoundError(
         `Activity match with ID '${matchId}' not found for project '${projectId}'`
       );
     }
 
-    return match;
+    return matchRes;
   }
 
   /**
@@ -562,12 +621,12 @@ export class ActivityMatchingService {
     matchId: string,
     reviewer: string = 'human'
   ): Promise<ActivityMatch> {
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const existingMatch = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+    const existingMatch = await this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
     if (!existingMatch) {
       throw new NotFoundError(
         `Activity match with ID '${matchId}' not found for project '${projectId}'`
@@ -591,7 +650,7 @@ export class ActivityMatchingService {
     }
 
     const nowIso = new Date().toISOString();
-    return this.activityMatchRepo.confirmMatchAtomically({
+    return await this.activityMatchRepo.confirmMatchAtomically({
       id: matchId,
       projectId,
       reviewer: reviewer || 'human',
@@ -609,12 +668,12 @@ export class ActivityMatchingService {
     reviewer: string = 'human',
     reason?: string
   ): Promise<ActivityMatch> {
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const existingMatch = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+    const existingMatch = await this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
     if (!existingMatch) {
       throw new NotFoundError(
         `Activity match with ID '${matchId}' not found for project '${projectId}'`
@@ -637,7 +696,7 @@ export class ActivityMatchingService {
       ? `${existingMatch.rationale || ''} [Rejected: ${reason}]`.trim()
       : existingMatch.rationale;
 
-    return this.activityMatchRepo.rejectMatchAtomically({
+    return await this.activityMatchRepo.rejectMatchAtomically({
       id: matchId,
       projectId,
       reviewer: reviewer || 'human',
@@ -658,12 +717,12 @@ export class ActivityMatchingService {
     reviewer: string = 'human',
     reason?: string
   ): Promise<ActivityMatch> {
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const existingMatch = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+    const existingMatch = await this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
     if (!existingMatch) {
       throw new NotFoundError(
         `Activity match with ID '${matchId}' not found for project '${projectId}'`
@@ -682,7 +741,7 @@ export class ActivityMatchingService {
     }
 
     // Verify target activity belongs to the same project (strict cross-project isolation)
-    const targetActivity = this.activityRepo.getById(targetActivityId);
+    const targetActivity = await this.activityRepo.getById(targetActivityId);
     if (!targetActivity || targetActivity.projectId !== projectId) {
       throw new NotFoundError(
         `Target activity with ID '${targetActivityId}' not found for project '${projectId}'`
@@ -695,7 +754,7 @@ export class ActivityMatchingService {
       ? `${originalRationale || ''} [Resolved manually to ${targetActivity.name} (${targetActivity.externalId}): ${reason}]`.trim()
       : `${originalRationale || ''} [Resolved manually to ${targetActivity.name} (${targetActivity.externalId})]`.trim();
 
-    return this.activityMatchRepo.resolveMatchAtomically({
+    return await this.activityMatchRepo.resolveMatchAtomically({
       id: matchId,
       projectId,
       targetActivityId,

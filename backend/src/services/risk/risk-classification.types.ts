@@ -26,11 +26,13 @@ export type {
   ActivityExecutionStatus
 };
 
+import { MaybePromise } from '../../database/provider.js';
+
 export interface RiskStatusInput {
   projectId: string;
   asOfDate?: string;
 }
 
 export interface RiskClassificationService {
-  getProjectRiskStatus(projectId: string, asOfDate?: string): ProjectRiskStatus;
+  getProjectRiskStatus(projectId: string, asOfDate?: string): MaybePromise<ProjectRiskStatus>;
 }

@@ -98,6 +98,8 @@ export function detectEvidenceFileType(
   return 'other';
 }
 
+import type { MaybePromise } from '../../database/provider.js';
+
 export class DefaultEvidenceService implements EvidenceService {
   private evidenceRepo: EvidenceRepository;
   private projectRepo: ProjectRepository;
@@ -124,15 +126,13 @@ export class DefaultEvidenceService implements EvidenceService {
     file: UploadedFilePayload,
     options?: UploadEvidenceOptions
   ): Promise<UploadEvidenceResult> {
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Verify optional progress-report exists and belongs to the same project
     if (options?.progressUpdateId) {
-      const progressUpdateRecord = this.progressUpdateRepo.getById(options.progressUpdateId);
+      const progressUpdateRecord = await this.progressUpdateRepo.getById(options.progressUpdateId);
       if (!progressUpdateRecord) {
         throw new NotFoundError(
           `Progress report with ID '${options.progressUpdateId}' not found`
@@ -145,7 +145,6 @@ export class DefaultEvidenceService implements EvidenceService {
       }
     }
 
-    // 3. Validate uploaded file presence
     if (!file || !file.path) {
       throw new ValidationError('No file provided for evidence upload');
     }
@@ -154,40 +153,54 @@ export class DefaultEvidenceService implements EvidenceService {
       throw new ValidationError('Uploaded file temporary source not found');
     }
 
-    // 4. Compute SHA-256 hash of actual file bytes
     let fileBuffer: Buffer;
     try {
       fileBuffer = fs.readFileSync(file.path);
     } catch (readErr) {
-      throw new ValidationError(`Failed to read uploaded temporary file: ${readErr instanceof Error ? readErr.message : String(readErr)}`);
+      throw new ValidationError(
+        `Failed to read uploaded temporary file: ${readErr instanceof Error ? readErr.message : String(readErr)}`
+      );
     }
 
-    const contentSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex').toLowerCase();
+    const contentSha256 = crypto
+      .createHash('sha256')
+      .update(fileBuffer)
+      .digest('hex')
+      .toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(contentSha256)) {
       throw new ValidationError('Computed content SHA-256 hash is invalid');
     }
 
-    // 5. Check for duplicate evidence in this project
-    const existingEvidence = this.evidenceRepo.findByProjectIdAndHash(projectId, contentSha256);
+    const existingEvidence = await this.evidenceRepo.findByProjectIdAndHash(projectId, contentSha256);
     if (existingEvidence) {
-      // Discard temporary duplicate upload file cleanly
-      if (fs.existsSync(file.path)) {
-        try {
-          fs.unlinkSync(file.path);
-        } catch {
-          // Ignore temp cleanup error
-        }
-      }
+      this.cleanupTempFile(file.path);
       return {
         ...existingEvidence,
         deduplicated: true
       };
     }
 
-    // 6. File type resolution
+    return await this.saveAndPersistFile(projectId, file, contentSha256, options);
+  }
+
+  private cleanupTempFile(filePath: string): void {
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch {
+        // Ignore temp cleanup error
+      }
+    }
+  }
+
+  private async saveAndPersistFile(
+    projectId: string,
+    file: UploadedFilePayload,
+    contentSha256: string,
+    options?: UploadEvidenceOptions
+  ): Promise<UploadEvidenceResult> {
     const fileType = options?.fileType || detectEvidenceFileType(file.originalname, file.mimetype);
 
-    // 7. Generate server-controlled safe filename and destination directory
     const rawExt = path.extname(file.originalname).toLowerCase();
     const safeExt = /^\.[a-z0-9]+$/i.test(rawExt) ? rawExt : '';
     const generatedFilename = `evidence-${Date.now()}-${crypto.randomUUID()}${safeExt}`;
@@ -199,16 +212,13 @@ export class DefaultEvidenceService implements EvidenceService {
 
     const targetFilePath = path.resolve(projectDir, generatedFilename);
 
-    // Ensure path cannot traverse outside the project directory
     const relativeUpload = path.relative(projectDir, targetFilePath);
     if (relativeUpload.startsWith('..') || path.isAbsolute(relativeUpload)) {
       throw new ValidationError('Invalid target storage path detected');
     }
 
-    // 8. Move/copy file to target storage path
     try {
       fs.copyFileSync(file.path, targetFilePath);
-      // Try to clean up temp file if different from target
       if (file.path !== targetFilePath && fs.existsSync(file.path)) {
         try {
           fs.unlinkSync(file.path);
@@ -222,7 +232,6 @@ export class DefaultEvidenceService implements EvidenceService {
       );
     }
 
-    // 9. Persist evidence row and project event in a single SQLite transaction
     const evidenceId = crypto.randomUUID();
     const relativePath = `${projectId}/${generatedFilename}`;
 
@@ -257,53 +266,110 @@ export class DefaultEvidenceService implements EvidenceService {
     };
 
     try {
-      const persisted = this.evidenceRepo.createWithEvent(evidenceInput, eventInput);
+      const persisted = await this.evidenceRepo.createWithEvent(evidenceInput, eventInput);
       return {
         ...persisted,
         deduplicated: false
       };
     } catch (dbError) {
-      // Clean up the newly created permanent file on database failure to preserve atomicity
-      if (fs.existsSync(targetFilePath)) {
-        try {
-          fs.unlinkSync(targetFilePath);
-        } catch (cleanupErr) {
-          logger.error('Failed to cleanup file after DB error', {
-            targetFilePath,
-            error: cleanupErr
-          });
-        }
-      }
+      this.cleanupPermanentFile(targetFilePath);
       throw dbError;
     }
   }
 
-  listProjectEvidence(projectId: string): Evidence[] {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  private cleanupPermanentFile(targetFilePath: string): void {
+    if (fs.existsSync(targetFilePath)) {
+      try {
+        fs.unlinkSync(targetFilePath);
+      } catch (cleanupErr) {
+        logger.error('Failed to cleanup file after DB error', {
+          targetFilePath,
+          error: cleanupErr
+        });
+      }
+    }
+  }
+
+  listProjectEvidence(projectId: string): MaybePromise<Evidence[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.evidenceRepo.listByProjectId(projectId);
+      });
+    }
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
-
     return this.evidenceRepo.listByProjectId(projectId);
   }
 
-  getEvidence(projectId: string, evidenceId: string): Evidence {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  getEvidence(projectId: string, evidenceId: string): MaybePromise<Evidence> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const evRes = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
+        if (evRes instanceof Promise) {
+          return evRes.then((evidence) => {
+            if (!evidence) {
+              throw new NotFoundError(
+                `Evidence with ID '${evidenceId}' not found for project '${projectId}'`
+              );
+            }
+            return evidence;
+          });
+        }
+        if (!evRes) {
+          throw new NotFoundError(
+            `Evidence with ID '${evidenceId}' not found for project '${projectId}'`
+          );
+        }
+        return evRes;
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
-
-    const evidence = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
-    if (!evidence) {
-      throw new NotFoundError(`Evidence with ID '${evidenceId}' not found for project '${projectId}'`);
+    const evRes = this.evidenceRepo.getByIdAndProjectId(evidenceId, projectId);
+    if (evRes instanceof Promise) {
+      return evRes.then((evidence) => {
+        if (!evidence) {
+          throw new NotFoundError(
+            `Evidence with ID '${evidenceId}' not found for project '${projectId}'`
+          );
+        }
+        return evidence;
+      });
     }
-
-    return evidence;
+    if (!evRes) {
+      throw new NotFoundError(
+        `Evidence with ID '${evidenceId}' not found for project '${projectId}'`
+      );
+    }
+    return evRes;
   }
 
-  getEvidenceContent(projectId: string, evidenceId: string): EvidenceFileContentResult {
-    const evidence = this.getEvidence(projectId, evidenceId);
+  getEvidenceContent(
+    projectId: string,
+    evidenceId: string
+  ): MaybePromise<EvidenceFileContentResult> {
+    const evidenceRes = this.getEvidence(projectId, evidenceId);
+    if (evidenceRes instanceof Promise) {
+      return evidenceRes.then((evidence) => this.resolveEvidenceContent(projectId, evidence));
+    }
+    return this.resolveEvidenceContent(projectId, evidenceRes);
+  }
 
+  private resolveEvidenceContent(
+    projectId: string,
+    evidence: Evidence
+  ): EvidenceFileContentResult {
     const projectRoot = path.resolve(process.cwd(), this.uploadDir, projectId);
     const resolvedPath = path.resolve(process.cwd(), this.uploadDir, evidence.filePath);
 
@@ -326,37 +392,96 @@ export class DefaultEvidenceService implements EvidenceService {
     };
   }
 
-  listProgressUpdateEvidence(projectId: string, updateId: string): Evidence[] {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  listProgressUpdateEvidence(projectId: string, updateId: string): MaybePromise<Evidence[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.resolveProgressUpdateEvidence(projectId, updateId);
+      });
+    }
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
+    return this.resolveProgressUpdateEvidence(projectId, updateId);
+  }
 
-    const progressUpdateRecord = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
-    if (!progressUpdateRecord) {
-      throw new NotFoundError(`Progress report with ID '${updateId}' not found for project '${projectId}'`);
+  private resolveProgressUpdateEvidence(
+    projectId: string,
+    updateId: string
+  ): MaybePromise<Evidence[]> {
+    const updateRes = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+    if (updateRes instanceof Promise) {
+      return updateRes.then((progressUpdateRecord) => {
+        if (!progressUpdateRecord) {
+          throw new NotFoundError(
+            `Progress report with ID '${updateId}' not found for project '${projectId}'`
+          );
+        }
+        return this.evidenceRepo.listByProgressUpdateId(updateId, projectId);
+      });
     }
-
+    if (!updateRes) {
+      throw new NotFoundError(
+        `Progress report with ID '${updateId}' not found for project '${projectId}'`
+      );
+    }
     return this.evidenceRepo.listByProgressUpdateId(updateId, projectId);
   }
 
-  listActivityEvidence(projectId: string, activityId: string): Evidence[] {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  listActivityEvidence(projectId: string, activityId: string): MaybePromise<Evidence[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.resolveActivityEvidence(projectId, activityId);
+      });
+    }
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
+    return this.resolveActivityEvidence(projectId, activityId);
+  }
 
-    const activity = this.activityRepo.getByIdAndProjectId(activityId, projectId);
-    if (!activity) {
-      throw new NotFoundError(`Activity with ID '${activityId}' not found for project '${projectId}'`);
+  private resolveActivityEvidence(projectId: string, activityId: string): MaybePromise<Evidence[]> {
+    const actRes = this.activityRepo.getByIdAndProjectId(activityId, projectId);
+    if (actRes instanceof Promise) {
+      return actRes.then((activity) => {
+        if (!activity) {
+          throw new NotFoundError(
+            `Activity with ID '${activityId}' not found for project '${projectId}'`
+          );
+        }
+        return this.evidenceRepo.listByActivityId(activityId, projectId);
+      });
     }
-
+    if (!actRes) {
+      throw new NotFoundError(
+        `Activity with ID '${activityId}' not found for project '${projectId}'`
+      );
+    }
     return this.evidenceRepo.listByActivityId(activityId, projectId);
   }
 
-  deleteEvidence(projectId: string, evidenceId: string): boolean {
-    const evidence = this.getEvidence(projectId, evidenceId);
+  deleteEvidence(projectId: string, evidenceId: string): MaybePromise<boolean> {
+    const evidenceRes = this.getEvidence(projectId, evidenceId);
+    if (evidenceRes instanceof Promise) {
+      return evidenceRes.then((evidence) =>
+        this.executeDeleteEvidence(projectId, evidenceId, evidence)
+      );
+    }
+    return this.executeDeleteEvidence(projectId, evidenceId, evidenceRes);
+  }
 
+  private executeDeleteEvidence(
+    projectId: string,
+    evidenceId: string,
+    evidence: Evidence
+  ): MaybePromise<boolean> {
     const resolvedPath = path.resolve(process.cwd(), this.uploadDir, evidence.filePath);
     const projectRoot = path.resolve(process.cwd(), this.uploadDir, projectId);
 
@@ -380,9 +505,60 @@ export class DefaultEvidenceService implements EvidenceService {
     }
 
     try {
-      const deleted = this.evidenceRepo.deleteByIdAndProjectId(evidenceId, projectId);
-      if (!deleted) {
-        // If DB deletion was a no-op, restore the staged file
+      const deleteRes = this.evidenceRepo.deleteByIdAndProjectId(evidenceId, projectId);
+      if (deleteRes instanceof Promise) {
+        return deleteRes
+          .then((deleted) => {
+            if (!deleted) {
+              if (fileStaged && fs.existsSync(tempTrashPath)) {
+                try {
+                  fs.renameSync(tempTrashPath, resolvedPath);
+                } catch (restoreErr) {
+                  logger.error('Failed to restore staged evidence file after DB deletion no-op', {
+                    tempTrashPath,
+                    resolvedPath,
+                    error: restoreErr
+                  });
+                }
+              }
+              return false;
+            }
+
+            if (fileStaged && fs.existsSync(tempTrashPath)) {
+              try {
+                fs.unlinkSync(tempTrashPath);
+              } catch (unlinkErr) {
+                logger.warn(
+                  'Failed to unlink staged trash evidence file after successful DB deletion',
+                  {
+                    tempTrashPath,
+                    error: unlinkErr
+                  }
+                );
+              }
+            }
+            return true;
+          })
+          .catch((dbError) => {
+            if (fileStaged && fs.existsSync(tempTrashPath)) {
+              try {
+                fs.renameSync(tempTrashPath, resolvedPath);
+              } catch (restoreErr) {
+                logger.error(
+                  'Failed to restore staged evidence file after DB deletion failure',
+                  {
+                    tempTrashPath,
+                    resolvedPath,
+                    error: restoreErr
+                  }
+                );
+              }
+            }
+            throw dbError;
+          });
+      }
+
+      if (!deleteRes) {
         if (fileStaged && fs.existsSync(tempTrashPath)) {
           try {
             fs.renameSync(tempTrashPath, resolvedPath);
@@ -397,21 +573,22 @@ export class DefaultEvidenceService implements EvidenceService {
         return false;
       }
 
-      // DB row removed successfully; permanently clean up the staged trash file
       if (fileStaged && fs.existsSync(tempTrashPath)) {
         try {
           fs.unlinkSync(tempTrashPath);
         } catch (unlinkErr) {
-          logger.warn('Failed to unlink staged trash evidence file after successful DB deletion', {
-            tempTrashPath,
-            error: unlinkErr
-          });
+          logger.warn(
+            'Failed to unlink staged trash evidence file after successful DB deletion',
+            {
+              tempTrashPath,
+              error: unlinkErr
+            }
+          );
         }
       }
 
       return true;
     } catch (dbError) {
-      // DB deletion failed: roll back the file to its original path to prevent DB/filesystem inconsistency
       if (fileStaged && fs.existsSync(tempTrashPath)) {
         try {
           fs.renameSync(tempTrashPath, resolvedPath);

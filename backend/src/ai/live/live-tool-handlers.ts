@@ -119,7 +119,7 @@ export class LiveToolHandlers {
    * Resolves a project by ID or code, falling back to session project ID or the single active project.
    * Ensures all database queries always use the canonical database UUID.
    */
-  public resolveProject(projectIdOrCode?: string, sessionProjectId?: string): Project | null {
+  public async resolveProject(projectIdOrCode?: string, sessionProjectId?: string): Promise<Project | null> {
     const candidates = [projectIdOrCode, sessionProjectId].filter(
       (v): v is string => typeof v === 'string' && v.trim().length > 0
     );
@@ -127,24 +127,24 @@ export class LiveToolHandlers {
     for (const cand of candidates) {
       const trimmed = cand.trim();
       // 1. Try by UUID
-      const byId = this.projectRepo.getById(trimmed);
+      const byId = await this.projectRepo.getById(trimmed);
       if (byId) return byId;
 
       // 2. Try by code (case-insensitive)
-      const byCode = this.projectRepo.getByCode(trimmed);
+      const byCode = await this.projectRepo.getByCode(trimmed);
       if (byCode) return byCode;
     }
 
     if (sessionProjectId && sessionProjectId.trim().length > 0) {
       const trimmed = sessionProjectId.trim();
-      const byId = this.projectRepo.getById(trimmed);
+      const byId = await this.projectRepo.getById(trimmed);
       if (byId) return byId;
-      const byCode = this.projectRepo.getByCode(trimmed);
+      const byCode = await this.projectRepo.getByCode(trimmed);
       if (byCode) return byCode;
     }
 
     // Fallback: If only one project exists in the system, default to it
-    const all = this.projectRepo.listAll();
+    const all = await this.projectRepo.listAll();
     if (all.length === 1) {
       return all[0];
     }
@@ -163,7 +163,7 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     logger.info(`LiveTool [get_next_recommended_activities]: Project [${projectId || 'default'}], Location: "${location || 'any'}"`);
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',
@@ -176,13 +176,13 @@ export class LiveToolHandlers {
     let snapshotActivities: ActivityProgressSnapshotItem[] = [];
 
     try {
-      const snapshot = this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
+      const snapshot = await this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
       if (snapshot && Array.isArray(snapshot.activities)) {
         snapshotActivities = snapshot.activities;
       }
     } catch (snapErr: any) {
       logger.warn(`LiveTool [get_next_recommended_activities]: Could not get snapshot, falling back to base activities: ${snapErr.message}`);
-      const rawActivities = this.activityRepo.listByProjectId(canonicalProjectId);
+      const rawActivities = await this.activityRepo.listByProjectId(canonicalProjectId);
       snapshotActivities = rawActivities.map((a) => ({
         activityId: a.id,
         externalId: a.externalId,
@@ -265,7 +265,7 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     logger.info(`LiveTool [lookup_activity_status]: Project [${projectId || 'default'}], Query: "${query}"`);
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',
@@ -283,7 +283,7 @@ export class LiveToolHandlers {
     }
 
     // Deterministically resolve activity within the project
-    const resolution = this.activityResolver.resolve(canonicalProjectId, query);
+    const resolution = await this.activityResolver.resolve(canonicalProjectId, query);
 
     if (resolution.status === 'not_found') {
       return {
@@ -322,7 +322,7 @@ export class LiveToolHandlers {
     let overdue = false;
 
     try {
-      const snapshot = this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
+      const snapshot = await this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
       const snapItem = snapshot.activities.find((a) => a.activityId === resolved.id);
       if (snapItem) {
         plannedProgress = snapItem.plannedProgress;
@@ -343,14 +343,14 @@ export class LiveToolHandlers {
     // Check for delay reasons from project intelligence
     const delayReasons: string[] = [];
     try {
-      const intelligence = this.intelligenceService.getIntelligence(canonicalProjectId, { asOfDate: today });
+      const intelligence = await this.intelligenceService.getIntelligence(canonicalProjectId, { asOfDate: today });
       const delayedItem = intelligence.delayed.find((d) => d.activityId === resolved.id);
       if (delayedItem) {
-        delayReasons.push(...delayedItem.reasons.map((r) => r.message));
+        delayReasons.push(...delayedItem.reasons.map((r: { message: string }) => r.message));
       }
       const atRiskItem = intelligence.atRisk.find((r) => r.activityId === resolved.id);
       if (atRiskItem) {
-        delayReasons.push(...atRiskItem.reasons.map((r) => `At Risk: ${r.message}`));
+        delayReasons.push(...atRiskItem.reasons.map((r: { message: string }) => `At Risk: ${r.message}`));
       }
     } catch {
       // Graceful fallback
@@ -399,7 +399,7 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     logger.info(`LiveTool [record_field_progress]: Intake received for project [${projectId || 'default'}]: "${rawStatement}"`);
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',
@@ -495,7 +495,7 @@ export class LiveToolHandlers {
 
     logger.debug(`LiveTool [processProgressStatementAsync]: Step 2 - Creating manual progress update (sourceType='voice')...`);
     // 2. Calls progressUpdateService.createManualUpdate with sourceType = 'voice'
-    const updateRecord = this.progressUpdateService.createManualUpdate({
+    const updateRecord = await this.progressUpdateService.createManualUpdate({
       projectId,
       reportDate: today,
       rawText: canonicalEnglishStatement,
@@ -512,7 +512,7 @@ export class LiveToolHandlers {
     );
 
     // Retrieve the persisted matches from the repository
-    const persistedMatches = this.activityMatchRepo.listByProgressUpdateId(updateRecord.id, projectId);
+    const persistedMatches = await this.activityMatchRepo.listByProgressUpdateId(updateRecord.id, projectId);
 
     for (const item of extraction.items) {
       let matchedActivityId: string | null = null;
@@ -530,18 +530,18 @@ export class LiveToolHandlers {
         isConfirmed = matchCandidate.status === 'confirmed';
       } else {
         // Fallback to DeterministicActivityResolver if matching threshold was missed
-        let resolved = this.activityResolver.resolve(projectId, item.reference || canonicalEnglishStatement);
+        let resolved = await this.activityResolver.resolve(projectId, item.reference || canonicalEnglishStatement);
         if (resolved.status !== 'resolved' && item.location) {
           const locQuery = `${item.location} ${item.reference || ''}`.trim();
-          resolved = this.activityResolver.resolve(projectId, locQuery);
+          resolved = await this.activityResolver.resolve(projectId, locQuery);
         }
         if (resolved.status !== 'resolved' && canonicalEnglishStatement) {
-          resolved = this.activityResolver.resolve(projectId, canonicalEnglishStatement);
+          resolved = await this.activityResolver.resolve(projectId, canonicalEnglishStatement);
         }
         if (resolved.status === 'resolved' && resolved.activity) {
           let anomaly = null;
           if (item.progress_percent !== null && item.progress_percent !== undefined) {
-            anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
+            anomaly = await this.anomalyEvaluationService.evaluateProgressAnomaly({
               projectId,
               activityId: resolved.activity.id,
               reportedPercent: item.progress_percent,
@@ -549,7 +549,7 @@ export class LiveToolHandlers {
             });
           }
 
-          const fallbackMatch = this.activityMatchRepo.create({
+          const fallbackMatch = await this.activityMatchRepo.create({
             projectId,
             progressUpdateId: updateRecord.id,
             activityId: resolved.activity.id,
@@ -582,7 +582,7 @@ export class LiveToolHandlers {
         continue;
       }
 
-      const activity = this.activityRepo.getById(matchedActivityId);
+      const activity = await this.activityRepo.getById(matchedActivityId);
       if (!activity) {
         logger.warn(`LiveTool [processProgressStatementAsync]: Activity [${matchedActivityId}] not found in repository.`);
         continue;
@@ -594,7 +594,7 @@ export class LiveToolHandlers {
         );
 
         // 4. Normalizes and links the extracted item via progressService.normalizeAndRecordProgress
-        const recordedProgress = this.progressService.normalizeAndRecordProgress({
+        const recordedProgress = await this.progressService.normalizeAndRecordProgress({
           projectId,
           updateId: updateRecord.id,
           matchId: matchedRecordId,
@@ -692,7 +692,7 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     logger.info(`LiveTool [get_project_intelligence]: Project [${projectId || 'default'}]`);
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',
@@ -704,8 +704,8 @@ export class LiveToolHandlers {
     const today = getTodayDateString();
 
     try {
-      const intelligence = this.intelligenceService.getIntelligence(canonicalProjectId, { asOfDate: today });
-      const snapshot = this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
+      const intelligence = await this.intelligenceService.getIntelligence(canonicalProjectId, { asOfDate: today });
+      const snapshot = await this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
 
       const delayedCount = intelligence.delayed?.length || 0;
       const atRiskCount = intelligence.atRisk?.length || 0;
@@ -785,7 +785,7 @@ export class LiveToolHandlers {
       `LiveTool [search_project_activities]: Project [${projectId || 'default'}], Query: "${query || ''}", Status: "${statusFilter || 'all'}"`
     );
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',
@@ -796,10 +796,10 @@ export class LiveToolHandlers {
     const canonicalProjectId = project.id;
     const today = getTodayDateString();
 
-    const rawActivities = this.activityRepo.listByProjectId(canonicalProjectId);
+    const rawActivities = await this.activityRepo.listByProjectId(canonicalProjectId);
     let snapshotItems: ActivityProgressSnapshotItem[] = [];
     try {
-      const snap = this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
+      const snap = await this.snapshotService.getProgressSnapshot(canonicalProjectId, today);
       snapshotItems = snap.activities;
     } catch {}
 
@@ -879,7 +879,7 @@ export class LiveToolHandlers {
   ): Promise<Record<string, any>> {
     logger.info(`LiveTool [query_project_assistant]: Project [${projectId || 'default'}], Question: "${question}"`);
 
-    const project = this.resolveProject(projectId, sessionProjectId);
+    const project = await this.resolveProject(projectId, sessionProjectId);
     if (!project) {
       return {
         status: 'error',

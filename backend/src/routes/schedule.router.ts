@@ -123,10 +123,10 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
     '/projects/:projectId/schedules',
     optionalAuthenticateSession,
     validateParams(projectIdParamSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        const schedules = service.listSchedules(projectId);
+        const schedules = await service.listSchedules(projectId);
         res.status(200).json({ schedules });
       } catch (error) {
         next(error);
@@ -139,10 +139,10 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
     '/projects/:projectId/schedules/:scheduleId',
     optionalAuthenticateSession,
     validateParams(scheduleParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, scheduleId } = req.params;
-        const schedule = service.getSchedule(projectId, scheduleId);
+        const schedule = await service.getSchedule(projectId, scheduleId);
         res.status(200).json({ schedule });
       } catch (error) {
         next(error);
@@ -155,10 +155,10 @@ export function createScheduleRouter(service: ScheduleImportService = scheduleIm
     '/projects/:projectId/schedules/:scheduleId/activities',
     optionalAuthenticateSession,
     validateParams(scheduleParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, scheduleId } = req.params;
-        const activities = service.listScheduleActivities(projectId, scheduleId);
+        const activities = await service.listScheduleActivities(projectId, scheduleId);
         res.status(200).json({ activities });
       } catch (error) {
         next(error);

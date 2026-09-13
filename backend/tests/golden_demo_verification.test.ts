@@ -47,17 +47,17 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
   it('2. Idempotency: Multiple consecutive seed runs produce identical logical state without duplicates', async () => {
     await seedGoldenDemo();
-    const firstProject = projectRepository.getByCode(goldenManifestInvariants.projectCode)!;
-    const firstSchedules = scheduleRepository.listByProjectId(firstProject.id);
-    const firstActivities = activityRepository.listByProjectId(firstProject.id);
-    const firstEvidence = evidenceRepository.listByProjectId(firstProject.id);
+    const firstProject = (await projectRepository.getByCode(goldenManifestInvariants.projectCode))!;
+    const firstSchedules = await scheduleRepository.listByProjectId(firstProject.id);
+    const firstActivities = await activityRepository.listByProjectId(firstProject.id);
+    const firstEvidence = await evidenceRepository.listByProjectId(firstProject.id);
 
     expect(firstSchedules).toHaveLength(1);
     expect(firstActivities).toHaveLength(30);
     expect(firstEvidence).toHaveLength(6);
 
     // Verify snapshot risk classification matches manifest
-    const risks1 = riskClassificationService.getProjectRiskStatus(firstProject.id, GOLDEN_AS_OF_DATE);
+    const risks1 = await riskClassificationService.getProjectRiskStatus(firstProject.id, GOLDEN_AS_OF_DATE);
     expect(risks1.summary.delayed).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
     expect(risks1.summary.atRisk).toBe(goldenManifestInvariants.expectedRiskCounts.atRisk);
     expect(risks1.summary.completed).toBe(goldenManifestInvariants.expectedRiskCounts.completed);
@@ -66,7 +66,7 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
   it('3. Dashboard HTTP API returns the populated golden project state with correct headline numbers', async () => {
     await seedGoldenDemo();
-    const project = projectRepository.getByCode(goldenManifestInvariants.projectCode)!;
+    const project = (await projectRepository.getByCode(goldenManifestInvariants.projectCode))!;
 
     const res = await request(app)
       .get(`/api/projects/${project.id}/dashboard`)
@@ -88,7 +88,7 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
   it('4. Project Intelligence HTTP API returns deterministic facts across all 7 intelligence categories', async () => {
     await seedGoldenDemo();
-    const project = projectRepository.getByCode(goldenManifestInvariants.projectCode)!;
+    const project = (await projectRepository.getByCode(goldenManifestInvariants.projectCode))!;
 
     const res = await request(app)
       .get(`/api/projects/${project.id}/intelligence`)
@@ -111,7 +111,7 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
   it('5. Grounded Assistant HTTP API returns verifiable grounded answers for manager queries', async () => {
     await seedGoldenDemo();
-    const project = projectRepository.getByCode(goldenManifestInvariants.projectCode)!;
+    const project = (await projectRepository.getByCode(goldenManifestInvariants.projectCode))!;
 
     // Delayed Query
     const delayedRes = await request(app)
@@ -144,8 +144,8 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
   it('6. Activity Detail Screen returns full execution timelines and evidence links for flagship activities', async () => {
     await seedGoldenDemo();
-    const project = projectRepository.getByCode(goldenManifestInvariants.projectCode)!;
-    const activities = activityRepository.listByProjectId(project.id);
+    const project = (await projectRepository.getByCode(goldenManifestInvariants.projectCode))!;
+    const activities = await activityRepository.listByProjectId(project.id);
     const pumpAct = activities.find((a) => a.externalId === 'ACT-B02')!;
 
     const res = await request(app)

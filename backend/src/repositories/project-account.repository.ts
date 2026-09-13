@@ -9,14 +9,16 @@ import {
 } from '../models/domain.types.js';
 import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ProjectAccountRepository {
-  create(input: CreateProjectAccountInput): ProjectAccount;
-  findById(id: string): ProjectAccount | null;
-  findByProjectAndType(projectId: string, accountType: AccountType): ProjectAccount | null;
-  listByProjectId(projectId: string): ProjectAccount[];
-  listPublicByProjectId(projectId: string): ProjectAccountPublic[];
-  updateCredential(id: string, credentialHash: string): boolean;
-  delete(id: string): boolean;
+  create(input: CreateProjectAccountInput): MaybePromise<ProjectAccount>;
+  findById(id: string): MaybePromise<ProjectAccount | null>;
+  findByProjectAndType(projectId: string, accountType: AccountType): MaybePromise<ProjectAccount | null>;
+  listByProjectId(projectId: string): MaybePromise<ProjectAccount[]>;
+  listPublicByProjectId(projectId: string): MaybePromise<ProjectAccountPublic[]>;
+  updateCredential(id: string, credentialHash: string): MaybePromise<boolean>;
+  delete(id: string): MaybePromise<boolean>;
 }
 
 interface ProjectAccountDbRow {

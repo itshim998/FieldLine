@@ -31,7 +31,7 @@ function mapRowToProject(row: ProjectDbRow): Project {
   };
 }
 
-export class PostgresProjectRepository {
+export class PostgresProjectRepository implements ProjectRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

@@ -131,10 +131,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/evidence',
     optionalAuthenticateSession,
     validateParams(evidenceProjectIdParamSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId } = req.params;
-        const evidence = service.listProjectEvidence(projectId);
+        const evidence = await service.listProjectEvidence(projectId);
         res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
@@ -147,10 +147,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/evidence/:evidenceId',
     optionalAuthenticateSession,
     validateParams(evidenceParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, evidenceId } = req.params;
-        const evidence = service.getEvidence(projectId, evidenceId);
+        const evidence = await service.getEvidence(projectId, evidenceId);
         res.status(200).json({ evidence: sanitizeEvidenceDto(evidence) });
       } catch (error) {
         next(error);
@@ -163,10 +163,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/evidence/:evidenceId/content',
     requireRole(['worker', 'admin']),
     validateParams(evidenceParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, evidenceId } = req.params;
-        const contentResult = service.getEvidenceContent(projectId, evidenceId);
+        const contentResult = await service.getEvidenceContent(projectId, evidenceId);
 
         res.setHeader('Content-Type', contentResult.mimeType);
         if (contentResult.fileSizeBytes) {
@@ -189,10 +189,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/progress-updates/:updateId/evidence',
     optionalAuthenticateSession,
     validateParams(progressUpdateEvidenceParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, updateId } = req.params;
-        const evidence = service.listProgressUpdateEvidence(projectId, updateId);
+        const evidence = await service.listProgressUpdateEvidence(projectId, updateId);
         res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
@@ -205,10 +205,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/activities/:activityId/evidence',
     optionalAuthenticateSession,
     validateParams(activityEvidenceParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, activityId } = req.params;
-        const evidence = service.listActivityEvidence(projectId, activityId);
+        const evidence = await service.listActivityEvidence(projectId, activityId);
         res.status(200).json({ evidence: evidence.map(sanitizeEvidenceDto) });
       } catch (error) {
         next(error);
@@ -221,10 +221,10 @@ export function createEvidenceRouter(
     '/projects/:projectId/evidence/:evidenceId',
     requireRole(['admin']),
     validateParams(evidenceParamsSchema),
-    (req: Request, res: Response, next: NextFunction): void => {
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
       try {
         const { projectId, evidenceId } = req.params;
-        service.deleteEvidence(projectId, evidenceId);
+        await service.deleteEvidence(projectId, evidenceId);
         res.status(200).json({ success: true });
       } catch (error) {
         next(error);

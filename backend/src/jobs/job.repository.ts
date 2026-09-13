@@ -12,27 +12,29 @@ import {
 } from '../models/domain.types.js';
 import { ConflictError, DatabaseError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface JobRepository {
-  create(input: CreateProcessingJobInput): ProcessingJob;
+  create(input: CreateProcessingJobInput): MaybePromise<ProcessingJob>;
   createWithEvent(
     jobInput: CreateProcessingJobInput,
     eventInput: CreateProjectEventInput
-  ): ProcessingJob;
-  getById(id: string): ProcessingJob | null;
-  getByIdAndProjectId(id: string, projectId: string): ProcessingJob | null;
-  listByProjectId(projectId: string, jobType?: ProcessingJobType): ProcessingJob[];
-  findExistingActiveDocumentIngestionJob(projectId: string, evidenceId: string): ProcessingJob | null;
-  findLatestCompletedDocumentIngestionJob(projectId: string, evidenceId: string): ProcessingJob | null;
+  ): MaybePromise<ProcessingJob>;
+  getById(id: string): MaybePromise<ProcessingJob | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<ProcessingJob | null>;
+  listByProjectId(projectId: string, jobType?: ProcessingJobType): MaybePromise<ProcessingJob[]>;
+  findExistingActiveDocumentIngestionJob(projectId: string, evidenceId: string): MaybePromise<ProcessingJob | null>;
+  findLatestCompletedDocumentIngestionJob(projectId: string, evidenceId: string): MaybePromise<ProcessingJob | null>;
   findOrCreateDocumentIngestionJob(
     projectId: string,
     evidenceId: string,
     eventSummary: string,
     eventPayloadJson: string
-  ): { job: ProcessingJob; isNew: boolean };
-  claimNextQueued(): ProcessingJob | null;
-  markCompleted(id: string, result: Record<string, unknown> | DocumentIngestionJobResult): ProcessingJob | null;
-  markFailed(id: string, errorMessage: string): ProcessingJob | null;
-  requeueStaleProcessingJobs(leaseTimeoutMs?: number): number;
+  ): MaybePromise<{ job: ProcessingJob; isNew: boolean }>;
+  claimNextQueued(): MaybePromise<ProcessingJob | null>;
+  markCompleted(id: string, result: Record<string, unknown> | DocumentIngestionJobResult): MaybePromise<ProcessingJob | null>;
+  markFailed(id: string, errorMessage: string): MaybePromise<ProcessingJob | null>;
+  requeueStaleProcessingJobs(leaseTimeoutMs?: number): MaybePromise<number>;
 }
 
 interface ProcessingJobDbRow {

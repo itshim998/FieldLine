@@ -27,7 +27,7 @@ async function startServer(): Promise<void> {
       const migResult = await runPostgresMigrations();
       console.log(`✅ PostgreSQL ready. Applied ${migResult.applied.length} migration(s).`);
     } else {
-      initActiveDatabase();
+      await initActiveDatabase();
       console.log(`📦 SQLite database initialized at: ${env.DATABASE_PATH}`);
     }
 
@@ -40,7 +40,8 @@ async function startServer(): Promise<void> {
           const seedResult = await seedGoldenDemo();
           console.log(`✨ Golden Demo seeded successfully: [${seedResult.projectCode}] ${seedResult.projectName} (${seedResult.activitiesCount} activities, ${seedResult.evidenceCount} evidence files)`);
         } catch (seedErr) {
-          console.error('⚠️ Auto-seeding Golden Demo encountered an error:', seedErr);
+          console.error('❌ Auto-seeding Golden Demo encountered a fatal error:', seedErr);
+          throw seedErr;
         }
       } else {
         console.log(`ℹ️ Existing data preserved: ${projectCount} project(s) found in database.`);
@@ -49,7 +50,7 @@ async function startServer(): Promise<void> {
 
     // Reconcile any legacy evidence rows without content hashes (SQLite only)
     if (!isPostgresDatabase()) {
-      const reconciliation = reconcileLegacyEvidenceHashes();
+      const reconciliation = await reconcileLegacyEvidenceHashes();
       if (reconciliation.reconciledCount > 0) {
         console.log(`🔍 Reconciled ${reconciliation.reconciledCount} legacy evidence content hashes.`);
       }

@@ -9,18 +9,20 @@ import {
 } from '../models/domain.types.js';
 import { DatabaseError, NotFoundError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface OperationalBlockerRepository {
-  create(input: CreateBlockerInput): OperationalBlocker;
-  findById(id: string): OperationalBlocker | null;
+  create(input: CreateBlockerInput): MaybePromise<OperationalBlocker>;
+  findById(id: string): MaybePromise<OperationalBlocker | null>;
   listByProjectId(
     projectId: string,
     options?: { status?: BlockerStatus; activityId?: string }
-  ): OperationalBlocker[];
-  listActiveByProject(projectId: string): OperationalBlocker[];
-  listByActivity(projectId: string, activityId: string): OperationalBlocker[];
-  resolve(id: string, projectId: string, resolvedAt?: string): OperationalBlocker | null;
-  countByRootCause(projectId: string): Record<BlockerCategory, number>;
-  delete(id: string, projectId: string): boolean;
+  ): MaybePromise<OperationalBlocker[]>;
+  listActiveByProject(projectId: string): MaybePromise<OperationalBlocker[]>;
+  listByActivity(projectId: string, activityId: string): MaybePromise<OperationalBlocker[]>;
+  resolve(id: string, projectId: string, resolvedAt?: string): MaybePromise<OperationalBlocker | null>;
+  countByRootCause(projectId: string): MaybePromise<Record<BlockerCategory, number>>;
+  delete(id: string, projectId: string): MaybePromise<boolean>;
 }
 
 interface BlockerDbRow {

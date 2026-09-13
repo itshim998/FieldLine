@@ -13,6 +13,7 @@ import {
   CreateActivityInput
 } from '../models/domain.types.js';
 import { NotFoundError, ValidationError, ScheduleValidationError } from '../errors/AppError.js';
+import { MaybePromise } from '../database/provider.js';
 
 export interface ScheduleImportFileInput {
   path: string;
@@ -23,9 +24,9 @@ export interface ScheduleImportFileInput {
 
 export interface ScheduleImportService {
   importSchedule(projectId: string, file: ScheduleImportFileInput): Promise<ScheduleImportSummary>;
-  listSchedules(projectId: string): Schedule[];
-  getSchedule(projectId: string, scheduleId: string): Schedule;
-  listScheduleActivities(projectId: string, scheduleId: string): Activity[];
+  listSchedules(projectId: string): MaybePromise<Schedule[]>;
+  getSchedule(projectId: string, scheduleId: string): MaybePromise<Schedule>;
+  listScheduleActivities(projectId: string, scheduleId: string): MaybePromise<Activity[]>;
 }
 
 export class DefaultScheduleImportService implements ScheduleImportService {
@@ -55,7 +56,7 @@ export class DefaultScheduleImportService implements ScheduleImportService {
     file: ScheduleImportFileInput
   ): Promise<ScheduleImportSummary> {
     // 1. Validate project existence
-    const project = this.projectRepo.getById(projectId);
+    const project = await this.projectRepo.getById(projectId);
     if (!project) {
       this.cleanupTempFile(file.path);
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
@@ -101,7 +102,7 @@ export class DefaultScheduleImportService implements ScheduleImportService {
         baselineProgress: row.baselineProgress ?? 0.0
       }));
 
-      const { schedule } = this.scheduleRepo.createWithActivities(
+      const { schedule } = await this.scheduleRepo.createWithActivities(
         {
           projectId,
           name: scheduleName,
@@ -126,29 +127,61 @@ export class DefaultScheduleImportService implements ScheduleImportService {
     }
   }
 
-  listSchedules(projectId: string): Schedule[] {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  listSchedules(projectId: string): MaybePromise<Schedule[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then((project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        return this.scheduleRepo.listByProjectId(projectId);
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
     return this.scheduleRepo.listByProjectId(projectId);
   }
 
-  getSchedule(projectId: string, scheduleId: string): Schedule {
-    const project = this.projectRepo.getById(projectId);
-    if (!project) {
+  getSchedule(projectId: string, scheduleId: string): MaybePromise<Schedule> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return projectRes.then(async (project) => {
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+        const schedule = await this.scheduleRepo.getByIdAndProjectId(scheduleId, projectId);
+        if (!schedule) {
+          throw new NotFoundError(`Schedule with ID '${scheduleId}' not found in project '${projectId}'`);
+        }
+        return schedule;
+      });
+    }
+
+    if (!projectRes) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
     const schedule = this.scheduleRepo.getByIdAndProjectId(scheduleId, projectId);
+    if (schedule instanceof Promise) {
+      return schedule.then((s) => {
+        if (!s) {
+          throw new NotFoundError(`Schedule with ID '${scheduleId}' not found in project '${projectId}'`);
+        }
+        return s;
+      });
+    }
     if (!schedule) {
       throw new NotFoundError(`Schedule with ID '${scheduleId}' not found in project '${projectId}'`);
     }
     return schedule;
   }
 
-  listScheduleActivities(projectId: string, scheduleId: string): Activity[] {
-    // Verify schedule belongs to project
-    this.getSchedule(projectId, scheduleId);
+  listScheduleActivities(projectId: string, scheduleId: string): MaybePromise<Activity[]> {
+    const schedRes = this.getSchedule(projectId, scheduleId);
+    if (schedRes instanceof Promise) {
+      return schedRes.then(() => this.activityRepo.listByScheduleId(scheduleId));
+    }
     return this.activityRepo.listByScheduleId(scheduleId);
   }
 

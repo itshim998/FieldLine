@@ -3,15 +3,16 @@ import crypto from 'node:crypto';
 import { getDatabase } from '../database/db.js';
 import { Project, CreateProjectInput, UpdateProjectInput } from '../models/domain.types.js';
 import { ConflictError, DatabaseError, NotFoundError } from '../errors/AppError.js';
+import { MaybePromise } from '../database/provider.js';
 
 export interface ProjectRepository {
-  create(input: CreateProjectInput): Project;
-  getById(id: string): Project | null;
-  getByCode(code: string): Project | null;
-  listAll(): Project[];
-  update(id: string, input: UpdateProjectInput): Project;
-  delete(id: string): boolean;
-  count(): number;
+  create(input: CreateProjectInput): MaybePromise<Project>;
+  getById(id: string): MaybePromise<Project | null>;
+  getByCode(code: string): MaybePromise<Project | null>;
+  listAll(): MaybePromise<Project[]>;
+  update(id: string, input: UpdateProjectInput): MaybePromise<Project>;
+  delete(id: string): MaybePromise<boolean>;
+  count(): MaybePromise<number>;
 }
 
 interface ProjectDbRow {

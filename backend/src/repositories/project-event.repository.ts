@@ -10,11 +10,13 @@ export interface ProjectEventFilterOptions {
   limit?: number;
 }
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ProjectEventRepository {
-  create(input: CreateProjectEventInput & { createdAt?: string }): ProjectEvent;
-  getById(id: string, projectId?: string): ProjectEvent | null;
-  listByProjectId(projectId: string, limit?: number): ProjectEvent[];
-  listRecentByProject(projectId: string, options?: ProjectEventFilterOptions): ProjectEvent[];
+  create(input: CreateProjectEventInput & { createdAt?: string }): MaybePromise<ProjectEvent>;
+  getById(id: string, projectId?: string): MaybePromise<ProjectEvent | null>;
+  listByProjectId(projectId: string, limit?: number): MaybePromise<ProjectEvent[]>;
+  listRecentByProject(projectId: string, options?: ProjectEventFilterOptions): MaybePromise<ProjectEvent[]>;
 }
 
 interface ProjectEventDbRow {

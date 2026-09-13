@@ -58,21 +58,23 @@ function mapRowToNotificationOutbox(row: NotificationOutboxDbRow): NotificationO
   };
 }
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface NotificationOutboxRepository {
-  create(input: CreateNotificationOutboxInput): NotificationOutboxItem;
-  getById(id: string): NotificationOutboxItem | null;
-  getByActivityMatchId(activityMatchId: string, channel?: NotificationChannel): NotificationOutboxItem | null;
-  findByIdempotencyKey(key: string): NotificationOutboxItem | null;
-  claimNextEligible(nowIso?: string): NotificationOutboxItem | null;
-  claimById(id: string, nowIso?: string): NotificationOutboxItem | null;
-  saveMessageSnapshot(id: string, message: AnomalyAlertMessage): NotificationOutboxItem | null;
-  markDelivered(id: string, providerMessageId?: string): NotificationOutboxItem | null;
-  scheduleRetry(id: string, errorCode: string, errorSummary: string, nextAttemptAt: string): NotificationOutboxItem | null;
-  markFailed(id: string, errorCode: string, errorSummary: string): NotificationOutboxItem | null;
-  requeueStaleProcessing(leaseTimeoutMs?: number, nowIso?: string): number;
-  listByProject(projectId: string, options?: { status?: NotificationOutboxStatus; limit?: number }): NotificationOutboxItem[];
-  count(projectId?: string, status?: NotificationOutboxStatus): number;
-  runInTransaction?<T>(fn: () => T): T;
+  create(input: CreateNotificationOutboxInput): MaybePromise<NotificationOutboxItem>;
+  getById(id: string): MaybePromise<NotificationOutboxItem | null>;
+  getByActivityMatchId(activityMatchId: string, channel?: NotificationChannel): MaybePromise<NotificationOutboxItem | null>;
+  findByIdempotencyKey(key: string): MaybePromise<NotificationOutboxItem | null>;
+  claimNextEligible(nowIso?: string): MaybePromise<NotificationOutboxItem | null>;
+  claimById(id: string, nowIso?: string): MaybePromise<NotificationOutboxItem | null>;
+  saveMessageSnapshot(id: string, message: AnomalyAlertMessage): MaybePromise<NotificationOutboxItem | null>;
+  markDelivered(id: string, providerMessageId?: string): MaybePromise<NotificationOutboxItem | null>;
+  scheduleRetry(id: string, errorCode: string, errorSummary: string, nextAttemptAt: string): MaybePromise<NotificationOutboxItem | null>;
+  markFailed(id: string, errorCode: string, errorSummary: string): MaybePromise<NotificationOutboxItem | null>;
+  requeueStaleProcessing(leaseTimeoutMs?: number, nowIso?: string): MaybePromise<number>;
+  listByProject(projectId: string, options?: { status?: NotificationOutboxStatus; limit?: number }): MaybePromise<NotificationOutboxItem[]>;
+  count(projectId?: string, status?: NotificationOutboxStatus): MaybePromise<number>;
+  runInTransaction?<T>(fn: () => MaybePromise<T>): MaybePromise<T>;
 }
 
 export class SqliteNotificationOutboxRepository implements NotificationOutboxRepository {

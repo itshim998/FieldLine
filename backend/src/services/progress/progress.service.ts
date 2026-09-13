@@ -18,7 +18,12 @@ import {
   ActivityProgressRepository,
   activityProgressRepository as defaultActivityProgressRepo
 } from '../../repositories/activity-progress.repository.js';
+import type { MaybePromise } from '../../database/provider.js';
 import {
+  Project,
+  Activity,
+  ActivityMatch,
+  ProgressUpdate,
   ActivityProgress,
   CreateActivityProgressInput,
   CreateProjectEventInput
@@ -40,10 +45,10 @@ export interface NormalizeAndRecordProgressInput {
 }
 
 export interface ProgressService {
-  normalizeAndRecordProgress(input: NormalizeAndRecordProgressInput): ActivityProgress;
-  listActivityProgress(projectId: string, activityId: string): ActivityProgress[];
-  getLatestActivityProgress(projectId: string, activityId: string): ActivityProgress | null;
-  listProgressByUpdate(projectId: string, updateId: string): ActivityProgress[];
+  normalizeAndRecordProgress(input: NormalizeAndRecordProgressInput): MaybePromise<ActivityProgress>;
+  listActivityProgress(projectId: string, activityId: string): MaybePromise<ActivityProgress[]>;
+  getLatestActivityProgress(projectId: string, activityId: string): MaybePromise<ActivityProgress | null>;
+  listProgressByUpdate(projectId: string, updateId: string): MaybePromise<ActivityProgress[]>;
 }
 
 export class DefaultProgressService implements ProgressService {
@@ -67,7 +72,7 @@ export class DefaultProgressService implements ProgressService {
     this.activityProgressRepo = dependencies?.activityProgressRepo || defaultActivityProgressRepo;
   }
 
-  normalizeAndRecordProgress(input: NormalizeAndRecordProgressInput): ActivityProgress {
+  normalizeAndRecordProgress(input: NormalizeAndRecordProgressInput): MaybePromise<ActivityProgress> {
     const {
       projectId,
       updateId,
@@ -79,38 +84,186 @@ export class DefaultProgressService implements ProgressService {
       allowSuggested = false
     } = input;
 
-    // 1. Verify project exists
-    const project = this.projectRepo.getById(projectId);
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return (async () => {
+        const project = await projectRes;
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+
+        const updateRecord = await this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+        if (!updateRecord) {
+          throw new NotFoundError(
+            `Progress report with ID '${updateId}' not found for project '${projectId}'`
+          );
+        }
+
+        const match = await this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+        if (!match) {
+          throw new NotFoundError(
+            `Activity match with ID '${matchId}' not found for project '${projectId}'`
+          );
+        }
+
+        if (match.progressUpdateId !== updateId) {
+          throw new ValidationError(
+            `Activity match '${matchId}' belongs to progress report '${match.progressUpdateId}', not '${updateId}'`
+          );
+        }
+
+        if (match.status === 'rejected') {
+          throw new ValidationError(
+            `Cannot normalize progress for rejected activity match '${matchId}'`
+          );
+        }
+
+        if (match.status === 'suggested' && !allowSuggested) {
+          throw new ValidationError(
+            `Cannot normalize progress for unconfirmed activity match '${matchId}'. Match status is 'suggested' and allowSuggested is false.`
+          );
+        }
+
+        const activity = await this.activityRepo.getById(match.activityId);
+        if (!activity || activity.projectId !== projectId) {
+          throw new NotFoundError(
+            `Matched activity with ID '${match.activityId}' not found for project '${projectId}'`
+          );
+        }
+
+        const effectiveAsOfDate = asOfDate || updateRecord.reportDate;
+
+        const normalized = normalizeProgress({
+          fact,
+          activity,
+          actualQuantity,
+          quantityUnit,
+          asOfDate: effectiveAsOfDate
+        });
+
+        if (normalized.actualPercent === null) {
+          throw new ValidationError(
+            'Cannot persist ActivityProgress because no deterministic actual percentage is available.'
+          );
+        }
+
+        const history = await this.activityProgressRepo.listByActivityId(activity.id, projectId);
+
+        let finalActualStart = normalized.actualStart;
+        const historicalStartDates = history
+          .map(r => r.actualStart)
+          .filter((d): d is string => d !== null && d !== undefined && d.length > 0)
+          .sort();
+
+        if (historicalStartDates.length > 0) {
+          const earliestHistoricalStart = historicalStartDates[0];
+          if (finalActualStart) {
+            finalActualStart =
+              earliestHistoricalStart < finalActualStart ? earliestHistoricalStart : finalActualStart;
+          } else if (normalized.status !== 'not_started') {
+            finalActualStart = earliestHistoricalStart;
+          }
+        }
+
+        let finalActualFinish = normalized.actualFinish;
+        const historicalFinishDates = history
+          .map(r => r.actualFinish)
+          .filter((d): d is string => d !== null && d !== undefined && d.length > 0)
+          .sort();
+
+        if (historicalFinishDates.length > 0) {
+          const earliestHistoricalFinish = historicalFinishDates[0];
+          if (finalActualFinish) {
+            finalActualFinish =
+              earliestHistoricalFinish < finalActualFinish
+                ? earliestHistoricalFinish
+                : finalActualFinish;
+          } else {
+            finalActualFinish = earliestHistoricalFinish;
+          }
+        }
+
+        const existing = await this.activityProgressRepo.findExistingObservation(
+          projectId,
+          activity.id,
+          updateId,
+          effectiveAsOfDate,
+          normalized.actualPercent,
+          normalized.actualQuantity,
+          normalized.status
+        );
+
+        if (existing) {
+          logger.info(
+            `ProgressService: Returning existing observation '${existing.id}' for activity '${activity.id}' as-of '${effectiveAsOfDate}'`
+          );
+          return existing;
+        }
+
+        const progressInput: CreateActivityProgressInput = {
+          projectId,
+          activityId: activity.id,
+          progressUpdateId: updateId,
+          actualPercent: normalized.actualPercent,
+          actualQuantity: normalized.actualQuantity,
+          actualStart: finalActualStart,
+          actualFinish: finalActualFinish,
+          status: normalized.status,
+          asOfDate: effectiveAsOfDate,
+          notes: normalized.notes
+        };
+
+        const eventInput: CreateProjectEventInput = {
+          projectId,
+          eventType: 'progress_updated',
+          entityType: 'activity_progress',
+          summary: `Activity progress recorded at ${normalized.actualPercent}% (${normalized.status}) for '${activity.name}'`,
+          payloadJson: JSON.stringify({
+            activityId: activity.id,
+            progressUpdateId: updateId,
+            matchId,
+            actualPercent: normalized.actualPercent,
+            actualQuantity: normalized.actualQuantity,
+            status: normalized.status,
+            asOfDate: effectiveAsOfDate
+          })
+        };
+
+        const savedProgress = await this.activityProgressRepo.createWithEvent(progressInput, eventInput);
+        logger.info(
+          `ProgressService: Created activity progress '${savedProgress.id}' for activity '${activity.name}' (${savedProgress.actualPercent}%)`
+        );
+
+        return savedProgress;
+      })();
+    }
+
+    // Synchronous execution for SQLite
+    const project = projectRes as Project | null;
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    // 2. Verify progress report exists and belongs to the specified project
-    const updateRecord = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+    const updateRecord = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId) as (ProgressUpdate|null);
     if (!updateRecord) {
       throw new NotFoundError(
         `Progress report with ID '${updateId}' not found for project '${projectId}'`
       );
     }
 
-    // 3. Verify activity match exists and belongs to the specified project
-    const match = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId);
+    const match = this.activityMatchRepo.getByIdAndProjectId(matchId, projectId) as ActivityMatch | null;
     if (!match) {
       throw new NotFoundError(
         `Activity match with ID '${matchId}' not found for project '${projectId}'`
       );
     }
 
-    // 4. Verify activity match belongs to the specific progress report
     if (match.progressUpdateId !== updateId) {
       throw new ValidationError(
         `Activity match '${matchId}' belongs to progress report '${match.progressUpdateId}', not '${updateId}'`
       );
     }
 
-
-
-    // 5. Enforce Match Status Policy
     if (match.status === 'rejected') {
       throw new ValidationError(
         `Cannot normalize progress for rejected activity match '${matchId}'`
@@ -123,18 +276,15 @@ export class DefaultProgressService implements ProgressService {
       );
     }
 
-    // 6. Verify matched activity belongs to the project
-    const activity = this.activityRepo.getById(match.activityId);
+    const activity = this.activityRepo.getById(match.activityId) as Activity | null;
     if (!activity || activity.projectId !== projectId) {
       throw new NotFoundError(
         `Matched activity with ID '${match.activityId}' not found for project '${projectId}'`
       );
     }
 
-    // 7. Determine effective as-of date (defaults to progress update's reportDate)
     const effectiveAsOfDate = asOfDate || updateRecord.reportDate;
 
-    // 8. Run pure deterministic progress normalization
     const normalized = normalizeProgress({
       fact,
       activity,
@@ -143,15 +293,13 @@ export class DefaultProgressService implements ProgressService {
       asOfDate: effectiveAsOfDate
     });
 
-    // 9. Enforce numeric percentage requirement (actual_percent is NOT NULL)
     if (normalized.actualPercent === null) {
       throw new ValidationError(
         'Cannot persist ActivityProgress because no deterministic actual percentage is available.'
       );
     }
 
-    // 10. Reconcile dates against historical activity progress records
-    const history = this.activityProgressRepo.listByActivityId(activity.id, projectId);
+    const history = this.activityProgressRepo.listByActivityId(activity.id, projectId) as ActivityProgress[];
 
     let finalActualStart = normalized.actualStart;
     const historicalStartDates = history
@@ -187,8 +335,6 @@ export class DefaultProgressService implements ProgressService {
       }
     }
 
-
-    // 11. Idempotency Check: Avoid uncontrolled duplicate observations
     const existing = this.activityProgressRepo.findExistingObservation(
       projectId,
       activity.id,
@@ -197,7 +343,7 @@ export class DefaultProgressService implements ProgressService {
       normalized.actualPercent,
       normalized.actualQuantity,
       normalized.status
-    );
+    ) as ActivityProgress | null;
 
     if (existing) {
       logger.info(
@@ -206,7 +352,6 @@ export class DefaultProgressService implements ProgressService {
       return existing;
     }
 
-    // 12. Atomic Persistence of ActivityProgress + progress_updated ProjectEvent
     const progressInput: CreateActivityProgressInput = {
       projectId,
       activityId: activity.id,
@@ -224,20 +369,19 @@ export class DefaultProgressService implements ProgressService {
       projectId,
       eventType: 'progress_updated',
       entityType: 'activity_progress',
-      summary: `Activity progress recorded: ${activity.name} (${normalized.actualPercent}%)`,
+      summary: `Activity progress recorded at ${normalized.actualPercent}% (${normalized.status}) for '${activity.name}'`,
       payloadJson: JSON.stringify({
         activityId: activity.id,
-        activityName: activity.name,
         progressUpdateId: updateId,
+        matchId,
         actualPercent: normalized.actualPercent,
         actualQuantity: normalized.actualQuantity,
         status: normalized.status,
-        percentSource: normalized.percentSource,
         asOfDate: effectiveAsOfDate
       })
     };
 
-    const savedProgress = this.activityProgressRepo.createWithEvent(progressInput, eventInput);
+    const savedProgress = this.activityProgressRepo.createWithEvent(progressInput, eventInput) as ActivityProgress;
     logger.info(
       `ProgressService: Created activity progress '${savedProgress.id}' for activity '${activity.name}' (${savedProgress.actualPercent}%)`
     );
@@ -245,42 +389,107 @@ export class DefaultProgressService implements ProgressService {
     return savedProgress;
   }
 
-  listActivityProgress(projectId: string, activityId: string): ActivityProgress[] {
-    const project = this.projectRepo.getById(projectId);
+  listActivityProgress(projectId: string, activityId: string): MaybePromise<ActivityProgress[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return (async () => {
+        const project = await projectRes;
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+
+        const activity = await this.activityRepo.getById(activityId);
+        if (!activity || activity.projectId !== projectId) {
+          throw new NotFoundError(`Activity with ID '${activityId}' not found for project '${projectId}'`);
+        }
+
+        return await this.activityProgressRepo.listByActivityId(activityId, projectId);
+      })();
+    }
+
+    const project = projectRes as Project | null;
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const activity = this.activityRepo.getById(activityId);
+    const activity = this.activityRepo.getById(activityId) as Activity | null;
     if (!activity || activity.projectId !== projectId) {
       throw new NotFoundError(`Activity with ID '${activityId}' not found for project '${projectId}'`);
     }
 
-    return this.activityProgressRepo.listByActivityId(activityId, projectId);
+    return this.activityProgressRepo.listByActivityId(activityId, projectId) as ActivityProgress[];
   }
 
-  getLatestActivityProgress(projectId: string, activityId: string): ActivityProgress | null {
-    const project = this.projectRepo.getById(projectId);
+  getLatestActivityProgress(projectId: string, activityId: string): MaybePromise<ActivityProgress | null> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return (async () => {
+        const project = await projectRes;
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+
+        const activity = await this.activityRepo.getById(activityId);
+        if (!activity || activity.projectId !== projectId) {
+          throw new NotFoundError(`Activity with ID '${activityId}' not found for project '${projectId}'`);
+        }
+
+        return await this.activityProgressRepo.getLatestByActivityId(activityId, projectId);
+      })();
+    }
+
+    const project = projectRes as Project | null;
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const activity = this.activityRepo.getById(activityId);
+    const activity = this.activityRepo.getById(activityId) as Activity | null;
     if (!activity || activity.projectId !== projectId) {
       throw new NotFoundError(`Activity with ID '${activityId}' not found for project '${projectId}'`);
     }
 
-    return this.activityProgressRepo.getLatestByActivityId(activityId, projectId);
+    return this.activityProgressRepo.getLatestByActivityId(activityId, projectId) as ActivityProgress | null;
   }
 
-  listProgressByUpdate(projectId: string, updateId: string): ActivityProgress[] {
-    const project = this.projectRepo.getById(projectId);
+  listProgressByUpdate(projectId: string, updateId: string): MaybePromise<ActivityProgress[]> {
+    const projectRes = this.projectRepo.getById(projectId);
+    if (projectRes instanceof Promise) {
+      return (async () => {
+        const project = await projectRes;
+        if (!project) {
+          throw new NotFoundError(`Project with ID '${projectId}' not found`);
+        }
+
+        const updateRecord = await this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+        if (!updateRecord) {
+          throw new NotFoundError(
+            `Progress report with ID '${updateId}' not found for project '${projectId}'`
+          );
+        }
+
+        return await this.activityProgressRepo.listByProgressUpdateId(updateId, projectId);
+      })();
+    }
+
+    const project = projectRes as Project | null;
     if (!project) {
       throw new NotFoundError(`Project with ID '${projectId}' not found`);
     }
 
-    const updateRecord = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
-    if (!updateRecord) {
+    const recordOrPromise = this.progressUpdateRepo.getByIdAndProjectId(updateId, projectId);
+    if (recordOrPromise instanceof Promise) {
+      return (async () => {
+        const found = await recordOrPromise;
+        if (!found) {
+          throw new NotFoundError(
+            `Progress report with ID '${updateId}' not found for project '${projectId}'`
+          );
+        }
+        return await this.activityProgressRepo.listByProgressUpdateId(updateId, projectId);
+      })();
+    }
+
+    if (!recordOrPromise) {
       throw new NotFoundError(
         `Progress report with ID '${updateId}' not found for project '${projectId}'`
       );

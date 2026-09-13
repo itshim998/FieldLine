@@ -38,7 +38,7 @@ function mapRowToBlocker(row: BlockerDbRow): OperationalBlocker {
   };
 }
 
-export class PostgresOperationalBlockerRepository {
+export class PostgresOperationalBlockerRepository implements OperationalBlockerRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

@@ -4,15 +4,17 @@ import { getDatabase } from '../database/db.js';
 import { Activity, CreateActivityInput } from '../models/domain.types.js';
 import { ConflictError, DatabaseError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ActivityRepository {
-  create(input: CreateActivityInput): Activity;
-  createMany(inputs: CreateActivityInput[]): Activity[];
-  getById(id: string): Activity | null;
-  getByIdAndProjectId(id: string, projectId: string): Activity | null;
-  listByScheduleId(scheduleId: string): Activity[];
-  listByProjectId(projectId: string): Activity[];
-  countByScheduleId(scheduleId: string): number;
-  countByProjectId(projectId: string): number;
+  create(input: CreateActivityInput): MaybePromise<Activity>;
+  createMany(inputs: CreateActivityInput[]): MaybePromise<Activity[]>;
+  getById(id: string): MaybePromise<Activity | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<Activity | null>;
+  listByScheduleId(scheduleId: string): MaybePromise<Activity[]>;
+  listByProjectId(projectId: string): MaybePromise<Activity[]>;
+  countByScheduleId(scheduleId: string): MaybePromise<number>;
+  countByProjectId(projectId: string): MaybePromise<number>;
 }
 
 interface ActivityDbRow {

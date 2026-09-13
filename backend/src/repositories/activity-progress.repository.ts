@@ -8,24 +8,26 @@ import {
 } from '../models/domain.types.js';
 import { ConflictError, DatabaseError } from '../errors/AppError.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface ActivityProgressRepository {
-  create(input: CreateActivityProgressInput): ActivityProgress;
+  create(input: CreateActivityProgressInput): MaybePromise<ActivityProgress>;
   createWithEvent(
     progressInput: CreateActivityProgressInput,
     eventInput: CreateProjectEventInput
-  ): ActivityProgress;
-  getById(id: string): ActivityProgress | null;
-  getByIdAndProjectId(id: string, projectId: string): ActivityProgress | null;
-  listByActivityId(activityId: string, projectId?: string): ActivityProgress[];
-  listByProgressUpdateId(progressUpdateId: string, projectId?: string): ActivityProgress[];
-  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): ActivityProgress[];
-  listByProjectId(projectId: string): ActivityProgress[];
-  getLatestByActivityId(activityId: string, projectId?: string): ActivityProgress | null;
+  ): MaybePromise<ActivityProgress>;
+  getById(id: string): MaybePromise<ActivityProgress | null>;
+  getByIdAndProjectId(id: string, projectId: string): MaybePromise<ActivityProgress | null>;
+  listByActivityId(activityId: string, projectId?: string): MaybePromise<ActivityProgress[]>;
+  listByProgressUpdateId(progressUpdateId: string, projectId?: string): MaybePromise<ActivityProgress[]>;
+  listByProgressUpdateIds(progressUpdateIds: string[], projectId: string): MaybePromise<ActivityProgress[]>;
+  listByProjectId(projectId: string): MaybePromise<ActivityProgress[]>;
+  getLatestByActivityId(activityId: string, projectId?: string): MaybePromise<ActivityProgress | null>;
   getLatestByActivityIdAsOfDate(
     activityId: string,
     projectId: string,
     asOfDate: string
-  ): ActivityProgress | null;
+  ): MaybePromise<ActivityProgress | null>;
   findExistingObservation(
     projectId: string,
     activityId: string,
@@ -34,8 +36,8 @@ export interface ActivityProgressRepository {
     actualPercent: number,
     actualQuantity: number | null,
     status: string
-  ): ActivityProgress | null;
-  delete(id: string, projectId?: string): boolean;
+  ): MaybePromise<ActivityProgress | null>;
+  delete(id: string, projectId?: string): MaybePromise<boolean>;
 }
 
 interface ActivityProgressDbRow {

@@ -42,7 +42,7 @@ function mapRowToProgressUpdate(row: ProgressUpdateDbRow): ProgressUpdate {
   };
 }
 
-export class PostgresProgressUpdateRepository {
+export class PostgresProgressUpdateRepository implements ProgressUpdateRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

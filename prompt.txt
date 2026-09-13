@@ -1,445 +1,555 @@
-You have already completed the Supabase/PostgreSQL migration.
+The Supabase connection is now successful and the FieldLine PostgreSQL baseline migration is being reached/applied.
 
-Do NOT perform another database migration.
-Do NOT redesign the dual-engine architecture.
-Do NOT redo Phase 4.
-
-The current authoritative repository state is GitHub `main` commit:
+Current production behavior:
 
 ```text
-8d09ef6d1ed9a4c9346c9649bb7335c27c09338d
+PostgreSQL ready. Applied 1 migration(s).
 ```
 
-Commit:
+However, startup then fails during Golden Demo seeding.
 
-```text
-feat(db): migrate production database to Supabase PostgreSQL with dual-engine provider and full regression preservation
-```
+I inspected the current `main` implementation and found two concrete defects plus a broader compatibility risk.
 
-I need a **small, targeted post-migration correctness fix** for the existing Phase 4 notification implementation.
+Do NOT redesign the Supabase architecture.
+Do NOT recreate the database.
+Do NOT alter the PostgreSQL schema unless the audit proves a schema defect.
+Do NOT change credentials.
+
+This is a **targeted application-level PostgreSQL compatibility correction**.
 
 ---
 
-# CRITICAL ISSUE 1 — WRONG `projectId`
+# CRITICAL ISSUE 1 — POSTGRES MIGRATIONS ARE BEING STARTED TWICE
 
 Inspect:
 
 ```text
-backend/src/services/anomaly/anomaly-notification.service.ts
+backend/src/database/provider.ts
+backend/src/database/postgres.ts
+backend/src/database/postgres-migrator.ts
+backend/src/index.ts
 ```
 
-The current implementation still passes:
-
-```ts
-projectId: messageInput.projectName
-```
-
-and:
-
-```ts
-projectId: context.projectName
-```
-
-into notification outbox creation.
-
-This is incorrect.
-
-`notification_outbox.project_id` is a relational identifier and must contain the real:
+Current behavior is effectively:
 
 ```text
-projects.id
+startServer()
+  ↓
+initActiveDatabase()
+  ↓
+initPostgres()
+  ↓
+runPostgresMigrations()
+
+THEN
+
+startServer()
+  ↓
+runPostgresMigrations()
 ```
 
-not:
+`initPostgres()` already runs migrations, while `startServer()` invokes `runPostgresMigrations()` again.
+
+Additionally, `initActiveDatabase()` currently does not await `initPostgres()`.
+
+This creates the observed race:
 
 ```text
-projects.name
+migration runner A
++
+migration runner B
+        ↓
+both see baseline migration as pending
+        ↓
+duplicate schema_migrations.name
 ```
 
-The implementation must obtain the authoritative `projectId` from the actual server-side report/match context.
-
-### Required behavior
+Observed production error:
 
 ```text
-trusted projectId
-      ↓
-notification_outbox.project_id
+duplicate key value violates unique constraint "schema_migrations_name_key"
 ```
 
-Never:
+### Required fix
+
+There must be exactly ONE authoritative PostgreSQL migration execution during startup.
+
+Choose the cleanest existing architecture and make startup deterministic.
+
+Requirements:
 
 ```text
-projectName
-      ↓
-project_id
+✓ initPostgres is awaited
+✓ migration runs exactly once
+✓ no concurrent migration runners
+✓ existing SQLite startup behavior remains intact
+✓ existing migration semantics remain intact
+✓ PostgreSQL startup still verifies/applies pending migrations
 ```
 
-Do not derive IDs from display names.
+Do not merely catch/suppress the duplicate-key error.
 
-Do not introduce a second project lookup merely because it is easy unless the existing context architecture requires it.
+Fix the race itself.
 
-Prefer passing the authoritative existing `projectId` through the notification context.
+Add a regression test proving that startup initialization does not launch two migration runs concurrently.
 
 ---
 
-# CRITICAL ISSUE 2 — NEVER FABRICATE `activityMatchId`
+# CRITICAL ISSUE 2 — SQLITE SYNC REPOSITORY INTERFACES VS POSTGRES ASYNC IMPLEMENTATIONS
 
-The current implementation also contains:
+Observed production log:
+
+```text
+Found existing Golden Demo Project: [undefined] (undefined)
+```
+
+followed by:
+
+```text
+TypeError: Cannot read properties of undefined (reading 'id')
+```
+
+and later:
+
+```text
+null value in column "project_id" of relation "schedules" violates not-null constraint
+```
+
+I inspected the current code.
+
+`demo/golden-demo-seeder.ts` calls:
 
 ```ts
-const matchId = context.activityMatchId || `match_${Date.now()}`;
+projectRepository.getByCode(...)
 ```
 
-This is invalid.
+without `await`.
 
-`notification_outbox.activity_match_id` is a foreign key to:
+The SQLite repository interface returns:
 
 ```text
-activity_matches.id
+Project | null
 ```
 
-Therefore an arbitrary synthetic identifier must never be inserted.
-
-### Required behavior
+but the PostgreSQL implementation returns:
 
 ```text
-real persisted activityMatchId
-      ↓
-notification_outbox.activity_match_id
+Promise<Project | null>
 ```
 
-If the authoritative activity match ID is unavailable:
+The current Proxy-based repository selector allows a PostgreSQL async implementation to be exposed through a repository interface that is typed as synchronous.
+
+This is an unsafe abstraction.
+
+### Required fix
+
+Perform a repository-wide audit of the dual SQLite/PostgreSQL provider system.
+
+Search for all repository/service calls where:
 
 ```text
-DO NOT CREATE THE NOTIFICATION INTENT.
+SQLite implementation = synchronous
+PostgreSQL implementation = asynchronous
 ```
 
-Do not generate:
+and verify that callers correctly support both engines.
 
-* timestamps
-* random strings
-* fake `match_*` values
-* activity names as IDs
-* project names as IDs
-
-The notification system must never contain an orphaned reference.
+Do NOT patch only `getByCode()`.
 
 ---
 
-# IMPORTANT: APPLY THIS TO ALL PHASE 4 CREATION PATHS
-
-Do not fix only one occurrence.
+# 3. GOLDEN DEMO SEEDER MUST BE FULLY POSTGRES-COMPATIBLE
 
 Audit:
 
 ```text
-recordNotificationIntent()
-notifyAnomalyAlert()
+demo/golden-demo-seeder.ts
 ```
 
-and every other caller that creates notification outbox entries.
+from start to finish.
 
-Search the repository for:
+Every database interaction must behave correctly under:
 
 ```text
-outboxRepo.create
-notificationOutboxRepo.create
-CreateNotificationOutboxInput
-projectId:
-activityMatchId:
-fieldline-anomaly-alert:
+DATABASE_PROVIDER=sqlite
 ```
 
-Confirm that every notification creation path uses the real persisted identifiers.
-
----
-
-# IMPORTANT: RESPECT THE NEW POSTGRESQL FOREIGN KEYS
-
-The repository now has PostgreSQL-backed implementations.
-
-Therefore this must be true for:
+and:
 
 ```text
 DATABASE_PROVIDER=postgres
 ```
 
-as well as SQLite.
+Identify every operation that may return a Promise under PostgreSQL.
 
-Verify that the notification path passes:
+Convert the seeder to a clean async flow where necessary.
+
+Examples include, but are not limited to:
 
 ```text
-projects.id
-activity_matches.id
+projectRepository.getByCode
+projectRepository.create
+authService.provisionDefaultAccounts
+scheduleImportService.importSchedule
+activityRepository.listByProjectId
+progressUpdateRepository.create
+activityMatchRepository.create
+evidenceRepository.attachToProgressUpdate
+progressService.normalizeAndRecordProgress
+projectEventRepository.create
+operationalBlockerRepository.create
 ```
 
-that actually exist in the active database.
+Do not assume the above list is exhaustive.
 
-Do not make SQLite-specific assumptions.
+Inspect the actual implementations.
 
-Do not weaken or remove foreign-key constraints.
+The requirement is:
 
-Do not make PostgreSQL more permissive merely to hide invalid notification input.
+**Golden Demo seeding must complete successfully against PostgreSQL.**
 
 ---
 
-# DO NOT CHANGE THE PHASE 2 CONTRACT UNNECESSARILY
+# 4. AUDIT OTHER PRODUCTION STARTUP / WORKER PATHS
 
-Phase 2 currently provides contextual values such as:
+The Golden Demo is only the currently visible failure.
 
-```text
-projectName
-activityExternalId
-activityName
-...
-activityMatchId
-```
-
-Do not redesign the Phase 2 message-generation contract just to solve this.
-
-The correction should establish the proper distinction:
+Search for the same sync/async mismatch throughout:
 
 ```text
-display context:
-projectName
-
-relational identity:
-projectId
+backend/src/services/
+backend/src/jobs/
+backend/src/repositories/
+backend/src/routes/
+backend/src/ai/
 ```
 
-If the current notification context lacks `projectId`, add the smallest explicit server-owned field required to carry it through the notification boundary.
+Look for code that assumes repository methods are synchronous.
 
-Do not infer it from `projectName`.
+Do not blindly convert everything.
+
+For each relevant path determine:
+
+```text
+SQLite return type
+Postgres return type
+caller expectation
+```
+
+Any production path that can run with:
+
+```text
+DATABASE_PROVIDER=postgres
+```
+
+must correctly await asynchronous PostgreSQL operations.
 
 ---
 
-# IMPORTANT: EXISTING POSTGRESQL / SQLITE DUAL-ENGINE ARCHITECTURE
+# 5. DO NOT USE `any` TO HIDE THE PROBLEM
 
-The current repository uses both:
+Do NOT solve the async mismatch by adding:
 
-```text
-SQLite implementations
-PostgreSQL implementations
+```ts
+as any
 ```
 
-with provider selection.
+or unsafe casts throughout the application.
 
-Preserve this architecture.
+The current Phase 4 notification code already contains some `as any` bridges.
 
-Do not:
+Do not expand that pattern.
 
-* remove SQLite
-* remove PostgreSQL
-* replace the repository system
-* add an ORM
-* rewrite all repositories
-* change unrelated async behavior
-
-Only make the changes required to correctly carry authoritative identifiers through the notification pipeline.
+Prefer a real type-safe boundary.
 
 ---
 
-# VERIFICATION 1 — DUPLICATE / INVALID IDENTIFIER TESTS
+# 6. RE-EVALUATE THE PROVIDER/REPOSITORY PROXY
 
-Add regression tests proving:
-
-### Valid
+The current pattern conceptually exposes:
 
 ```text
-projectId = real project ID
-activityMatchId = real activity match ID
+ProjectRepository (sync interface)
+        ↓
+Proxy
+   ↙        ↘
+SQLite      PostgreSQL
+sync        async
 ```
 
-→ notification outbox row is successfully created.
+This is not type-safe.
 
-### Invalid project identity
-
-A display name passed where a project ID is expected must not silently create a valid notification.
-
-### Missing activity match
-
-If:
+Do not necessarily redesign the whole repository architecture, but evaluate whether the active repository contracts should become consistently asynchronous:
 
 ```text
-activityMatchId = null / undefined
+Promise<T>
 ```
 
-→ no notification outbox row is created.
+for both SQLite and PostgreSQL implementations.
 
-### Fabricated match
-
-Verify the code cannot produce:
+This may be the cleanest long-term solution because:
 
 ```text
-match_<timestamp>
+SQLite can easily return:
+Promise.resolve(value)
+
+PostgreSQL naturally returns:
+Promise<T>
 ```
 
-or another synthetic match ID.
+However:
+
+**Do not perform a repository-wide rewrite unless the audit demonstrates it is necessary.**
+
+Choose the smallest safe architecture that eliminates the type contradiction.
 
 ---
 
-# VERIFICATION 2 — POSTGRESQL-SPECIFIC TEST
+# 7. GOLDEN DEMO AUTO-SEEDING
 
-Run the notification persistence test path against the PostgreSQL implementation.
+The current startup behavior is:
+
+```text
+AUTO_SEED_DEMO=true
++
+projectCount === 0
+        ↓
+seed Golden Demo
+```
+
+That behavior should remain available for the SIH demonstration.
+
+But it must now correctly operate against PostgreSQL.
 
 Verify:
 
 ```text
-real project ID
-+
-real activity match ID
-↓
-Postgres notification_outbox
+fresh Supabase database
+ ↓
+schema exists
+ ↓
+seedGoldenDemo()
+ ↓
+30 activities
+ ↓
+evidence
+ ↓
+progress reports
+ ↓
+matches
+ ↓
+canonical progress
+ ↓
+events
+ ↓
+accounts
+ ↓
+notification-related data where applicable
 ```
 
-and confirm PostgreSQL foreign-key integrity succeeds.
+The seed must either:
 
-Also verify that the previous incorrect behavior:
+1. complete successfully, or
+2. fail transactionally/cleanly without leaving an unusable half-seeded database.
 
-```text
-projectName → project_id
-```
-
-fails rather than silently succeeding.
-
-Do not only test SQLite.
+Do not silently swallow a failed seed and continue as if production is healthy.
 
 ---
 
-# VERIFICATION 3 — FULL END-TO-END ANOMALY PATH
+# 8. IMPORTANT: THE SEEDING ERROR MUST NOT BE MASKED
 
-Exercise the real flow:
-
-```text
-worker report
-    ↓
-Phase 1 anomaly
-    ↓
-activity match persisted
-    ↓
-Phase 4 notification creation
-    ↓
-notification_outbox
-```
-
-Verify the resulting outbox record contains:
+The current startup catches:
 
 ```text
-project_id = actual projects.id
-activity_match_id = actual activity_matches.id
+Auto-seeding Golden Demo encountered an error
 ```
 
-Then verify Phase 4 delivery still functions.
+and then continues.
+
+For production PostgreSQL, this can produce an application that starts with partially initialized/inconsistent data.
+
+After fixing the underlying issue, review whether the startup semantics should be strengthened so a failed required production seed is clearly surfaced.
+
+Do not make unrelated policy changes.
+
+The key requirement is:
+
+**No silent half-seeded production state.**
 
 ---
 
-# VERIFICATION 4 — PRESERVE ALL EXISTING PHASE 4 INVARIANTS
+# 9. PostgreSQL MIGRATION STATE
 
-Do not regress:
+After fixing the startup race, verify:
 
 ```text
-normal/cold-start → no notification
+fresh database
+ ↓
+exactly one migration execution
+ ↓
+schema_migrations contains:
+20260913000000_baseline_schema
+```
 
-same anomaly/channel → one logical notification
+and subsequent restart produces:
 
-same notification → same idempotency key
+```text
+Applied 0 migration(s)
+```
 
-retry → same message snapshot
+without duplicate-key errors.
 
-retry → no second Groq generation
+Test both:
 
-temporary failure → retry_wait
+```text
+first startup
+second startup
+```
 
-permanent failure → failed
+against PostgreSQL.
 
-stale lease → recoverable
+---
 
-anomaly persistence is independent from notification delivery
+# 10. TEST POSTGRESQL USING A REALISTIC DATABASE
+
+Use the existing PostgreSQL test infrastructure and `pg-mem` where appropriate.
+
+But do not rely exclusively on `pg-mem`.
+
+For provider-specific behavior, use the actual PostgreSQL implementation and verify:
+
+```text
+project creation
+project lookup
+schedule creation
+activity creation
+progress creation
+match creation
+notification outbox creation
+transaction rollback
+```
+
+The highest-value test is:
+
+```text
+fresh PostgreSQL schema
+ ↓
+seedGoldenDemo()
+ ↓
+seed succeeds
 ```
 
 ---
 
-# IMPORTANT: CHECK THE SUPABASE DATABASE INITIALIZATION
+# 11. CANONICAL TRUTH MUST REMAIN UNCHANGED
 
-Because PostgreSQL is now available, verify that the corrected notification path is actually backed by the PostgreSQL repository when:
+The migration/correction must not change FieldLine's core invariant:
 
 ```text
-DATABASE_PROVIDER=postgres
+only confirmed matches
+        ↓
+canonical activity_progress
 ```
 
-and not accidentally by the SQLite implementation.
-
-You do not need to redesign the current repository-provider selection mechanism.
-
-Just prove the correct implementation is selected.
+Verify the Golden Demo produces the same canonical truth against PostgreSQL as SQLite.
 
 ---
 
-# SECURITY / DATA INTEGRITY
+# 12. NOTIFICATION OUTBOX MUST REMAIN CORRECT
 
-Do not weaken:
+Verify the Phase 4 outbox still uses:
 
-* foreign keys
-* unique notification constraints
-* idempotency keys
-* transaction boundaries
+```text
+real projectId
+real activityMatchId
+```
 
-Do not convert identifiers into human-readable strings.
+and that foreign-key relationships remain intact.
 
-A display name and a relational ID are different concepts and must remain different throughout the application.
+Do not weaken constraints.
 
 ---
 
-# TESTING COMMANDS
+# 13. VERIFICATION COMMANDS
 
-Run the focused notification tests.
-
-Run PostgreSQL-specific tests using a test database/configuration where practical.
-
-Then run:
+Run at minimum:
 
 ```bash
 npx tsc -p tsconfig.backend.json --noEmit
 npm test
 ```
 
-Do not claim success unless the commands actually pass.
+Plus focused PostgreSQL/startup tests.
+
+Run the Golden Demo seed against PostgreSQL in an isolated test environment.
+
+Verify the following sequence:
+
+```text
+START #1
+  PostgreSQL initialization
+  migrations applied exactly once
+  Golden Demo seed succeeds
+
+STOP
+
+START #2
+  PostgreSQL initialization
+  migrations applied 0
+  existing Golden Demo preserved
+  no reseed corruption
+```
+
+Do not claim success without actually executing these scenarios.
 
 ---
 
-# FINAL REPORT
+# 14. FINAL REPORT
 
 Return:
 
-### 1. Exact bug fixed
+### A. Root causes
 
-Show where `projectName` was incorrectly being used as `projectId`.
+Explicitly explain:
 
-### 2. Exact identifier flow now
+1. why `schema_migrations` was being inserted twice
+2. why `projectRepository.getByCode()` produced the `undefined` project behavior
+3. whether other sync/async mismatches were discovered
 
-Show:
+### B. Changes made
+
+List exact files changed.
+
+### C. Provider architecture
+
+Explain how SQLite and PostgreSQL are now exposed safely to callers.
+
+### D. Golden Demo
+
+Provide actual PostgreSQL seed results:
 
 ```text
-real projectId → notification_outbox.project_id
-real activityMatchId → notification_outbox.activity_match_id
+project
+activities
+evidence
+reports
+matches
+canonical observations
+accounts
 ```
 
-### 3. Missing-ID behavior
+### E. Migration lifecycle
 
-Explain exactly what happens when `activityMatchId` is unavailable.
+Show first-start and second-start behavior.
 
-### 4. PostgreSQL verification
+### F. Tests
 
-Confirm the corrected notification path was tested against PostgreSQL/Supabase-compatible persistence.
+Give exact commands and actual counts.
 
-### 5. Regression tests
+### G. Remaining limitations
 
-Give exact commands and actual pass/fail counts.
+Be honest.
 
-### 6. Full test suite
+Do not redesign unrelated FieldLine functionality.
 
-Give the actual final result.
-
-Do not perform unrelated refactoring.
-
-This is a **targeted correctness correction after the Supabase migration**, not a new architecture phase.
+The goal is to make the CURRENT FieldLine architecture reliably compatible with PostgreSQL/Supabase.

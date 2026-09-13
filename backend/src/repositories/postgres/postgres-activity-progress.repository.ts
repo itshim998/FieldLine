@@ -43,7 +43,7 @@ function mapRowToActivityProgress(row: ActivityProgressDbRow): ActivityProgress 
   };
 }
 
-export class PostgresActivityProgressRepository {
+export class PostgresActivityProgressRepository implements ActivityProgressRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

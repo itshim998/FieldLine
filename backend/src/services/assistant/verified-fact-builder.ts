@@ -1,7 +1,7 @@
 import {
-  ProjectIntelligenceService,
   projectIntelligenceService as defaultIntelligenceService
 } from '../intelligence/project-intelligence.service.js';
+import type { ProjectIntelligenceService } from '../intelligence/project-intelligence.types.js';
 import {
   ProgressSnapshotService,
   progressSnapshotService as defaultSnapshotService
@@ -19,6 +19,10 @@ import {
   ResolvedActivityInfo,
   MAX_VERIFIED_FACTS_LIMIT
 } from './assistant.types.js';
+
+import type { MaybePromise } from '../../database/provider.js';
+import type { ActivityProgress, ActivityProgressSnapshotItem } from '../../models/domain.types.js';
+import type { ProjectIntelligence } from '../intelligence/project-intelligence.types.js';
 
 export class VerifiedFactBuilder {
   private intelligenceService: ProjectIntelligenceService;
@@ -43,24 +47,78 @@ export class VerifiedFactBuilder {
     intent: AssistantIntent,
     asOfDate: string,
     resolvedActivity: ResolvedActivityInfo | null
-  ): VerifiedFact[] {
-    const intelligence = this.intelligenceService.getIntelligence(projectId, {
+  ): MaybePromise<VerifiedFact[]> {
+    const intelRes = this.intelligenceService.getIntelligence(projectId, {
       asOfDate
     });
 
-    // Obtain snapshot to enrich fact data attributes (e.g. status, plannedStart, varianceState)
-    let snapshotMap = new Map<string, any>();
-    try {
-      const snapshot = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
-      if (snapshot && Array.isArray(snapshot.activities)) {
-        for (const act of snapshot.activities) {
-          snapshotMap.set(act.activityId, act);
-        }
-      }
-    } catch {
-      // Graceful fallback if snapshot not yet generated
+    if (intelRes instanceof Promise) {
+      return intelRes.then(async (intelligence) => {
+        const snapshotMap = await this.resolveSnapshotMapAsync(projectId, asOfDate);
+        return this.compileFacts(projectId, intelligence, snapshotMap, intent, asOfDate, resolvedActivity);
+      });
     }
 
+    const snapshotMapRes = this.resolveSnapshotMap(projectId, asOfDate);
+    if (snapshotMapRes instanceof Promise) {
+      return snapshotMapRes.then((snapshotMap) =>
+        this.compileFacts(projectId, intelRes, snapshotMap, intent, asOfDate, resolvedActivity)
+      );
+    }
+
+    return this.compileFacts(projectId, intelRes, snapshotMapRes, intent, asOfDate, resolvedActivity);
+  }
+
+  private resolveSnapshotMap(
+    projectId: string,
+    asOfDate: string
+  ): MaybePromise<Map<string, ActivityProgressSnapshotItem>> {
+    try {
+      const snapRes = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+      if (snapRes instanceof Promise) {
+        return snapRes
+          .then((snapshot) => this.buildSnapshotMapFromSnapshot(snapshot))
+          .catch(() => new Map());
+      }
+      return this.buildSnapshotMapFromSnapshot(snapRes);
+    } catch {
+      return new Map();
+    }
+  }
+
+  private async resolveSnapshotMapAsync(
+    projectId: string,
+    asOfDate: string
+  ): Promise<Map<string, ActivityProgressSnapshotItem>> {
+    try {
+      const snapshot = await this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+      return this.buildSnapshotMapFromSnapshot(snapshot);
+    } catch {
+      return new Map();
+    }
+  }
+
+  private buildSnapshotMapFromSnapshot(snapshot: unknown): Map<string, ActivityProgressSnapshotItem> {
+    const map = new Map<string, ActivityProgressSnapshotItem>();
+    if (snapshot && typeof snapshot === 'object' && 'activities' in snapshot) {
+      const acts = (snapshot as { activities: ActivityProgressSnapshotItem[] }).activities;
+      if (Array.isArray(acts)) {
+        for (const act of acts) {
+          map.set(act.activityId, act);
+        }
+      }
+    }
+    return map;
+  }
+
+  private compileFacts(
+    projectId: string,
+    intelligence: ProjectIntelligence,
+    snapshotMap: Map<string, ActivityProgressSnapshotItem>,
+    intent: AssistantIntent,
+    asOfDate: string,
+    resolvedActivity: ResolvedActivityInfo | null
+  ): MaybePromise<VerifiedFact[]> {
     const facts: VerifiedFact[] = [];
 
     switch (intent.intent) {
@@ -119,9 +177,15 @@ export class VerifiedFactBuilder {
 
         // If a specific activity was asked about but is not in atRisk, provide its authoritative snapshot status fact
         if (resolvedActivity && atRiskList.length === 0) {
-          const snapFact = this.buildActivitySnapshotFact(projectId, resolvedActivity, asOfDate, intelligence);
-          if (snapFact) {
-            facts.push(snapFact);
+          const snapFactRes = this.buildActivitySnapshotFact(projectId, resolvedActivity, asOfDate, intelligence);
+          if (snapFactRes instanceof Promise) {
+            return snapFactRes.then((snapFact) => {
+              if (snapFact) facts.push(snapFact);
+              return facts.slice(0, MAX_VERIFIED_FACTS_LIMIT);
+            });
+          }
+          if (snapFactRes) {
+            facts.push(snapFactRes);
           }
         }
         break;
@@ -225,7 +289,7 @@ export class VerifiedFactBuilder {
 
         // Bounded to 10 most recent events for deterministic prompt payload and low latency
         for (const e of events.slice(0, 10)) {
-          const payload = (e.payload || {}) as Record<string, any>;
+          const payload = (e.payload || {}) as Record<string, unknown>;
           facts.push({
             ref: `event:${e.eventId}`,
             category: 'recent_changes',
@@ -245,9 +309,15 @@ export class VerifiedFactBuilder {
 
       case 'activity_status': {
         if (resolvedActivity) {
-          const snapFact = this.buildActivitySnapshotFact(projectId, resolvedActivity, asOfDate, intelligence);
-          if (snapFact) {
-            facts.push(snapFact);
+          const snapFactRes = this.buildActivitySnapshotFact(projectId, resolvedActivity, asOfDate, intelligence);
+          if (snapFactRes instanceof Promise) {
+            return snapFactRes.then((snapFact) => {
+              if (snapFact) facts.push(snapFact);
+              return facts.slice(0, MAX_VERIFIED_FACTS_LIMIT);
+            });
+          }
+          if (snapFactRes) {
+            facts.push(snapFactRes);
           }
         }
         break;
@@ -266,36 +336,91 @@ export class VerifiedFactBuilder {
     resolvedActivity: ResolvedActivityInfo,
     asOfDate: string,
     _intelligence: unknown
-  ): VerifiedFact | null {
+  ): MaybePromise<VerifiedFact | null> {
     try {
-      const snapshot = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
-      const actSnap = snapshot.activities.find((a: { activityId: string }) => a.activityId === resolvedActivity.id);
-      const latestProgress = this.progressRepo.getLatestByActivityId(resolvedActivity.id);
+      const snapRes = this.snapshotService.getProgressSnapshot(projectId, asOfDate);
+      if (snapRes instanceof Promise) {
+        return snapRes
+          .then(async (snapshot) => {
+            const actSnap = snapshot.activities.find(
+              (a: { activityId: string }) => a.activityId === resolvedActivity.id
+            );
+            const latestProgress = await this.progressRepo.getLatestByActivityId(resolvedActivity.id);
+            return this.formatActivitySnapshotFact(
+              resolvedActivity,
+              asOfDate,
+              actSnap,
+              latestProgress,
+              projectId
+            );
+          })
+          .catch(() => this.formatFallbackActivityFact(resolvedActivity, projectId));
+      }
 
-      if (actSnap) {
-        return {
-          ref: `activity_status:${resolvedActivity.externalId}`,
-          category: 'activity_status',
+      const actSnap = snapRes?.activities?.find(
+        (a: { activityId: string }) => a.activityId === resolvedActivity.id
+      );
+      const progRes = this.progressRepo.getLatestByActivityId(resolvedActivity.id);
+      if (progRes instanceof Promise) {
+        return progRes
+          .then((latestProgress) =>
+            this.formatActivitySnapshotFact(
+              resolvedActivity,
+              asOfDate,
+              actSnap,
+              latestProgress,
+              projectId
+            )
+          )
+          .catch(() => this.formatFallbackActivityFact(resolvedActivity, projectId));
+      }
+
+      return this.formatActivitySnapshotFact(
+        resolvedActivity,
+        asOfDate,
+        actSnap,
+        progRes,
+        projectId
+      );
+    } catch {
+      return this.formatFallbackActivityFact(resolvedActivity, projectId);
+    }
+  }
+
+  private formatActivitySnapshotFact(
+    resolvedActivity: ResolvedActivityInfo,
+    asOfDate: string,
+    actSnap: ActivityProgressSnapshotItem | undefined,
+    latestProgress: ActivityProgress | null,
+    projectId: string
+  ): VerifiedFact {
+    if (actSnap) {
+      return {
+        ref: `activity_status:${resolvedActivity.externalId}`,
+        category: 'activity_status',
+        activityId: resolvedActivity.id,
+        externalId: resolvedActivity.externalId,
+        activityName: resolvedActivity.name,
+        progressUpdateId: latestProgress?.progressUpdateId || null,
+        evidenceId: null,
+        summary: `Activity "${resolvedActivity.name}" (${resolvedActivity.externalId}) as of ${asOfDate}: Execution status: ${actSnap.status}, Planned progress: ${actSnap.plannedProgress}%, Actual progress: ${actSnap.actualProgress}%, Progress variance: ${actSnap.progressVariance}%, Variance state: ${actSnap.varianceState}, Planned finish: ${actSnap.plannedFinish}, Overdue: ${actSnap.overdue}, Location: ${resolvedActivity.location || 'N/A'}.`,
+        data: {
           activityId: resolvedActivity.id,
           externalId: resolvedActivity.externalId,
-          activityName: resolvedActivity.name,
-          progressUpdateId: latestProgress?.progressUpdateId || null,
-          evidenceId: null,
-          summary: `Activity "${resolvedActivity.name}" (${resolvedActivity.externalId}) as of ${asOfDate}: Execution status: ${actSnap.status}, Planned progress: ${actSnap.plannedProgress}%, Actual progress: ${actSnap.actualProgress}%, Progress variance: ${actSnap.progressVariance}%, Variance state: ${actSnap.varianceState}, Planned finish: ${actSnap.plannedFinish}, Overdue: ${actSnap.overdue}, Location: ${resolvedActivity.location || 'N/A'}.`,
-          data: {
-            activityId: resolvedActivity.id,
-            externalId: resolvedActivity.externalId,
-            name: resolvedActivity.name,
-            location: resolvedActivity.location,
-            snapshot: actSnap,
-            latestProgress
-          }
-        };
-      }
-    } catch {
-      // Return fallback if snapshot not available
+          name: resolvedActivity.name,
+          location: resolvedActivity.location,
+          snapshot: actSnap,
+          latestProgress
+        }
+      };
     }
+    return this.formatFallbackActivityFact(resolvedActivity, projectId);
+  }
 
+  private formatFallbackActivityFact(
+    resolvedActivity: ResolvedActivityInfo,
+    projectId: string
+  ): VerifiedFact {
     return {
       ref: `activity_status:${resolvedActivity.externalId}`,
       category: 'activity_status',

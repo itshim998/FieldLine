@@ -41,7 +41,7 @@ function mapRowToEvidence(row: EvidenceDbRow): Evidence {
   };
 }
 
-export class PostgresEvidenceRepository {
+export class PostgresEvidenceRepository implements EvidenceRepository {
   private getPool: () => Pool;
 
   constructor(poolProvider?: () => Pool) {

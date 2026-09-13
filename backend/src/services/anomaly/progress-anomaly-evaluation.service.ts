@@ -22,6 +22,9 @@ export type {
   ProgressAnomalyEvaluationService
 } from './progress-anomaly-evaluation.types.js';
 import { logger } from '../../config/logger.js';
+import { MaybePromise } from '../../database/provider.js';
+import { Activity } from '../../models/domain.types.js';
+import { ActivityProgress } from '../../models/domain.types.js';
 
 export interface ProgressAnomalyEvaluationServiceDependencies {
   activityProgressRepo?: ActivityProgressRepository;
@@ -40,7 +43,7 @@ export class DefaultProgressAnomalyEvaluationService implements ProgressAnomalyE
     this.anomalyModelService = dependencies?.anomalyModelService || defaultAnomalyModelService;
   }
 
-  evaluateProgressAnomaly(input: EvaluateProgressAnomalyInput): AnomalyPrediction | null {
+  evaluateProgressAnomaly(input: EvaluateProgressAnomalyInput): MaybePromise<AnomalyPrediction | null> {
     const { projectId, activityId, activity: passedActivity, reportedPercent, reportDate } = input;
 
     // 1. If progress percent is missing or non-numeric, return null (no progress observation to evaluate)
@@ -54,12 +57,39 @@ export class DefaultProgressAnomalyEvaluationService implements ProgressAnomalyE
     }
 
     try {
+      // 3. Resolve canonical evaluation date
+      const effectiveDate = (reportDate || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
+
       // 2. Resolve activity metadata for planned timeline and identifiers
-      let act = passedActivity;
-      if (!act) {
-        act = this.activityRepo.getById(activityId);
+      const actRes = passedActivity || this.activityRepo.getById(activityId);
+      if (actRes instanceof Promise) {
+        return actRes.then((act) => {
+          if (!act) {
+            logger.warn(
+              `ProgressAnomalyEvaluationService: Activity '${activityId}' not found for project '${projectId}'. Falling back to cold-start.`
+            );
+            return { ...COLD_START_ANOMALY_PREDICTION };
+          }
+          const priorRes = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+            act.id,
+            projectId,
+            effectiveDate
+          );
+          if (priorRes instanceof Promise) {
+            return priorRes.then((prior) =>
+              this.computePrediction(act, prior, effectiveDate, reportedPercent)
+            );
+          }
+          return this.computePrediction(act, priorRes, effectiveDate, reportedPercent);
+        }).catch((err: any) => {
+          logger.warn(
+            `ProgressAnomalyEvaluationService: Anomaly evaluation failed gracefully for activity '${activityId}': ${err?.message || err}. Falling back to cold-start.`
+          );
+          return { ...COLD_START_ANOMALY_PREDICTION };
+        });
       }
 
+      const act = actRes;
       if (!act) {
         logger.warn(
           `ProgressAnomalyEvaluationService: Activity '${activityId}' not found for project '${projectId}'. Falling back to cold-start.`
@@ -67,50 +97,60 @@ export class DefaultProgressAnomalyEvaluationService implements ProgressAnomalyE
         return { ...COLD_START_ANOMALY_PREDICTION };
       }
 
-      // 3. Resolve canonical evaluation date
-      const effectiveDate = (reportDate || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
-
-      // 4. Retrieve latest canonical observation strictly as of report date
-      // Critical Invariant: Must run before new observation is committed so current report does not become its own baseline
-      const priorObservation = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+      const priorRes = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
         act.id,
         projectId,
         effectiveDate
       );
-
-      // 5. Cold start: if no prior canonical observation exists, return safe cold-start
-      if (!priorObservation) {
-        return { ...COLD_START_ANOMALY_PREDICTION };
+      if (priorRes instanceof Promise) {
+        return priorRes.then((prior) =>
+          this.computePrediction(act, prior, effectiveDate, reportedPercent)
+        ).catch((err: any) => {
+          logger.warn(
+            `ProgressAnomalyEvaluationService: Anomaly evaluation failed gracefully for activity '${activityId}': ${err?.message || err}. Falling back to cold-start.`
+          );
+          return { ...COLD_START_ANOMALY_PREDICTION };
+        });
       }
 
-      // 6. Calculate planned progress as-of report date
-      const { plannedProgress } = calculatePlannedProgress(
-        act.plannedStart,
-        act.plannedFinish,
-        effectiveDate,
-        act.externalId || act.name
-      );
-
-      // 7. Extract the 5 canonical anomaly features
-      const anomalyFeatures = extractAnomalyFeatures({
-        reportedPercent,
-        priorObservation,
-        plannedPercent: plannedProgress,
-        reportDate: effectiveDate
-      });
-
-      // 8. Invoke AnomalyModelService inference
-      if (anomalyFeatures && this.anomalyModelService.isAvailable()) {
-        return this.anomalyModelService.predict(anomalyFeatures);
-      }
-
-      return { ...COLD_START_ANOMALY_PREDICTION };
+      return this.computePrediction(act, priorRes, effectiveDate, reportedPercent);
     } catch (err: any) {
       logger.warn(
         `ProgressAnomalyEvaluationService: Anomaly evaluation failed gracefully for activity '${activityId}': ${err?.message || err}. Falling back to cold-start.`
       );
       return { ...COLD_START_ANOMALY_PREDICTION };
     }
+  }
+
+  private computePrediction(
+    act: Pick<Activity, 'id' | 'plannedStart' | 'plannedFinish' | 'externalId' | 'name'>,
+    priorObservation: ActivityProgress | null,
+    effectiveDate: string,
+    reportedPercent: number
+  ): AnomalyPrediction {
+    if (!priorObservation) {
+      return { ...COLD_START_ANOMALY_PREDICTION };
+    }
+
+    const { plannedProgress } = calculatePlannedProgress(
+      act.plannedStart,
+      act.plannedFinish,
+      effectiveDate,
+      act.externalId || act.name
+    );
+
+    const anomalyFeatures = extractAnomalyFeatures({
+      reportedPercent,
+      priorObservation,
+      plannedPercent: plannedProgress,
+      reportDate: effectiveDate
+    });
+
+    if (anomalyFeatures && this.anomalyModelService.isAvailable()) {
+      return this.anomalyModelService.predict(anomalyFeatures);
+    }
+
+    return { ...COLD_START_ANOMALY_PREDICTION };
   }
 }
 

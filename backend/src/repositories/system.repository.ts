@@ -1,11 +1,13 @@
 import { Database as DatabaseType } from 'better-sqlite3';
 import { getDatabase } from '../database/db.js';
 
+import { MaybePromise } from '../database/provider.js';
+
 export interface SystemRepository {
-  isHealthy(): boolean;
-  getAllMetadata(): Record<string, string>;
-  getMetadata(key: string): string | null;
-  setMetadata(key: string, value: string): void;
+  isHealthy(): MaybePromise<boolean>;
+  getAllMetadata(): MaybePromise<Record<string, string>>;
+  getMetadata(key: string): MaybePromise<string | null>;
+  setMetadata(key: string, value: string): MaybePromise<void>;
 }
 
 export class SqliteSystemRepository implements SystemRepository {
