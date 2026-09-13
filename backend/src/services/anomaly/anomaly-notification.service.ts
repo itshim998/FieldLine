@@ -91,8 +91,17 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
       return null;
     }
 
+    // Critical Invariant: Must have authoritative activityMatchId AND authoritative projectId.
+    // Never fabricate synthetic IDs, never use projectName as projectId.
+    if (!context.activityMatchId || !context.projectId) {
+      logger.warn(
+        `AnomalyNotificationService: recordNotificationIntent skipped due to missing authoritative relational identity (projectId='${context.projectId}', activityMatchId='${context.activityMatchId}')`
+      );
+      return null;
+    }
+
     const messageInput = toAnomalyMessageInput(prediction, context);
-    if (!messageInput || !context.activityMatchId) {
+    if (!messageInput) {
       return null;
     }
 
@@ -103,7 +112,7 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
 
     try {
       return this.outboxRepo.create({
-        projectId: messageInput.projectName, // or mapped from match
+        projectId: context.projectId,
         activityMatchId: context.activityMatchId,
         notificationType: 'anomaly_alert',
         channel: 'email',
@@ -127,26 +136,32 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
       return { message: null, delivery: null, outboxItem: null };
     }
 
-    // 2. Adapt verified server facts to message generation input
+    // 2. Strict Relational Identity Invariant:
+    // If activityMatchId or projectId is missing/unavailable, NEVER fabricate a synthetic ID and NEVER create notification intent.
+    if (!context.activityMatchId || !context.projectId) {
+      logger.warn(
+        `AnomalyNotificationService: Cannot create notification outbox without authoritative activityMatchId ('${context.activityMatchId}') and projectId ('${context.projectId}'). Notification skipped.`
+      );
+      return { message: null, delivery: null, outboxItem: null };
+    }
+
+    // 3. Adapt verified server facts to message generation input
     const messageInput = toAnomalyMessageInput(prediction, context);
     if (!messageInput) {
       return { message: null, delivery: null, outboxItem: null };
     }
 
     try {
-      // 3. Ensure durable outbox row exists (idempotent lookup or creation)
-      let outboxItem: NotificationOutboxItem | null = null;
-      if (context.activityMatchId) {
-        outboxItem = this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email');
-      }
+      // 4. Ensure durable outbox row exists (idempotent lookup or creation)
+      let outboxItem: NotificationOutboxItem | null =
+        await (this.outboxRepo.getByActivityMatchId(context.activityMatchId, 'email') as any);
 
       if (!outboxItem) {
-        const matchId = context.activityMatchId || `match_${Date.now()}`;
-        const idempotencyKey = `fieldline-anomaly-alert:${matchId}`;
+        const idempotencyKey = `fieldline-anomaly-alert:${context.activityMatchId}`;
         try {
-          outboxItem = this.outboxRepo.create({
-            projectId: context.projectName,
-            activityMatchId: matchId,
+          outboxItem = await (this.outboxRepo.create({
+            projectId: context.projectId,
+            activityMatchId: context.activityMatchId,
             notificationType: 'anomaly_alert',
             channel: 'email',
             payload: {
@@ -154,9 +169,9 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
               message: null
             },
             idempotencyKey
-          });
+          }) as any);
         } catch {
-          outboxItem = this.outboxRepo.findByIdempotencyKey(idempotencyKey);
+          outboxItem = await (this.outboxRepo.findByIdempotencyKey(idempotencyKey) as any);
         }
       }
 
@@ -164,16 +179,16 @@ export class DefaultAnomalyNotificationService implements AnomalyNotificationSer
         throw new Error('Failed to obtain or persist outbox entry for anomaly notification');
       }
 
-      // 4. Claim the item so attempt_count increments and lease is locked, then process through worker
+      // 5. Claim the item so attempt_count increments and lease is locked, then process through worker
       const claimedItem =
-        this.outboxRepo.claimById(outboxItem.id) ||
-        this.outboxRepo.getById(outboxItem.id) ||
+        (await (this.outboxRepo.claimById(outboxItem.id) as any)) ||
+        (await (this.outboxRepo.getById(outboxItem.id) as any)) ||
         outboxItem;
 
       await this.notificationWorker.processNotification(claimedItem);
 
-      // 5. Reload updated outbox row
-      const updatedItem = this.outboxRepo.getById(outboxItem.id) || outboxItem;
+      // 6. Reload updated outbox row
+      const updatedItem = (await (this.outboxRepo.getById(outboxItem.id) as any)) || outboxItem;
       let alertMsg: AnomalyAlertMessage | null = null;
       try {
         const parsed = JSON.parse(updatedItem.payloadJson) as NotificationOutboxPayload;

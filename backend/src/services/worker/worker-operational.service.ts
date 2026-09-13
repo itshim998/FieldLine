@@ -489,6 +489,7 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
           await this.anomalyNotificationService.notifyAnomalyAlert({
             prediction: anomaly,
             context: {
+              projectId,
               projectName: project.name,
               activityExternalId: activity.externalId,
               activityName: activity.name,

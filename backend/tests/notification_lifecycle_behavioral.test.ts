@@ -182,6 +182,9 @@ describe('Phase 4 — Realistic Lifecycle Scenarios (A through H)', () => {
     // 2. Outbox row created and delivered
     const outbox = outboxRepo.getByActivityMatchId(reportRes.match!.id);
     expect(outbox).not.toBeNull();
+    expect(outbox?.projectId).toBe(testProjectId);
+    expect(outbox?.projectId).not.toBe('Petrochemical Unit 9');
+    expect(outbox?.activityMatchId).toBe(reportRes.match!.id);
     expect(outbox?.status).toBe('delivered');
     expect(outbox?.providerMessageId).toBe('resend_msg_scen_a');
     expect(outbox?.attemptCount).toBe(1);
@@ -369,6 +372,7 @@ describe('Phase 4 — Realistic Lifecycle Scenarios (A through H)', () => {
         reasons: ['Same deviation']
       },
       context: {
+        projectId: testProjectId,
         projectName: 'Petrochemical Unit 9',
         activityExternalId: 'ACT-WELD-01',
         activityName: 'High-Pressure Pipe Welding',

@@ -487,6 +487,7 @@ export class ActivityMatchingService {
             await this.anomalyNotificationService.notifyAnomalyAlert({
               prediction: r.bestMatch.anomaly,
               context: {
+                projectId,
                 projectName: project.name,
                 activityExternalId: r.bestMatch.activityExternalId,
                 activityName: r.bestMatch.activityName,

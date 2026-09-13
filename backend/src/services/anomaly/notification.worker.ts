@@ -79,16 +79,16 @@ export class NotificationWorker {
         alertMessage = await this.messageGenerator.generateAnomalyMessage(payload.messageInput);
 
         if (!alertMessage) {
-          this.outboxRepo.markFailed(
+          await (this.outboxRepo.markFailed(
             item.id,
             'MESSAGE_GENERATION_FAILED',
             'Failed to generate anomaly alert message'
-          );
+          ) as any);
           return false;
         }
 
-        // Snapshot to SQLite so all subsequent retries reuse this exact payload
-        this.outboxRepo.saveMessageSnapshot(item.id, alertMessage);
+        // Snapshot so all subsequent retries reuse this exact payload
+        await (this.outboxRepo.saveMessageSnapshot(item.id, alertMessage) as any);
         payload.message = alertMessage;
       } else {
         logger.debug(
@@ -104,7 +104,7 @@ export class NotificationWorker {
         logger.info(
           `NotificationWorker: Notification ${item.id} delivered successfully. Provider message ID: ${deliveryResult.providerMessageId || 'acknowledged'}`
         );
-        this.outboxRepo.markDelivered(item.id, deliveryResult.providerMessageId);
+        await (this.outboxRepo.markDelivered(item.id, deliveryResult.providerMessageId) as any);
         return true;
       }
 
@@ -118,7 +118,7 @@ export class NotificationWorker {
         logger.warn(
           `NotificationWorker: Temporary delivery failure for notification ${item.id} (${errorCode}). Retrying at ${nextAttemptAt}. Attempt ${item.attemptCount}/${item.maxAttempts}.`
         );
-        this.outboxRepo.scheduleRetry(item.id, errorCode, errorSummary, nextAttemptAt);
+        await (this.outboxRepo.scheduleRetry(item.id, errorCode, errorSummary, nextAttemptAt) as any);
         return false;
       }
 
@@ -132,7 +132,7 @@ export class NotificationWorker {
       logger.error(
         `NotificationWorker: Permanent delivery failure for notification ${item.id} (${finalCode}): ${finalSummary}`
       );
-      this.outboxRepo.markFailed(item.id, finalCode, finalSummary);
+      await (this.outboxRepo.markFailed(item.id, finalCode, finalSummary) as any);
       return false;
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);

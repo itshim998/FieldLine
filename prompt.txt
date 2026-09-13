@@ -1,1192 +1,445 @@
-Your task is to migrate FieldLine from a Render-filesystem-backed SQLite production database to a **persistent Supabase PostgreSQL production database**, while preserving the existing application architecture and all currently implemented behavior.
+You have already completed the Supabase/PostgreSQL migration.
 
-## Current authoritative baseline
+Do NOT perform another database migration.
+Do NOT redesign the dual-engine architecture.
+Do NOT redo Phase 4.
 
-The latest GitHub `main` commit is:
+The current authoritative repository state is GitHub `main` commit:
 
-```text id="x8g1v2"
-1036141538cfa0b1184cadb59b5f4271639fef0b
+```text
+8d09ef6d1ed9a4c9346c9649bb7335c27c09338d
 ```
 
 Commit:
 
-```text id="yh5oq4"
-feat(anomaly): implement Phase 4 notification outbox, worker runner & retry reliability
+```text
+feat(db): migrate production database to Supabase PostgreSQL with dual-engine provider and full regression preservation
 ```
 
-This commit already contains the completed Phase 1–4 architecture, including:
-
-* unified anomaly evaluation
-* Groq anomaly-message generation
-* Resend HTTP email delivery
-* notification outbox
-* notification worker
-* bounded retry/backoff
-* lease claiming/recovery
-* notification idempotency
-* immutable notification payload snapshot
-* atomic notification persistence with anomaly match persistence
-
-Do NOT redesign those phases.
+I need a **small, targeted post-migration correctness fix** for the existing Phase 4 notification implementation.
 
 ---
 
-# 1. PRIMARY OBJECTIVE
+# CRITICAL ISSUE 1 — WRONG `projectId`
 
-Make FieldLine production-compatible with:
-
-```text id="jxj7u8"
-Render
-  ↓
-FieldLine Node/Express backend
-  ↓
-PostgreSQL
-  ↓
-Supabase
-```
-
-The application architecture should become:
-
-```text id="8tew0h"
-Application services
-       ↓
-Repository interfaces
-       ↓
-PostgreSQL repository implementation
-       ↓
-Supabase PostgreSQL
-```
-
-The existing SQLite implementation may remain as a **local/test compatibility backend** so that deterministic offline development and the existing golden-demo workflow are preserved.
-
-Production should use PostgreSQL.
-
----
-
-# 2. IMPORTANT: THIS IS NOT A SIMPLE DATABASE-CONFIG CHANGE
-
-The current database layer uses synchronous `better-sqlite3`, SQLite-specific transactions, PRAGMA settings, SQLite error codes, and a custom SQLite migration system.
-
-Therefore, do not assume that replacing:
-
-```text id="7y0c1j"
-DATABASE_PATH
-```
-
-with:
+Inspect:
 
 ```text
-DATABASE_URL
+backend/src/services/anomaly/anomaly-notification.service.ts
 ```
 
-is sufficient.
+The current implementation still passes:
 
-The PostgreSQL implementation will require asynchronous database access.
-
-Perform a full architecture audit first and determine the smallest safe migration strategy.
-
----
-
-# 3. FIRST: AUDIT THE ENTIRE DATABASE SURFACE
-
-Before implementing:
-
-### Inspect
-
-* `backend/src/database/db.ts`
-* `backend/src/database/migrator.ts`
-* `backend/src/database/schema.ts`
-* every SQLite migration
-* every repository
-* every service that directly accesses the database
-* `better-sqlite3` imports
-* `getDatabase()`
-* `runInTransaction()`
-* SQLite-specific error handling
-* database health checks
-* transaction boundaries
-* startup/shutdown
-* seed scripts
-* demo reset/verification scripts
-* processing job repositories
-* notification outbox repository
-* activity match repository
-* progress repository
-* event repository
-* tests and test database setup
-
-Search the entire repository for:
-
-```text
-better-sqlite3
-getDatabase(
-runInTransaction(
-.prepare(
-.exec(
-.transaction(
-pragma(
-sqlite_master
-SQLITE_
-DATABASE_PATH
-```
-
-Do not assume the repository layer is the only place with SQLite coupling.
-
-Produce an internal migration map before modifying code.
-
----
-
-# 4. TARGET DATABASE ARCHITECTURE
-
-Use PostgreSQL on Supabase.
-
-Prefer a native Node PostgreSQL client rather than using Supabase's REST/Data API for backend persistence.
-
-Evaluate a suitable client such as:
-
-```text
-postgres
-```
-
-or:
-
-```text
-pg
-```
-
-and choose based on the repository's existing architecture and transaction requirements.
-
-Do not add a large ORM merely to perform this migration.
-
-Prefer direct SQL + repository abstractions.
-
----
-
-# 5. CONNECTION CONFIGURATION
-
-Introduce a production configuration centered around:
-
-```text
-DATABASE_PROVIDER=postgres
-DATABASE_URL=<Supabase PostgreSQL connection string>
-DATABASE_SSL=true
-```
-
-Use exact names consistent with the repository if another clean convention already exists.
-
-Keep SQLite configuration available for local/test compatibility, for example:
-
-```text
-DATABASE_PROVIDER=sqlite
-DATABASE_PATH=./database/fieldline.db
-```
-
-Do not expose credentials in source control.
-
-Do not commit any actual Supabase password, connection string, or service-role credential.
-
----
-
-# 6. CHOOSE THE CORRECT SUPABASE CONNECTION MODE
-
-Do not hard-code assumptions.
-
-Supabase currently supports:
-
-* direct Postgres connection
-* shared pooler session mode
-* shared pooler transaction mode
-* dedicated pooler modes on applicable plans
-
-For a persistent Render backend, determine whether direct connectivity is appropriate.
-
-If the deployment environment is IPv4-only, use Supabase's shared pooler in **session mode** rather than assuming IPv6 direct connectivity.
-
-Use a connection configuration that preserves the transaction semantics required by FieldLine.
-
-SSL must be enabled for remote production connections.
-
-The same `DATABASE_URL` abstraction should support the chosen connection mode cleanly.
-
----
-
-# 7. BUILD A DATABASE ABSTRACTION
-
-Create a clean database-provider boundary.
-
-Conceptually:
-
-```text id="qqw4o3"
-DatabaseProvider
-   ├── SqliteDatabaseProvider
-   └── PostgresDatabaseProvider
-```
-
-or an equivalent repository-consistent architecture.
-
-Do not force services to know which database engine is active.
-
-The service layer should continue speaking in domain/repository terms.
-
----
-
-# 8. ASYNC MIGRATION
-
-This is a major part of the work.
-
-The current SQLite repositories are synchronous.
-
-PostgreSQL access will be asynchronous.
-
-Convert repository contracts to async where necessary:
-
-```ts id="c4gh3b"
-await repository.getById(...)
-await repository.create(...)
-await repository.list(...)
-await repository.update(...)
-```
-
-Then propagate `async/await` through the affected service/controller paths.
-
-Do NOT create:
-
-```text
-sync wrappers around async DB operations
-```
-
-using hacks such as child processes, blocking loops, or arbitrary synchronous network workarounds.
-
-Do not hide asynchronous database calls behind unsafe pseudo-synchronous abstractions.
-
-Use normal Node asynchronous I/O.
-
----
-
-# 9. PRESERVE SQLite TEST/LOCAL COMPATIBILITY
-
-Do not throw away the existing SQLite implementation unless the audit demonstrates that maintaining it is genuinely unsafe.
-
-The preferred model is:
-
-```text id="q2j29b"
-DATABASE_PROVIDER=sqlite
-        ↓
-SQLite repository implementation
-```
-
-for local deterministic tests.
-
-And:
-
-```text
-DATABASE_PROVIDER=postgres
-        ↓
-Postgres repository implementation
-```
-
-for production.
-
-The repository interfaces should make both implementations behaviorally equivalent.
-
----
-
-# 10. POSTGRESQL SCHEMA
-
-Create a PostgreSQL schema representing the **current FieldLine domain state**, rather than mechanically translating every historical SQLite migration.
-
-Use a PostgreSQL baseline migration under a repository-consistent location, preferably:
-
-```text
-supabase/migrations/
-```
-
-unless an audit reveals a better existing convention.
-
-The baseline must include every currently required table and constraint.
-
-At minimum audit/include:
-
-```text
-projects
-project_accounts
-activities
-schedules
-evidence
-progress_updates
-activity_matches
-activity_progress
-project_events
-operational_blockers
-processing_jobs
-notification_outbox
-```
-
-plus any other actual tables found in the current repository.
-
-Preserve:
-
-* primary keys
-* foreign keys
-* unique constraints
-* indexes
-* not-null constraints
-* check constraints
-* cascade behavior
-* review-state constraints
-* anomaly severity constraints
-* notification state constraints
-
----
-
-# 11. DO NOT LOSE THE CURRENT PHASE 4 OUTBOX
-
-The current `notification_outbox` is part of the latest architecture.
-
-Its logical model includes fields equivalent to:
-
-```text id="0eawpe"
-id
-project_id
-activity_match_id
-notification_type
-channel
-status
-payload_json
-idempotency_key
-attempt_count
-max_attempts
-next_attempt_at
-locked_at
-last_attempt_at
-delivered_at
-provider_message_id
-last_error_code
-last_error_summary
-created_at
-updated_at
-```
-
-and a uniqueness model preventing duplicate logical anomaly notifications.
-
-Preserve these semantics exactly.
-
-Do not simplify them during the migration.
-
----
-
-# 12. CANONICAL TRUTH MUST SURVIVE IDENTICALLY
-
-Preserve the existing FieldLine invariant:
-
-```text id="w6z8j4"
-unconfirmed/suggested match
-      ↓
-NO canonical activity_progress write
+```ts
+projectId: messageInput.projectName
 ```
 
 and:
 
-```text id="c6h8ri"
-confirmed match
+```ts
+projectId: context.projectName
+```
+
+into notification outbox creation.
+
+This is incorrect.
+
+`notification_outbox.project_id` is a relational identifier and must contain the real:
+
+```text
+projects.id
+```
+
+not:
+
+```text
+projects.name
+```
+
+The implementation must obtain the authoritative `projectId` from the actual server-side report/match context.
+
+### Required behavior
+
+```text
+trusted projectId
       ↓
-allowed to become canonical progress
+notification_outbox.project_id
 ```
 
-The migration must not change:
-
-* Match Review Policy
-* canonical progress rules
-* anomaly advisory semantics
-* dashboard truth semantics
-
-Existing canonical-truth tests must remain green.
-
-Add PostgreSQL-backed equivalents where needed.
-
----
-
-# 13. TRANSACTION MIGRATION
-
-Replace SQLite-specific transaction logic with native PostgreSQL transactions.
-
-The important invariant is:
-
-```text id="lvn2wc"
-BEGIN
-    persist anomaly/activity match
-    create notification_outbox row
-COMMIT
-```
-
-The external providers MUST NOT be called inside the database transaction.
-
-Never do:
-
-```text id="6k0lfx"
-BEGIN
-    DB writes
-    ↓
-    Resend HTTP request
-    ↓
-COMMIT
-```
-
-Instead:
-
-```text id="p2wtgd"
-BEGIN
-    DB writes
-    outbox insert
-COMMIT
-
-Notification worker
-    ↓
-external provider
-```
-
-The notification outbox must remain atomically coupled to anomaly persistence.
-
----
-
-# 14. POSTGRES TRANSACTION CLIENT/PINNING
-
-When using a PostgreSQL pool, transaction operations must execute on the same checked-out connection/client.
-
-Do not accidentally run:
-
-```text id="tw5r1s"
-BEGIN on connection A
-INSERT on connection B
-COMMIT on connection C
-```
-
-The transaction helper must guarantee a single connection for the entire transaction.
-
-Test this.
-
----
-
-# 15. MIGRATE THE EXISTING `processing_jobs` SYSTEM
-
-The existing repository already uses a persistent `processing_jobs` model with:
+Never:
 
 ```text
-queued
-processing
-completed
-failed
-attempt_count
-locked_at
+projectName
+      ↓
+project_id
 ```
 
-and stale-job recovery.
+Do not derive IDs from display names.
 
-Migrate this functionality to PostgreSQL without redesigning its behavior.
+Do not introduce a second project lookup merely because it is easy unless the existing context architecture requires it.
 
-The existing document-ingestion worker should continue working.
-
-Do not introduce Redis, BullMQ, Kafka, RabbitMQ, or another queue.
+Prefer passing the authoritative existing `projectId` through the notification context.
 
 ---
 
-# 16. MIGRATE `notification_outbox` CLAIM/LEASE SEMANTICS
+# CRITICAL ISSUE 2 — NEVER FABRICATE `activityMatchId`
 
-Preserve Phase 4 behavior.
+The current implementation also contains:
 
-The notification worker must still safely:
-
-```text id="fy39kg"
-claim pending/retry_wait item
-        ↓
-processing
-        ↓
-deliver
+```ts
+const matchId = context.activityMatchId || `match_${Date.now()}`;
 ```
 
-and stale processing notifications must remain recoverable.
+This is invalid.
 
-Make the claim operation atomic under PostgreSQL concurrency.
+`notification_outbox.activity_match_id` is a foreign key to:
 
-Use PostgreSQL transaction/locking semantics appropriate for the implementation.
-
-Do not assume SQLite locking behavior translates directly to PostgreSQL.
-
-Add a concurrency test demonstrating that two consumers cannot legitimately claim the same notification simultaneously.
-
----
-
-# 17. IDEMPOTENCY
-
-Preserve the existing logical idempotency rules.
-
-The database must prevent duplicate logical notification events.
-
-The Resend idempotency key must remain stable.
-
-The same notification event must retain:
-
-```text id="xk0b58"
-same outbox identity
-same payload snapshot
-same Resend idempotency key
+```text
+activity_matches.id
 ```
 
-across retries.
+Therefore an arbitrary synthetic identifier must never be inserted.
 
-Do not generate a new random identity when retrying.
+### Required behavior
 
----
-
-# 18. MESSAGE SNAPSHOT
-
-Preserve Phase 4's rule that Groq is not called repeatedly during email retries.
-
-The lifecycle must remain:
-
-```text id="3qkjb9"
-anomaly
- ↓
-notification intent
- ↓
-message generated once
- ↓
-message snapshot stored
- ↓
-delivery attempt
- ↓
-retry
- ↓
-same snapshot
+```text
+real persisted activityMatchId
+      ↓
+notification_outbox.activity_match_id
 ```
 
-The database migration must preserve this payload exactly.
+If the authoritative activity match ID is unavailable:
 
----
+```text
+DO NOT CREATE THE NOTIFICATION INTENT.
+```
 
-# 19. POSTGRES MIGRATION FILES
+Do not generate:
 
-Create a clean Supabase-compatible migration history for the PostgreSQL schema.
-
-Do not blindly copy SQLite syntax.
-
-Examples of things that require deliberate PostgreSQL translation include:
-
-* SQLite `INTEGER PRIMARY KEY`
-* SQLite `AUTOINCREMENT`
-* SQLite-specific `CURRENT_TIMESTAMP` semantics
-* SQLite `PRAGMA`
-* SQLite `sqlite_master`
-* SQLite-specific indexes
-* `ALTER TABLE` behavior
-* JSON storage
-* boolean representation
-* date/time representation
-* `ON CONFLICT` semantics where relevant
-
-Use PostgreSQL-native types and constraints.
-
-For JSON payloads, evaluate whether `jsonb` is appropriate for fields currently represented as JSON text.
-
-Do not change domain semantics solely for stylistic reasons.
-
----
-
-# 20. DATA TYPE AUDIT
-
-Audit every schema column and make deliberate PostgreSQL type choices.
-
-Pay special attention to:
-
-* IDs
-* percentages
-* quantities
-* anomaly scores
 * timestamps
-* booleans
-* JSON payloads
-* nullable fields
-* enums/check-constrained strings
+* random strings
+* fake `match_*` values
+* activity names as IDs
+* project names as IDs
 
-Do not blindly convert all SQLite `TEXT` columns to arbitrary PostgreSQL types.
-
-Preserve application-level behavior.
+The notification system must never contain an orphaned reference.
 
 ---
 
-# 21. DATA MIGRATION / IMPORT TOOL
+# IMPORTANT: APPLY THIS TO ALL PHASE 4 CREATION PATHS
 
-Create a deterministic one-time migration/import utility for an existing SQLite database.
+Do not fix only one occurrence.
 
-Conceptually:
-
-```text id="u6y1v3"
-SQLite fieldline.db
-        ↓
-read data
-        ↓
-transform SQLite → PostgreSQL values
-        ↓
-insert preserving IDs
-        ↓
-verify relationships
-        ↓
-report counts
-```
-
-Preserve all existing primary keys and foreign-key relationships.
-
-Import in dependency-safe order derived from the actual schema.
-
-The import must be idempotent or safely repeatable.
-
-Do not require real production data to be present for tests.
-
----
-
-# 22. MIGRATION VERIFICATION
-
-After import, compare at minimum:
-
-```text id="uujyga"
-row counts per table
-primary key sets
-foreign key integrity
-critical project/activity relationships
-activity_match counts
-activity_progress counts
-notification_outbox counts
-processing_jobs counts
-```
-
-For representative records compare important field values.
-
-Where practical, create a migration verification script that reports:
+Audit:
 
 ```text
-table
-sqlite_count
-postgres_count
-status
+recordNotificationIntent()
+notifyAnomalyAlert()
 ```
 
-Do not claim migration success based solely on total row count.
+and every other caller that creates notification outbox entries.
 
----
-
-# 23. GOLDEN DEMO
-
-Preserve the existing Golden Demo behavior.
-
-The existing project has a deterministic demo/reset/verification workflow.
-
-Local mode should continue supporting:
-
-```bash
-npm run demo:reset
-npm run demo:verify
-npm run verify:release
-npm test
-```
-
-Do not make normal tests require a live Supabase database.
-
-For PostgreSQL, provide explicit commands/scripts for:
-
-```text id="v5h4yi"
-initialize schema
-seed golden demo
-verify database
-import SQLite data
-```
-
-Use safe names consistent with the repository.
-
----
-
-# 24. DO NOT ALLOW `demo:reset` TO WIPE PRODUCTION
-
-This is mandatory.
-
-A developer convenience command must not silently operate against an arbitrary `DATABASE_URL`.
-
-Use explicit environment/provider safeguards.
-
-For example, require a deliberate flag or a clearly test/local database provider before destructive reset operations.
-
-Do not implement a dangerous:
-
-```text id="6pp9i8"
-DROP TABLES
-```
-
-against any configured production database merely because someone runs `npm run demo:reset`.
-
----
-
-# 25. STARTUP / HEALTH CHECK
-
-Update startup so the application:
-
-```text id="78p2c4"
-starts
- ↓
-initializes selected database provider
- ↓
-verifies database connectivity
- ↓
-verifies expected schema/migration state
- ↓
-starts workers
- ↓
-starts HTTP server
-```
-
-Health checks should distinguish:
-
-```text DB unavailable
-```
-
-from:
-
-```text application unavailable
-```
-
-without leaking credentials.
-
----
-
-# 26. SHUTDOWN
-
-Ensure graceful shutdown closes:
-
-```text id="yq09d5"
-notification worker
-processing worker
-HTTP server
-PostgreSQL pool/client
-```
-
-in a safe order.
-
-Do not leave active DB connections hanging.
-
----
-
-# 27. ENVIRONMENT CONFIGURATION
-
-Update `env.ts` using the repository's existing Zod configuration approach.
-
-Support:
-
-### Local/test
+Search the repository for:
 
 ```text
-DATABASE_PROVIDER=sqlite
-DATABASE_PATH=...
+outboxRepo.create
+notificationOutboxRepo.create
+CreateNotificationOutboxInput
+projectId:
+activityMatchId:
+fieldline-anomaly-alert:
 ```
 
-### Production
+Confirm that every notification creation path uses the real persisted identifiers.
+
+---
+
+# IMPORTANT: RESPECT THE NEW POSTGRESQL FOREIGN KEYS
+
+The repository now has PostgreSQL-backed implementations.
+
+Therefore this must be true for:
 
 ```text
 DATABASE_PROVIDER=postgres
-DATABASE_URL=...
-DATABASE_SSL=true
 ```
 
-Do not commit secrets.
+as well as SQLite.
 
-Update `.env.example`.
-
-Update `render.yaml` appropriately.
-
-Do not expose passwords or complete connection strings in source control.
-
----
-
-# 28. RENDER CONFIGURATION
-
-The current production configuration still uses the local database path.
-
-Replace production database configuration with the Supabase PostgreSQL configuration.
-
-Keep only the necessary variables.
-
-Do not require the Render filesystem for application data persistence.
-
-The production application should no longer depend on:
+Verify that the notification path passes:
 
 ```text
-DATABASE_PATH=./database/fieldline.db
+projects.id
+activity_matches.id
 ```
 
-for its primary database.
+that actually exist in the active database.
+
+Do not make SQLite-specific assumptions.
+
+Do not weaken or remove foreign-key constraints.
+
+Do not make PostgreSQL more permissive merely to hide invalid notification input.
 
 ---
 
-# 29. IMPORTANT: FILE STORAGE IS A SEPARATE CONCERN
+# DO NOT CHANGE THE PHASE 2 CONTRACT UNNECESSARILY
 
-Do not pretend that moving SQLite → Supabase PostgreSQL automatically makes uploaded files persistent.
+Phase 2 currently provides contextual values such as:
 
-The current application still has a filesystem upload directory.
+```text
+projectName
+activityExternalId
+activityName
+...
+activityMatchId
+```
 
-For this phase:
+Do not redesign the Phase 2 message-generation contract just to solve this.
 
-* migrate the database
-* preserve existing evidence metadata behavior
-* do not silently redesign evidence storage
+The correction should establish the proper distinction:
 
-If the audit identifies that evidence files are required to persist across Render restarts for the SIH demo, document that as a separate follow-up concern rather than mixing it into the database migration.
+```text
+display context:
+projectName
+
+relational identity:
+projectId
+```
+
+If the current notification context lacks `projectId`, add the smallest explicit server-owned field required to carry it through the notification boundary.
+
+Do not infer it from `projectName`.
 
 ---
 
-# 30. SUPABASE SECURITY
+# IMPORTANT: EXISTING POSTGRESQL / SQLITE DUAL-ENGINE ARCHITECTURE
 
-The backend should own the privileged database connection.
+The current repository uses both:
 
-Do not expose the Postgres connection string to the frontend.
-
-Do not put a database password in frontend code.
-
-Do not expose a Supabase service credential through Vite/browser environment variables.
-
-The architecture should remain:
-
-```text id="u5n9n4"
-Browser
-   ↓
-FieldLine API
-   ↓
-Supabase PostgreSQL
+```text
+SQLite implementations
+PostgreSQL implementations
 ```
 
-not direct browser-to-database access.
+with provider selection.
 
-Do not add Supabase Auth merely because Supabase is being introduced.
+Preserve this architecture.
 
-Do not add RLS everywhere merely because Supabase supports RLS; first preserve the existing backend trust boundary.
+Do not:
+
+* remove SQLite
+* remove PostgreSQL
+* replace the repository system
+* add an ORM
+* rewrite all repositories
+* change unrelated async behavior
+
+Only make the changes required to correctly carry authoritative identifiers through the notification pipeline.
 
 ---
 
-# 31. TEST STRATEGY
+# VERIFICATION 1 — DUPLICATE / INVALID IDENTIFIER TESTS
 
-Preserve the current SQLite test suite as the fast deterministic baseline.
+Add regression tests proving:
 
-Then add PostgreSQL-specific integration tests.
+### Valid
 
-At minimum test:
-
-### Database connection
-
-```text id="0c42v3"
-connect
-health check
-disconnect
+```text
+projectId = real project ID
+activityMatchId = real activity match ID
 ```
 
-### Schema
+→ notification outbox row is successfully created.
 
-```text id="z6s6yq"
-all required tables exist
-constraints exist
-indexes exist
+### Invalid project identity
+
+A display name passed where a project ID is expected must not silently create a valid notification.
+
+### Missing activity match
+
+If:
+
+```text
+activityMatchId = null / undefined
 ```
 
-### Repository equivalence
+→ no notification outbox row is created.
 
-For representative CRUD operations, verify SQLite and PostgreSQL implementations behave equivalently.
+### Fabricated match
 
-### Transaction rollback
+Verify the code cannot produce:
 
-A forced failure midway through a transaction must roll back all writes.
+```text
+match_<timestamp>
+```
 
-### Canonical truth
-
-Unconfirmed matches must not create canonical progress.
-
-### Outbox atomicity
-
-Anomaly + notification intent must commit together.
-
-### Notification claiming
-
-Concurrent workers must not claim the same item simultaneously.
-
-### Stale lease recovery
-
-Stale processing notification becomes eligible again.
-
-### Retry state
-
-Backoff and max-attempt semantics remain unchanged.
-
-### Idempotency
-
-Duplicate notification creation does not produce two logical events.
-
-### Message snapshot
-
-Retries do not call Groq again.
-
-### Existing processing jobs
-
-Document ingestion queue behavior remains intact.
+or another synthetic match ID.
 
 ---
 
-# 32. BEHAVIORAL REGRESSION TESTING
+# VERIFICATION 2 — POSTGRESQL-SPECIFIC TEST
 
-Do not stop at database-level tests.
+Run the notification persistence test path against the PostgreSQL implementation.
 
-Use existing realistic FieldLine workflows.
+Verify:
 
-Run representative flows:
-
-```text id="wq4n8e"
-Worker report
- ↓
-matching
- ↓
-anomaly detection
- ↓
-match persistence
- ↓
-notification outbox
- ↓
-notification worker
- ↓
-mocked email delivery
+```text
+real project ID
++
+real activity match ID
+↓
+Postgres notification_outbox
 ```
 
-Verify behavior is equivalent before and after changing database provider.
+and confirm PostgreSQL foreign-key integrity succeeds.
 
-Especially test:
+Also verify that the previous incorrect behavior:
 
-### Scenario A
-
-Normal worker report.
-
-Expected:
-
-```text no anomaly alert
-no notification
+```text
+projectName → project_id
 ```
 
-### Scenario B
+fails rather than silently succeeding.
 
-High anomaly.
+Do not only test SQLite.
 
-Expected:
+---
 
-```text anomaly persisted
-notification persisted
-message snapshot persisted
+# VERIFICATION 3 — FULL END-TO-END ANOMALY PATH
+
+Exercise the real flow:
+
+```text
+worker report
+    ↓
+Phase 1 anomaly
+    ↓
+activity match persisted
+    ↓
+Phase 4 notification creation
+    ↓
+notification_outbox
 ```
 
-### Scenario C
+Verify the resulting outbox record contains:
 
-Resend failure.
-
-Expected:
-
-```text anomaly remains valid
-notification enters retry state
+```text
+project_id = actual projects.id
+activity_match_id = actual activity_matches.id
 ```
 
-### Scenario D
+Then verify Phase 4 delivery still functions.
 
-Retry.
+---
 
-Expected:
+# VERIFICATION 4 — PRESERVE ALL EXISTING PHASE 4 INVARIANTS
 
-```text same notification
-same message payload
-same idempotency key
-```
+Do not regress:
 
-### Scenario E
+```text
+normal/cold-start → no notification
 
-Application restart.
+same anomaly/channel → one logical notification
 
-Expected:
+same notification → same idempotency key
 
-```text pending/retry notification survives process restart
-```
+retry → same message snapshot
 
-### Scenario F
+retry → no second Groq generation
 
-Two worker instances/processes attempt the same notification.
+temporary failure → retry_wait
 
-Expected:
+permanent failure → failed
 
-```text exactly one logical claim at a time
+stale lease → recoverable
+
+anomaly persistence is independent from notification delivery
 ```
 
 ---
 
-# 33. FULL REGRESSION
+# IMPORTANT: CHECK THE SUPABASE DATABASE INITIALIZATION
 
-Do not declare the migration complete until the actual commands have been run.
+Because PostgreSQL is now available, verify that the corrected notification path is actually backed by the PostgreSQL repository when:
 
-At minimum:
+```text
+DATABASE_PROVIDER=postgres
+```
+
+and not accidentally by the SQLite implementation.
+
+You do not need to redesign the current repository-provider selection mechanism.
+
+Just prove the correct implementation is selected.
+
+---
+
+# SECURITY / DATA INTEGRITY
+
+Do not weaken:
+
+* foreign keys
+* unique notification constraints
+* idempotency keys
+* transaction boundaries
+
+Do not convert identifiers into human-readable strings.
+
+A display name and a relational ID are different concepts and must remain different throughout the application.
+
+---
+
+# TESTING COMMANDS
+
+Run the focused notification tests.
+
+Run PostgreSQL-specific tests using a test database/configuration where practical.
+
+Then run:
 
 ```bash
-npm test
 npx tsc -p tsconfig.backend.json --noEmit
-npm run demo:reset
-npm run demo:verify
-npm run verify:release
+npm test
 ```
 
-plus the new PostgreSQL/Supabase integration tests and migration verification.
-
-If some existing command must change because of the new architecture, document the exact reason and provide the repository-consistent replacement.
-
-Do not silently break established workflows.
+Do not claim success unless the commands actually pass.
 
 ---
 
-# 34. PERFORMANCE / CONNECTION POOL
+# FINAL REPORT
 
-Choose a conservative connection pool size appropriate for:
+Return:
 
-* Render Free resource limits
-* Supabase plan limits
-* FieldLine's current single-process/small-worker architecture
+### 1. Exact bug fixed
 
-Do not open a connection per request.
+Show where `projectName` was incorrectly being used as `projectId`.
 
-Do not create a separate pool for every repository.
+### 2. Exact identifier flow now
 
-Use one shared database client/pool.
+Show:
 
-Do not optimize prematurely.
-
----
-
-# 35. FINAL REPORT
-
-Return a detailed walkthrough after implementation.
-
-Include:
-
-## A. Architecture before / after
-
-```text id="lh1vcp"
-BEFORE
-FieldLine
-  ↓
-SQLite file
-  ↓
-Render filesystem
-
-AFTER
-FieldLine
-  ↓
-Repository abstraction
-  ↓
-PostgreSQL
-  ↓
-Supabase
+```text
+real projectId → notification_outbox.project_id
+real activityMatchId → notification_outbox.activity_match_id
 ```
 
-## B. Database provider strategy
+### 3. Missing-ID behavior
 
-Explain:
+Explain exactly what happens when `activityMatchId` is unavailable.
 
-* production provider
-* local/test provider
-* connection mode
-* client library
-* SSL behavior
+### 4. PostgreSQL verification
 
-## C. Schema migration
+Confirm the corrected notification path was tested against PostgreSQL/Supabase-compatible persistence.
 
-List:
+### 5. Regression tests
 
-* PostgreSQL baseline migration
-* important indexes/constraints
-* notification outbox migration
-* processing jobs
-* canonical progress tables
+Give exact commands and actual pass/fail counts.
 
-## D. Repository migration
+### 6. Full test suite
 
-Explain which repositories were changed and how SQLite/PostgreSQL coexist.
+Give the actual final result.
 
-## E. Transaction migration
+Do not perform unrelated refactoring.
 
-Show how anomaly persistence + notification outbox remains atomic.
-
-## F. Data migration
-
-Describe the import tool and verification results.
-
-## G. Render deployment
-
-State exactly which environment variables are required, without exposing secrets.
-
-## H. Test results
-
-Provide exact commands and actual counts.
-
-## I. Behavioral evaluation
-
-Demonstrate representative worker → anomaly → notification flows.
-
-## J. Remaining limitations
-
-Be explicit about:
-
-* filesystem evidence persistence
-* Supabase Free project pausing
-* anything not migrated
-
-Do not claim zero limitations if they exist.
-
----
-
-# Definition of Done
-
-This migration is complete only when:
-
-```text id="4g5z6q"
-✓ Production database is Supabase PostgreSQL
-✓ SQLite remains available only where intentionally useful for local/test compatibility
-✓ Repository abstraction hides database engine
-✓ PostgreSQL access is properly asynchronous
-✓ No synchronous hacks around async DB operations
-✓ Current domain schema is faithfully represented in PostgreSQL
-✓ Primary/foreign keys are preserved
-✓ Canonical progress semantics are preserved
-✓ Existing ML advisory fields are preserved
-✓ processing_jobs works on PostgreSQL
-✓ notification_outbox works on PostgreSQL
-✓ Notification claim/lease semantics remain concurrency-safe
-✓ Outbox creation remains atomic with anomaly persistence
-✓ Resend remains outside DB transactions
-✓ Notification idempotency is preserved
-✓ Message snapshots remain immutable across retries
-✓ Groq is not called repeatedly for email retries
-✓ Existing SQLite test/demo workflow remains usable
-✓ Production no longer depends on DATABASE_PATH/local SQLite
-✓ Supabase credentials remain server-side only
-✓ Startup/shutdown correctly manage PostgreSQL connections
-✓ Migration/import tooling exists
-✓ Migration verification exists
-✓ Golden Demo behavior is preserved
-✓ demo reset cannot accidentally wipe production
-✓ Existing processing-worker behavior remains intact
-✓ Full regression suite passes
-✓ PostgreSQL-specific integration tests pass
-✓ Behavioral evaluation passes
-✓ Remaining infrastructure limitations are documented honestly
-```
-
-Do the smallest clean migration that satisfies these requirements.
-
-Do not perform unrelated refactors.
-
-Do not redesign Phase 1, Phase 2, Phase 3, or Phase 4.
-
-Preserve existing FieldLine behavior unless a PostgreSQL compatibility change genuinely requires modification.
+This is a **targeted correctness correction after the Supabase migration**, not a new architecture phase.

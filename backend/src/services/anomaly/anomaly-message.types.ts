@@ -27,6 +27,7 @@ export interface GenerateAnomalyMessageInput {
  * into a Phase 2 GenerateAnomalyMessageInput.
  */
 export interface AdaptAnomalyEvaluationOptions {
+  projectId?: string | null;
   projectName: string;
   activityExternalId: string;
   activityName: string;
