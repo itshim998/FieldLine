@@ -197,8 +197,8 @@ describe('Pass 36 — End-to-End Truth Certification: Two-Account Lifecycle & No
       const dashboard = dashboardRes.body;
       expect(dashboard.project.code).toBe(goldenManifestInvariants.projectCode);
       expect(dashboard.activityStatus.totalActivities).toBe(30);
-      expect(dashboard.activityStatus.delayed).toBe(4);
-      expect(dashboard.activityStatus.atRisk).toBe(4);
+      expect(dashboard.activityStatus.delayed).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
+      expect(dashboard.activityStatus.atRisk).toBe(goldenManifestInvariants.expectedRiskCounts.atRisk);
 
       // Verify active blockers are prominently displayed in Needs Attention
       expect(dashboard.attention.activeBlockersCount).toBeGreaterThanOrEqual(2);
@@ -250,8 +250,8 @@ describe('Pass 36 — End-to-End Truth Certification: Two-Account Lifecycle & No
 
       expect(riskRes.status).toBe(200);
       expect(riskRes.body.summary).toBeDefined();
-      expect(riskRes.body.summary.delayed).toBe(4);
-      expect(riskRes.body.summary.atRisk).toBe(4);
+      expect(riskRes.body.summary.delayed).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
+      expect(riskRes.body.summary.atRisk).toBe(goldenManifestInvariants.expectedRiskCounts.atRisk);
 
       // Verify ACT-C01 risk classification includes active blocker reason
       const actC01Risk = riskRes.body.activities.find((a: any) => a.externalId === 'ACT-C01');

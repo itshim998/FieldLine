@@ -14,6 +14,7 @@ import { projectEventRepository } from '../backend/src/repositories/project-even
 import { operationalBlockerRepository } from '../backend/src/repositories/operational-blocker.repository.js';
 import { authService } from '../backend/src/services/auth.service.js';
 import {
+  GOLDEN_AS_OF_DATE,
   goldenProjectManifest,
   goldenManifestInvariants,
   goldenWorkerCredentials,
@@ -80,7 +81,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
       description: goldenProjectManifest.description,
       status: 'active',
       startDate: '2026-08-01',
-      targetEndDate: '2026-09-30'
+      targetEndDate: '2026-11-30'
     });
     logger.info(`✅ Created Golden Demo Project: [${project.code}] ${project.name} (${project.id})`);
   } else {
@@ -538,7 +539,7 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     projectId,
     eventType: 'progress_recorded',
     summary: `Presentation baseline progress established as of ${goldenManifestInvariants.projectCode} evaluation`,
-    payloadJson: JSON.stringify({ observationsCount: totalObservations, asOfDate: '2026-08-28' })
+    payloadJson: JSON.stringify({ observationsCount: totalObservations, asOfDate: GOLDEN_AS_OF_DATE })
   });
 
   // 6. Seed Golden Operational Blockers (Pass 36 Enhancement)
@@ -583,6 +584,6 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     canonicalObservationsCount: totalObservations,
     accountsCount: 2,
     operationalBlockersCount: seededBlockersCount,
-    asOfDate: '2026-08-28'
+    asOfDate: GOLDEN_AS_OF_DATE
   };
 }

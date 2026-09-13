@@ -27,12 +27,12 @@ The Golden Demo environment provides a deterministic, machine-verifiable EPC dat
 | **Project Name** | `Refinery Expansion — Unit 4` | Downstream EPC Refining Expansion Package |
 | **Project Code** | `REFINERY-U4` | Canonical Project Identifier |
 | **Activities** | **30 Activities** | Distributed across 6 EPC Work Areas (Civil, Foundation, Structural, Piping, Electrical, Commissioning) |
-| **Snapshot Date** | `2026-08-28` | As-of Reference Date |
-| **Delayed Activities** | **4 Activities** | `ACT-A02`, `ACT-B02`, `ACT-D02`, `ACT-F01` |
-| **At-Risk Activities** | **4 Activities** | `ACT-A03`, `ACT-B03`, `ACT-C01`, `ACT-D03` |
+| **Snapshot Date** | `2026-09-13` | As-of Reference Date |
+| **Delayed Activities** | **1 Activity** | `ACT-D02` |
+| **At-Risk Activities** | **2 Activities** | `ACT-B02`, `ACT-C01` |
 | **Completed Activities** | **4 Activities** | `ACT-A01`, `ACT-B01`, `ACT-D01`, `ACT-E01` |
-| **On-Track / Ahead** | **18 Activities** | Pacing on or ahead of planned baseline schedule |
-| **Approaching Milestones**| **4 Milestones** | Zero-duration milestones due within 14 days (`ACT-A05`, `ACT-B05`, `ACT-C05`, `ACT-F05`) |
+| **On-Track / Ahead** | **23 Activities** | Pacing on or ahead of planned baseline schedule (18 on-track, 5 ahead) |
+| **Approaching Milestones**| **2 Milestones** | Zero-duration milestones due within 14 days (`ACT-A05`, `ACT-B05`) |
 | **Physical Evidence** | **6 Files** | Real multi-format evidence fixtures on disk (`.txt`, `.csv`) |
 
 ---
@@ -51,7 +51,7 @@ npm run setup
 # 3. Reset and seed deterministic Golden Demo environment
 npm run demo:reset
 
-# 4. Verify all 53 machine-checkable invariants
+# 4. Verify all 61 machine-checkable invariants
 npm run demo:verify
 
 # 5. Launch the application (Backend: port 3001, Frontend: port 3000)
@@ -73,9 +73,9 @@ npm run verify:release
 
 This orchestrates:
 1. **Production Build** (`npm run build`) — Compiles TypeScript backend and builds Vite frontend bundle.
-2. **Full Regression Suite** (`npm test`) — Executes 91 test files (741+ Vitest assertions).
+2. **Full Regression Suite** (`npm test`) — Executes full test suite.
 3. **Demo Reset** (`npm run demo:reset`) — Wipes runtime SQLite database & uploads, re-applies migrations, and seeds the golden dataset.
-4. **Demo Verification** (`npm run demo:verify`) — Verifies all 53 invariant checks across risk status, intelligence queries, assistant grounding, and physical evidence files.
+4. **Demo Verification** (`npm run demo:verify`) — Verifies all 61 invariant checks across risk status, intelligence queries, assistant grounding, and physical evidence files.
 
 ---
 
@@ -84,22 +84,22 @@ This orchestrates:
 ### Step 1: Primary Operational Dashboard (1 min)
 1. Navigate to **Overview** tab (default).
 2. **Highlight Overall Health**:
-   - **Actual Progress**: `45.8%` vs **Planned Progress**: `54.3%` (`-8.5 pts` variance, state `BEHIND`).
+   - **Actual Progress**: `45.8%` vs **Planned Progress**: `49.8%` (`-4.0 pts` variance, state `BEHIND`).
    - Deterministic risk classification: `DELAYED`.
 3. **Scannable Execution Breakdown**:
-   - 4 Delayed, 4 At-Risk, 4 Completed, 18 On-Track/Ahead.
+   - 1 Delayed, 2 At-Risk, 4 Completed, 23 On-Track/Ahead.
 4. **Attention Items**:
-   - Point out delayed activity `ACT-B02` (Crude Pump Foundation Piling Works) and at-risk activity `ACT-C01` (PR-07 Steel Erection).
+   - Point out delayed activity `ACT-D02` (Pipe Spool Fabrication & Welding) and at-risk activities `ACT-B02` (Crude Pump Foundation Piling Works) and `ACT-C01` (PR-07 Pipe Rack Structural Steel Erection).
    - Point out unresolved AI match candidate awaiting review.
 5. **Key Milestones**:
-   - Point out 4 approaching zero-duration milestones (`ACT-A05`, `ACT-B05`, `ACT-C05`, `ACT-F05`).
+   - Point out 2 approaching zero-duration milestones (`ACT-A05`, `ACT-B05`).
 
 ---
 
 ### Step 2: Activity Detail Deep-Dive (1.5 min)
 1. On the dashboard, click on **`ACT-B02`** (Crude Pump Foundation Piling Works).
 2. The UI smoothly transitions to the **Activity Detail View**:
-   - **Header & Current State**: Demonstrates identity (`ACT-B02`), WBS (`WBS-B.02`), Location (`Area B — Foundation`), Planned vs Actual progress (`65.0%` vs `100.0%`, `-35.0%` variance, `OVERDUE`).
+   - **Header & Current State**: Demonstrates identity (`ACT-B02`), WBS (`WBS-B.02`), Location (`Area B — Foundation`), Planned vs Actual progress (`65.0%` vs `75.56%`, `-10.56%` variance, `AT_RISK` with active weather blocker).
    - **Historical Progress Trajectory**: Shows chronological observation trendline across multiple dates (`08-14`: 20% &rarr; `08-18`: 38% &rarr; `08-21`: 52% &rarr; `08-27`: 65%).
    - **Originating Progress Reports**: Displays the daily site logs and shift updates that contributed to this activity.
    - **Match & Review Context**: Proves the **Canonical Truth Protection** boundary—only confirmed matches produced progress observations.
@@ -124,15 +124,15 @@ This orchestrates:
 
 #### Question A: `"What is delayed?"`
 - **Markdown Presentation (Pass 28)**: Renders a clean GFM response with section headings (`## Delayed Activities`), responsive tabular comparison (`| Activity | Actual Progress | Status |`), and bold takeaways.
-- **Verified Factual Claims**: Highlights structured claim tags with exact percentage variance and reasons.
+- **Verified Factual Claims**: Highlights structured claim tags with exact percentage variance and reasons (identifying `ACT-D02` overdue spool fabrication).
 - **Verified Facts Accordion**: Expand to show the cited deterministic fact records.
 
 #### Question B: `"Tell me about the crude pump foundation"`
-- **Synthesis**: Identifies `ACT-B02` (Crude Pump Foundation Piling Works) in Area B, notes current progress is 65% against planned 100% (delayed by -35 pts).
+- **Synthesis**: Identifies `ACT-B02` (Crude Pump Foundation Piling Works) in Area B, notes current progress is 65% against planned 75.6% (-10.56 pts variance, at risk with active weather blocker).
 - **Target Badge**: Click the `Target: ACT-B02` badge to immediately open its full Activity Detail view!
 
 #### Question C: `"Which activities are at risk?"`
-- **Synthesis**: Explains `ACT-A03`, `ACT-B03`, `ACT-C01`, and `ACT-D03` formatted in structured Markdown with specific variance warnings and approaching finish deadlines.
+- **Synthesis**: Explains `ACT-B02` and `ACT-C01` formatted in structured Markdown with specific variance warnings, active blocker context, and approaching finish deadlines.
 
 #### Question D: `"How to speed up the work?"`
 - **Executive Advisory Markdown**: Demonstrates structured general advice formatted in numbered sections (fast-tracking, resource crashing, bottleneck elimination, daily coordination standups) without raw text dumps.

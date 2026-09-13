@@ -201,14 +201,21 @@ export function getAuthoritativeFactValue(fact: VerifiedFact, rawField: string):
       return data.progressVariance ?? snap.progressVariance;
     case 'varianceState':
       return data.varianceState ?? snap.varianceState;
-    case 'classification':
-      return data.classification ?? (data.overdue ? 'DELAYED' : (data.varianceState === 'behind' ? 'AT_RISK' : 'ON_TRACK'));
+    case 'classification': {
+      const isOverdue = data.overdue ?? snap.overdue;
+      const vState = data.varianceState ?? snap.varianceState;
+      const primary = data.classification ?? (isOverdue ? 'DELAYED' : (vState === 'behind' ? 'AT_RISK' : 'ON_TRACK'));
+      const candidates: string[] = [primary];
+      if (vState) candidates.push(String(vState));
+      if (isOverdue) candidates.push('DELAYED', 'overdue');
+      return candidates.length === 1 ? candidates[0] : candidates;
+    }
     case 'status': {
       const st = data.status ?? snap.status ?? payload.status;
       const candidates: string[] = [];
       if (st) candidates.push(String(st));
       if (data.classification) candidates.push(String(data.classification));
-      if (data.overdue) candidates.push('delayed', 'overdue', 'delayed/overdue', 'DELAYED/OVERDUE');
+      if (data.overdue ?? snap.overdue) candidates.push('delayed', 'overdue', 'delayed/overdue', 'DELAYED/OVERDUE');
       if (candidates.length > 0) return candidates.length === 1 ? candidates[0] : candidates;
       return undefined;
     }
@@ -597,8 +604,8 @@ export class AssistantService {
     }
 
     // 6b. Field Progress Report Handling
-    // When a worker reports an activity progress update (e.g. "Pump foundation piles completed to 65% at Area B crude pump bay.")
-    // directly record the update into Field Progress Updates and acknowledge naturally like Live Voice.
+    // When a worker reports an activity progress report (e.g. "Pump foundation piles completed to 65% at Area B crude pump bay.")
+    // directly record the entry into Field Progress Updates and acknowledge naturally like Live Voice.
     const progressPercentMatch =
       trimmedQuestion.match(/(?:completed\s+to|reached|jumped(?:\s+to)?|progress(?:\s+is|\s+to)?|at|done)\s*(\d{1,3})\s*%?/i) ||
       trimmedQuestion.match(/(\d{1,3})\s*%\s*(?:complete|completed|done|progress)?/i);
@@ -653,10 +660,10 @@ export class AssistantService {
           allowSuggested: true
         });
         logger.info(
-          `AssistantService: Field progress update recorded: "${resolvedActivity.name}" (${resolvedActivity.externalId}) -> ${progressPercent}%`
+          `AssistantService: Field progress observation recorded: "${resolvedActivity.name}" (${resolvedActivity.externalId}) -> ${progressPercent}%`
         );
       } catch (err: any) {
-        logger.warn(`AssistantService: Could not persist field progress update: ${err.message}`);
+        logger.warn(`AssistantService: Could not persist field progress observation: ${err.message}`);
       }
 
       const verifiedFacts: VerifiedFact[] = [
@@ -696,7 +703,7 @@ export class AssistantService {
         intent,
         resolvedActivity,
         ambiguousCandidates: null,
-        answer: `Understood! Progress update acknowledged and recorded: ${resolvedActivity.name} (${resolvedActivity.externalId})${locText} has been updated to ${progressPercent}% complete. The field update has been logged to Field Progress Updates in the control room.`,
+        answer: `Understood! Progress entry acknowledged and recorded: ${resolvedActivity.name} (${resolvedActivity.externalId})${locText} has been updated to ${progressPercent}% complete. The field report has been logged to Field Progress Updates in the control room.`,
         claims,
         factRefs: [`activity:${resolvedActivity.externalId}`],
         grounded: true,

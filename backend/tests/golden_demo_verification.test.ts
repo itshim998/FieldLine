@@ -77,13 +77,13 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
 
     expect(body.project.code).toBe(goldenManifestInvariants.projectCode);
     expect(body.activityStatus.totalActivities).toBe(30);
-    expect(body.activityStatus.delayed).toBe(4);
-    expect(body.activityStatus.atRisk).toBe(4);
-    expect(body.activityStatus.completed).toBe(4);
-    expect(body.activityStatus.onTrack + body.activityStatus.ahead).toBe(18);
-    expect(body.milestones.upcoming).toHaveLength(4);
-    expect(body.attention.delayedCount).toBe(4);
-    expect(body.attention.atRiskCount).toBe(4);
+    expect(body.activityStatus.delayed).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
+    expect(body.activityStatus.atRisk).toBe(goldenManifestInvariants.expectedRiskCounts.atRisk);
+    expect(body.activityStatus.completed).toBe(goldenManifestInvariants.expectedRiskCounts.completed);
+    expect(body.activityStatus.onTrack + body.activityStatus.ahead).toBe(goldenManifestInvariants.expectedRiskCounts.onTrack);
+    expect(body.milestones.upcoming).toHaveLength(goldenManifestInvariants.expectedApproachingMilestoneIds.length);
+    expect(body.attention.delayedCount).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
+    expect(body.attention.atRiskCount).toBe(goldenManifestInvariants.expectedRiskCounts.atRisk);
   });
 
   it('4. Project Intelligence HTTP API returns deterministic facts across all 7 intelligence categories', async () => {
@@ -97,13 +97,13 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
     expect(res.status).toBe(200);
     const intel = res.body;
 
-    expect(intel.delayed).toHaveLength(4);
+    expect(intel.delayed).toHaveLength(goldenManifestInvariants.expectedDelayedIds.length);
     expect(intel.delayed.map((d: any) => d.externalId).sort()).toEqual(goldenManifestInvariants.expectedDelayedIds.sort());
 
-    expect(intel.atRisk).toHaveLength(4);
+    expect(intel.atRisk).toHaveLength(goldenManifestInvariants.expectedAtRiskIds.length);
     expect(intel.atRisk.map((a: any) => a.externalId).sort()).toEqual(goldenManifestInvariants.expectedAtRiskIds.sort());
 
-    expect(intel.approachingMilestones).toHaveLength(4);
+    expect(intel.approachingMilestones).toHaveLength(goldenManifestInvariants.expectedApproachingMilestoneIds.length);
     expect(intel.approachingMilestones.map((m: any) => m.externalId).sort()).toEqual(goldenManifestInvariants.expectedApproachingMilestoneIds.sort());
 
     expect(intel.behindSchedule.length).toBeGreaterThanOrEqual(8);
@@ -159,6 +159,6 @@ describe('Pass 24 — Golden Demo Environment & Verification Suite', () => {
     expect(detail.activity.name).toBe('Crude Pump Foundation Piling Works');
     expect(detail.timeline.length).toBeGreaterThanOrEqual(4);
     expect(detail.evidence.length).toBeGreaterThanOrEqual(1);
-    expect(detail.current.riskClassification).toBe('DELAYED');
+    expect(detail.current.riskClassification).toBe('AT_RISK');
   });
 });

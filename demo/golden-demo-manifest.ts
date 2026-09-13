@@ -3,7 +3,7 @@
  * Pass 24 — Presentation Dataset for SIH 2026
  */
 
-export const GOLDEN_AS_OF_DATE = '2026-08-28';
+export const GOLDEN_AS_OF_DATE = '2026-09-13';
 
 export const goldenProjectManifest = {
   name: 'Refinery Expansion — Unit 4',
@@ -90,29 +90,36 @@ export const goldenManifestInvariants: GoldenExpectedInvariants = {
   projectName: 'Refinery Expansion — Unit 4',
   activityCount: 30,
   scheduleCount: 1,
-  expectedDelayedIds: ['ACT-A02', 'ACT-B02', 'ACT-D02', 'ACT-F01'],
-  expectedAtRiskIds: ['ACT-A03', 'ACT-B03', 'ACT-C01', 'ACT-D03'],
+  expectedDelayedIds: ['ACT-D02'],
+  expectedAtRiskIds: ['ACT-B02', 'ACT-C01'],
   expectedCompletedIds: ['ACT-A01', 'ACT-B01', 'ACT-D01', 'ACT-E01'],
   expectedMilestoneIds: ['ACT-A05', 'ACT-B05', 'ACT-C05', 'ACT-F05'],
   expectedBehindScheduleIds: [
-    'ACT-C01', // -44.74%
-    'ACT-D02', // -45%
-    'ACT-A02', // -35%
-    'ACT-B02', // -35%
-    'ACT-F01', // -30%
-    'ACT-D03', // -23.33%
-    'ACT-B03', // -19.21%
-    'ACT-A03'  // -15%
+    'ACT-D02', // -45.00%
+    'ACT-C01', // -14.15%
+    'ACT-B02', // -10.56%
+    'ACT-F03', // -9.78%
+    'ACT-E04', // -8.60%
+    'ACT-E05', // -8.17%
+    'ACT-C03', // -8.10%
+    'ACT-D05', // -7.40%
+    'ACT-F02', // -7.26%
+    'ACT-B04', // -6.79%
+    'ACT-C04', // -5.74%
+    'ACT-D04', // -5.68%
+    'ACT-E03', // -5.28%
+    'ACT-A02', // -4.64%
+    'ACT-B03'  // -3.09%
   ],
-  expectedApproachingMilestoneIds: ['ACT-A05', 'ACT-B05', 'ACT-C05', 'ACT-F05'],
+  expectedApproachingMilestoneIds: ['ACT-A05', 'ACT-B05'],
   expectedRichHistoryIds: ['ACT-B02', 'ACT-C01', 'ACT-E02', 'ACT-B01', 'ACT-A02'],
   expectedActiveBlockersCount: 2,
   expectedBlockerCategories: ['equipment', 'weather'],
   expectedRiskCounts: {
-    delayed: 4,
-    atRisk: 4,
+    delayed: 1,
+    atRisk: 2,
     completed: 4,
-    onTrack: 18,
+    onTrack: 23,
     total: 30
   },
   expectedEvidenceFileNames: [
@@ -259,7 +266,7 @@ export const goldenRichHistories: GoldenHistoryProgression[] = [
         date: '2026-08-27',
         actualPercent: 65,
         status: 'in_progress',
-        reportSummary: 'Rough grading reached 65% (delayed against 08-20 baseline).'
+        reportSummary: 'Rough grading reached 65% across terrace platforms.'
       }
     ]
   }

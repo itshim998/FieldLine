@@ -3,7 +3,7 @@ import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/database/db.js';
 import { seedGoldenDemo } from '../../demo/golden-demo-seeder.js';
-import { GOLDEN_AS_OF_DATE } from '../../demo/golden-demo-manifest.js';
+import { GOLDEN_AS_OF_DATE, goldenManifestInvariants } from '../../demo/golden-demo-manifest.js';
 import { projectRepository } from '../src/repositories/project.repository.js';
 import { workerAuthHeader, adminAuthHeader } from './helpers/auth-test-helper.js';
 
@@ -63,7 +63,7 @@ describe('Pass 31 — Worker Operational Tasks ("Today\'s Execution Cockpit")', 
 
     // Summary assertions
     expect(res.body.summary.today).toBeGreaterThan(0);
-    expect(res.body.summary.delayed).toBe(4); // Manifest has 4 delayed activities
+    expect(res.body.summary.delayed).toBe(goldenManifestInvariants.expectedRiskCounts.delayed);
   });
 
   it('2. Properly categorizes completed activities when querying all or completed scope', async () => {
@@ -88,7 +88,7 @@ describe('Pass 31 — Worker Operational Tasks ("Today\'s Execution Cockpit")', 
     expect(b01.status).toBe('COMPLETED');
     expect(b01.actualProgress).toBe(100);
 
-    expect(res.body.summary.completed).toBe(4);
+    expect(res.body.summary.completed).toBe(goldenManifestInvariants.expectedRiskCounts.completed);
   });
 
   it('3. Categorizes delayed and at-risk activities accurately', async () => {
@@ -100,8 +100,8 @@ describe('Pass 31 — Worker Operational Tasks ("Today\'s Execution Cockpit")', 
     expect(res.status).toBe(200);
     const tasks = res.body.tasks;
 
-    // ACT-A02 is overdue and delayed in golden demo
-    const delayedTask = tasks.find((t: any) => t.externalId === 'ACT-A02');
+    // ACT-D02 is overdue and delayed in golden demo
+    const delayedTask = tasks.find((t: any) => t.externalId === 'ACT-D02');
     expect(delayedTask).toBeDefined();
     expect(delayedTask.status).toBe('DELAYED');
     expect(delayedTask.statusLabel).toBe('Delayed');

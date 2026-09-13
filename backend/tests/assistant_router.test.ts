@@ -47,9 +47,13 @@ describe('Assistant Router (Pass 18)', () => {
     expect(res.body.grounded).toBe(true);
     expect(res.body.answer).toBe('Activity ACT-001 is delayed.');
     expect(res.body.factRefs).toEqual(['delayed:ACT-001']);
-    expect(fakeService.answerQuestion).toHaveBeenCalledWith(validProjectId, 'What is delayed?', {
-      asOfDate: undefined
-    });
+    expect(fakeService.answerQuestion).toHaveBeenCalledWith(
+      validProjectId,
+      'What is delayed?',
+      expect.objectContaining({
+        asOfDate: undefined
+      })
+    );
   });
 
   it('POST /api/projects/:projectId/assistant/query should return 400 on invalid UUID project ID', async () => {

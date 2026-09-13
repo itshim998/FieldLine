@@ -1,31 +1,31 @@
 Activity ID,Activity Name,WBS,Location,Planned Start,Planned Finish,Planned Quantity,Unit
 ACT-A01,Unit 4 Site Clearing & Grubbing,WBS-01.01,Area A,2026-08-01,2026-08-10,5000,m2
-ACT-A02,Unit 4 Site Rough Grading & Terracing,WBS-01.02,Area A,2026-08-05,2026-08-20,12000,m3
-ACT-A03,Stormwater Retention Basin Excavation,WBS-01.03,Area A,2026-08-10,2026-08-30,4500,m3
-ACT-A04,Perimeter Access Road Sub-base Compaction,WBS-01.04,Area A,2026-08-15,2026-09-05,2500,m
-ACT-A05,Civil Site Preparation Acceptance,WBS-01.05,Area A,2026-08-30,2026-08-30,1,ea
+ACT-A02,Unit 4 Site Rough Grading & Terracing,WBS-01.02,Area A,2026-08-05,2026-09-30,12000,m3
+ACT-A03,Stormwater Retention Basin Excavation,WBS-01.03,Area A,2026-08-10,2026-09-28,4500,m3
+ACT-A04,Perimeter Access Road Sub-base Compaction,WBS-01.04,Area A,2026-08-15,2026-10-08,2500,m
+ACT-A05,Civil Site Preparation Acceptance,WBS-01.05,Area A,2026-09-25,2026-09-25,1,ea
 ACT-B01,North Tank Farm Foundation Excavation,WBS-02.01,Area B,2026-08-05,2026-08-18,3500,m3
-ACT-B02,Crude Pump Foundation Piling Works,WBS-02.02,Area B,2026-08-10,2026-08-24,180,piles
-ACT-B03,Substation Heavy Equipment Mat Foundation,WBS-02.03,Area B,2026-08-12,2026-08-31,850,m3
-ACT-B04,Compressor House Deep Foundation Piers,WBS-02.04,Area B,2026-08-15,2026-09-10,40,piers
-ACT-B05,Foundation Piling Inspection Sign-Off,WBS-02.05,Area B,2026-09-02,2026-09-02,1,ea
-ACT-C01,Pipe Rack PR-07 Structural Steel Erection,WBS-03.01,Area C,2026-08-10,2026-08-29,320,ton
-ACT-C02,Main Pipe Bridge Column Splice & Bolting,WBS-03.02,Area C,2026-08-18,2026-09-05,140,ton
-ACT-C03,Compressor Shelter Superstructure Frame,WBS-03.03,Area C,2026-08-20,2026-09-15,210,ton
-ACT-C04,Substation Multi-Tier Cable Support Structure,WBS-03.04,Area C,2026-08-22,2026-09-10,85,ton
-ACT-C05,Major Steel Structure Erection Complete,WBS-03.05,Area C,2026-09-08,2026-09-08,1,ea
+ACT-B02,Crude Pump Foundation Piling Works,WBS-02.02,Area B,2026-08-10,2026-09-24,180,piles
+ACT-B03,Substation Heavy Equipment Mat Foundation,WBS-02.03,Area B,2026-08-12,2026-09-28,850,m3
+ACT-B04,Compressor House Deep Foundation Piers,WBS-02.04,Area B,2026-08-15,2026-10-10,40,piers
+ACT-B05,Foundation Piling Inspection Sign-Off,WBS-02.05,Area B,2026-09-27,2026-09-27,1,ea
+ACT-C01,Pipe Rack PR-07 Structural Steel Erection,WBS-03.01,Area C,2026-08-10,2026-10-02,320,ton
+ACT-C02,Main Pipe Bridge Column Splice & Bolting,WBS-03.02,Area C,2026-08-18,2026-10-05,140,ton
+ACT-C03,Compressor Shelter Superstructure Frame,WBS-03.03,Area C,2026-08-20,2026-10-22,210,ton
+ACT-C04,Substation Multi-Tier Cable Support Structure,WBS-03.04,Area C,2026-08-22,2026-10-15,85,ton
+ACT-C05,Major Steel Structure Erection Complete,WBS-03.05,Area C,2026-10-25,2026-10-25,1,ea
 ACT-D01,Cooling Water Underground Header Installation,WBS-04.01,Area D,2026-08-01,2026-08-16,1200,m
-ACT-D02,Process Pipe Rack Carbon Steel Spooling,WBS-04.02,Area D,2026-08-12,2026-08-25,950,spools
-ACT-D03,High Pressure Steam Header Tie-in Welds,WBS-04.03,Area D,2026-08-18,2026-08-30,48,welds
-ACT-D04,Crude Feedstock Line Flange Assembly,WBS-04.04,Area D,2026-08-20,2026-09-12,120,joints
-ACT-D05,Flare Header Stainless Steel Line Welding,WBS-04.05,Area D,2026-08-24,2026-09-15,640,m
+ACT-D02,Process Pipe Rack Carbon Steel Spooling,WBS-04.02,Area D,2026-08-12,2026-09-08,950,spools
+ACT-D03,High Pressure Steam Header Tie-in Welds,WBS-04.03,Area D,2026-08-18,2026-10-02,48,welds
+ACT-D04,Crude Feedstock Line Flange Assembly,WBS-04.04,Area D,2026-08-20,2026-10-18,120,joints
+ACT-D05,Flare Header Stainless Steel Line Welding,WBS-04.05,Area D,2026-08-24,2026-11-05,640,m
 ACT-E01,Electrical Substation Civil & Trenching Works,WBS-05.01,Area E,2026-08-02,2026-08-15,800,m
-ACT-E02,MCC Room Cable Tray Installation & Earthing,WBS-05.02,Area E,2026-08-15,2026-09-02,1500,m
-ACT-E03,High Voltage Feeder Cable Pulling Section 1,WBS-05.03,Area E,2026-08-20,2026-09-08,3200,m
-ACT-E04,Instrument Air Header Distribution Tubing,WBS-05.04,Area E,2026-08-22,2026-09-12,1100,m
-ACT-E05,Control Room Marshalling Cabinet Termination,WBS-05.05,Area E,2026-08-25,2026-09-15,36,panels
-ACT-F01,Cooling Water Header Flush & Hydrostatic Test,WBS-06.01,Area F,2026-08-16,2026-08-26,1,pkg
-ACT-F02,Unit 4 Hydrotest Package A Pre-Commissioning,WBS-06.02,Area F,2026-08-24,2026-09-08,1,pkg
-ACT-F03,Emergency Shutdown Loop Logic Verification,WBS-06.03,Area F,2026-08-26,2026-09-14,42,loops
-ACT-F04,Instrument Air Header Leak Testing & Certification,WBS-06.04,Area F,2026-08-28,2026-09-18,1,pkg
-ACT-F05,Unit 4 Ready for Startup (RFSU) Milestone,WBS-06.05,Area F,2026-09-10,2026-09-10,1,ea
+ACT-E02,MCC Room Cable Tray Installation & Earthing,WBS-05.02,Area E,2026-08-15,2026-09-30,1500,m
+ACT-E03,High Voltage Feeder Cable Pulling Section 1,WBS-05.03,Area E,2026-08-20,2026-10-12,3200,m
+ACT-E04,Instrument Air Header Distribution Tubing,WBS-05.04,Area E,2026-08-22,2026-10-18,1100,m
+ACT-E05,Control Room Marshalling Cabinet Termination,WBS-05.05,Area E,2026-08-25,2026-11-15,36,panels
+ACT-F01,Cooling Water Header Flush & Hydrostatic Test,WBS-06.01,Area F,2026-08-16,2026-09-25,1,pkg
+ACT-F02,Unit 4 Hydrotest Package A Pre-Commissioning,WBS-06.02,Area F,2026-08-24,2026-10-25,1,pkg
+ACT-F03,Emergency Shutdown Loop Logic Verification,WBS-06.03,Area F,2026-08-26,2026-11-25,42,loops
+ACT-F04,Instrument Air Header Leak Testing & Certification,WBS-06.04,Area F,2026-09-20,2026-10-15,1,pkg
+ACT-F05,Unit 4 Ready for Startup (RFSU) Milestone,WBS-06.05,Area F,2026-11-25,2026-11-25,1,ea
