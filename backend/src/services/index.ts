@@ -244,7 +244,15 @@ export {
   generateDeterministicFallbackMessage,
   anomalyAlertPayloadSchema,
   isEligibleForAnomalyAlert,
-  toAnomalyMessageInput
+  toAnomalyMessageInput,
+  escapeHtml,
+  formatMultilineHtml,
+  renderAnomalyAlertEmail,
+  ResendEmailDeliveryService,
+  resendEmailDeliveryService,
+  sanitizeEmailSecrets,
+  DefaultAnomalyNotificationService,
+  defaultAnomalyNotificationService
 } from './anomaly/index.js';
 export type {
   AnomalyAlertSeverity,
@@ -252,6 +260,15 @@ export type {
   AdaptAnomalyEvaluationOptions,
   AnomalyAlertPayload,
   AnomalyAlertMessage,
-  AnomalyMessageGeneratorService
+  AnomalyMessageGeneratorService,
+  EmailDeliveryResult,
+  EmailDeliveryService,
+  RenderedAnomalyAlertEmail,
+  ResendEmailDeliveryServiceOptions,
+  AnomalyNotificationService,
+  NotifyAnomalyAlertInput,
+  NotifyAnomalyAlertResult,
+  AnomalyNotificationServiceDependencies
 } from './anomaly/index.js';
+
 

@@ -182,4 +182,46 @@ describe('Environment Configuration Validation', () => {
 
     expect(() => getValidatedEnv(custom)).toThrow('Environment validation failed');
   });
+
+  it('Phase 3 — defaults EMAIL_ENABLED to false and safely parses empty email fields', () => {
+    const config = getValidatedEnv({});
+    expect(config.EMAIL_ENABLED).toBe(false);
+    expect(config.EMAIL_FROM).toBe('FieldLine Alerts <onboarding@resend.dev>');
+    expect(config.parsedAlertRecipients).toEqual([]);
+  });
+
+  it('Phase 3 — validates EMAIL_ENABLED=true requires RESEND_API_KEY and ANOMALY_ALERT_RECIPIENTS', () => {
+    // Missing RESEND_API_KEY
+    expect(() =>
+      getValidatedEnv({
+        EMAIL_ENABLED: 'true',
+        ANOMALY_ALERT_RECIPIENTS: 'admin@fieldline.app'
+      })
+    ).toThrow(/RESEND_API_KEY is required/);
+
+    // Missing ANOMALY_ALERT_RECIPIENTS
+    expect(() =>
+      getValidatedEnv({
+        EMAIL_ENABLED: 'true',
+        RESEND_API_KEY: 're_test_key_123'
+      })
+    ).toThrow(/At least one recipient email/);
+
+    // Successfully parses when both are provided
+    const valid = getValidatedEnv({
+      EMAIL_ENABLED: 'true',
+      RESEND_API_KEY: 're_test_key_123',
+      EMAIL_FROM: 'Alerts <alerts@custom.com>',
+      ANOMALY_ALERT_RECIPIENTS: 'admin@custom.com, supervisor@custom.com; lead@custom.com'
+    });
+
+    expect(valid.EMAIL_ENABLED).toBe(true);
+    expect(valid.RESEND_API_KEY).toBe('re_test_key_123');
+    expect(valid.EMAIL_FROM).toBe('Alerts <alerts@custom.com>');
+    expect(valid.parsedAlertRecipients).toEqual([
+      'admin@custom.com',
+      'supervisor@custom.com',
+      'lead@custom.com'
+    ]);
+  });
 });

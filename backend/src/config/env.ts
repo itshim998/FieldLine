@@ -83,6 +83,18 @@ export function extractGeminiApiKeys(source: Record<string, string | undefined>)
   return { keys };
 }
 
+/**
+ * Parses a string of recipients (comma, semicolon, or whitespace separated)
+ * into a clean array of trimmed email addresses.
+ */
+export function parseAnomalyAlertRecipients(raw?: string | null): string[] {
+  if (!raw || typeof raw !== 'string') return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0 && r.includes('@'));
+}
+
 export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -100,14 +112,24 @@ export const envSchema = z.object({
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
     if (typeof val === 'boolean') return val;
     return true;
-  }, z.boolean()).default(true)
+  }, z.boolean()).default(true),
+  EMAIL_ENABLED: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
+    if (typeof val === 'boolean') return val;
+    return false;
+  }, z.boolean()).default(false),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().min(1).default('FieldLine Alerts <onboarding@resend.dev>'),
+  ANOMALY_ALERT_RECIPIENTS: z.string().optional()
 }).passthrough().transform((data) => {
   const { keys: groqKeys } = extractGroqApiKeys(data as Record<string, string | undefined>);
   const { keys: geminiKeys } = extractGeminiApiKeys(data as Record<string, string | undefined>);
+  const alertRecipients = parseAnomalyAlertRecipients(data.ANOMALY_ALERT_RECIPIENTS);
   return {
     ...data,
     groqApiKeys: groqKeys,
-    geminiApiKeys: geminiKeys
+    geminiApiKeys: geminiKeys,
+    parsedAlertRecipients: alertRecipients
   };
 }).superRefine((data, ctx) => {
   const hasGeminiKey = (data.GEMINI_API_KEY && data.GEMINI_API_KEY.trim().length > 0) || (data.geminiApiKeys && data.geminiApiKeys.length > 0);
@@ -125,6 +147,25 @@ export const envSchema = z.object({
       message: 'At least one Groq API key (e.g. GROQ_API_KEY_01) is required when AI_PROVIDER=groq',
       path: ['groqApiKeys']
     });
+  }
+
+  if (data.EMAIL_ENABLED) {
+    if (!data.RESEND_API_KEY || data.RESEND_API_KEY.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'RESEND_API_KEY is required when EMAIL_ENABLED=true',
+        path: ['RESEND_API_KEY']
+      });
+    }
+
+    const recipients = parseAnomalyAlertRecipients(data.ANOMALY_ALERT_RECIPIENTS);
+    if (recipients.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one recipient email in ANOMALY_ALERT_RECIPIENTS is required when EMAIL_ENABLED=true',
+        path: ['ANOMALY_ALERT_RECIPIENTS']
+      });
+    }
   }
 });
 

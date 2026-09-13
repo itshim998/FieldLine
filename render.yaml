@@ -21,3 +21,11 @@ services:
         value: ./database/fieldline.db
       - key: UPLOAD_DIR
         value: ./uploads
+      - key: EMAIL_ENABLED
+        value: "false"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: FieldLine Alerts <onboarding@resend.dev>
+      - key: ANOMALY_ALERT_RECIPIENTS
+        sync: false

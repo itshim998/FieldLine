@@ -29,3 +29,34 @@ export {
   buildAnomalyMessagePrompt,
   generateDeterministicFallbackMessage
 } from './anomaly-message-generator.service.js';
+
+export type {
+  EmailDeliveryResult,
+  EmailDeliveryService
+} from './email/email-delivery.types.js';
+
+export {
+  escapeHtml,
+  formatMultilineHtml,
+  renderAnomalyAlertEmail
+} from './email/email-renderer.js';
+export type { RenderedAnomalyAlertEmail } from './email/email-renderer.js';
+
+export {
+  ResendEmailDeliveryService,
+  resendEmailDeliveryService,
+  sanitizeEmailSecrets
+} from './email/resend-email-delivery.service.js';
+export type { ResendEmailDeliveryServiceOptions } from './email/resend-email-delivery.service.js';
+
+export {
+  DefaultAnomalyNotificationService,
+  defaultAnomalyNotificationService
+} from './anomaly-notification.service.js';
+export type {
+  AnomalyNotificationService,
+  NotifyAnomalyAlertInput,
+  NotifyAnomalyAlertResult,
+  AnomalyNotificationServiceDependencies
+} from './anomaly-notification.service.js';
+

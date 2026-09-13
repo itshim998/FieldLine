@@ -1,290 +1,264 @@
-You have completed Phase 2 of FieldLine: **Groq Anomaly-Message Generator**.
+You are now implementing **Phase 3 — Free HTTP Email Delivery** for FieldLine.
 
-I reviewed your Phase 2 walkthrough. The overall architecture is correct and should be preserved. Do **not** redesign Phase 2 or broaden its scope into Phase 3/4/5.
+The objective is to add a real, free, HTTP-based email delivery channel for the anomaly alerts produced by Phase 2.
 
-Your task now is to perform a **corrective hardening pass** and bring Phase 2 to a production-quality **10/10 implementation** while preserving the existing architecture and behavior.
-
-## Primary objective
-
-Make Phase 2 a strict, trustworthy communication layer:
-
-**Phase 1 detects the anomaly → Phase 2 explains trusted facts → later phases deliver it.**
-
-The LLM must NEVER become the source of truth for anomaly detection, severity, score, activity identity, or evidence.
-
----
-
-# 1. FIRST: inspect the ACTUAL implementation
-
-Do not rely only on your walkthrough.
-
-Inspect the actual files currently present in the workspace, including:
-
-* `ProgressAnomalyEvaluationService` and its result types
-* `anomaly-message.types.ts`
-* `anomaly-message-generator.service.ts`
-* prompt-builder code
-* `AIService`
-* `GroqAIProvider`
-* `MockAIProvider`
-* all current Phase 2 tests
-* every current caller of the Phase 2 generator
-
-Also inspect the Phase 1 implementation that actually exists in the workspace.
-
-### Important
-
-There was previously a distinction between the Phase 1 architecture described in the report and the implementation visible on remote `main`. Therefore:
-
-**Treat the actual local code as authoritative.**
-
-Do not assume that a capability exists merely because the walkthrough says it exists.
-
-If any Phase 2 code is currently compensating for, duplicating, or reconstructing Phase 1 logic, correct that.
-
----
-
-# 2. HARDEN THE TRUST BOUNDARY BETWEEN PHASE 1 AND PHASE 2
-
-This is the most important correction.
-
-Phase 2 must consume **trusted anomaly facts produced by Phase 1**.
-
-It must NOT independently:
-
-* calculate anomaly scores
-* determine severity
-* infer whether an activity is anomalous
-* reconstruct the canonical baseline
-* recompute previous progress from arbitrary database state
-* reinterpret Match Model confidence as anomaly evidence
-* change severity based on LLM judgment
-
-The intended flow is:
+The intended architecture is:
 
 ```text
-Phase 1 anomaly evaluation
+Worker Progress Report
         ↓
-trusted structured anomaly result
+Phase 1 — Anomaly Detection
         ↓
-small Phase 2 mapping/adaptation layer
+Persisted anomaly/activity match
         ↓
-GenerateAnomalyMessageInput
+Phase 2 — AnomalyAlertMessage
         ↓
-Groq / deterministic fallback
+Phase 3 — Email Delivery
+        ↓
+HTTPS
+        ↓
+Resend
+        ↓
+Administrator Email
 ```
 
-Inspect every caller and verify that they are passing the actual Phase 1 anomaly result rather than manually recreating anomaly facts.
+The architectural rule remains:
 
-If needed, introduce a small explicit mapper/adapter such as:
+**ML detects. Groq explains. Email delivers.**
 
-`toAnomalyMessageInput(...)`
-
-or an equivalent narrow boundary.
-
-Do NOT duplicate anomaly calculations merely to populate the Phase 2 input.
+Do not blur these responsibilities.
 
 ---
 
-# 3. SERVER-OWNED FACTS MUST REMAIN SERVER-OWNED
+# IMPORTANT REPOSITORY-STATE INSTRUCTION
 
-The LLM may generate:
+Before changing anything:
 
+1. Inspect the current GitHub `main` baseline.
+2. Inspect the actual local workspace, especially the Phase 1 and Phase 2 implementations that were recently added.
+3. Treat the actual current local implementation as authoritative for Phase 1/2 behavior.
+4. Do not assume that GitHub `main` already contains Phase 1 or Phase 2 merely because they are described in previous walkthroughs.
+5. Do not redesign Phase 1 or Phase 2.
+6. Reuse the actual Phase 2 `AnomalyAlertMessage` contract that exists in the workspace.
+
+You are performing a Phase 3 addition around the existing architecture, not rebuilding the notification system from scratch.
+
+---
+
+# 1. FIRST: AUDIT THE CURRENT ARCHITECTURE
+
+Inspect at minimum:
+
+* actual Phase 1 anomaly evaluation service/result types
+* actual Phase 2 anomaly message types
+* actual Phase 2 message generator
+* Phase 2 adapter (`toAnomalyMessageInput` or equivalent)
+* current worker progress-report paths
+* activity-match persistence
+* progress persistence
+* existing service barrel exports
+* `backend/src/config/env.ts`
+* `package.json`
+* existing logging/redaction conventions
+* `render.yaml`
+* existing test architecture
+* existing `ChatGPT_plan.md`
+
+Determine the real point at which a completed anomaly has:
+
+1. been evaluated,
+2. been persisted,
+3. produced an `AnomalyAlertMessage`.
+
+Phase 3 email delivery must attach to that completed flow.
+
+Do not attach email directly to `AnomalyModelService.predict()`.
+
+---
+
+# 2. USE RESEND OVER HTTPS
+
+Implement email delivery using the Resend Email API over HTTPS.
+
+Do NOT use:
+
+* SMTP
+* Nodemailer
+* Gmail SMTP
+* a local mail server
+* a background email daemon
+
+The current deployment is a Render Free Node web service, so SMTP is specifically unsuitable.
+
+Prefer native Node 22 `fetch()` rather than introducing the Resend SDK unless the existing repository architecture provides a strong reason otherwise.
+
+Keep the dependency footprint small.
+
+---
+
+# 3. CREATE A CLEAN EMAIL DELIVERY ABSTRACTION
+
+Add a small, repository-consistent abstraction equivalent to:
+
+```ts
+interface EmailDeliveryService {
+  sendAnomalyAlert(
+    message: AnomalyAlertMessage
+  ): Promise<EmailDeliveryResult>;
+}
+```
+
+The exact names and directory structure may follow existing FieldLine conventions.
+
+The important rule is:
+
+**Business/application services must not know Resend's HTTP details.**
+
+Keep Resend-specific behavior behind an adapter such as:
+
+```text
+ResendEmailDeliveryService
+```
+
+or an equivalent name.
+
+The rest of FieldLine should depend on the abstraction, not directly on Resend.
+
+---
+
+# 4. ADD EMAIL CONFIGURATION
+
+Extend the existing Zod-based environment configuration.
+
+Use explicit variables equivalent to:
+
+```text
+EMAIL_ENABLED
+RESEND_API_KEY
+EMAIL_FROM
+ANOMALY_ALERT_RECIPIENTS
+```
+
+Choose exact names consistent with the repository conventions if necessary.
+
+Requirements:
+
+* API key must never be hard-coded.
+* Sender must be configuration-driven.
+* Recipients must be configuration-driven.
+* Recipients must NOT come from the worker's report.
+* Support multiple recipients in a clear configuration format.
+* Email delivery must be disableable.
+
+The default development/test behavior should remain safe and offline-capable.
+
+Prefer:
+
+```text
+EMAIL_ENABLED=false
+```
+
+when not explicitly configured.
+
+Do not make the existing golden demo depend on Resend credentials.
+
+---
+
+# 5. DO NOT BREAK THE EXISTING MOCK/OFFLINE WORKFLOW
+
+FieldLine already values deterministic offline operation.
+
+Therefore:
+
+```text
+EMAIL_ENABLED=false
+```
+
+must result in:
+
+* no HTTP request
+* no Resend dependency
+* no test failure
+* no change to existing anomaly behavior
+
+The existing demo/test workflow must remain usable without an email account.
+
+---
+
+# 6. BUILD A DETERMINISTIC EMAIL RENDERER
+
+Phase 2 already produces the channel-neutral:
+
+```text
+AnomalyAlertMessage
+```
+
+Use that as the source.
+
+Do NOT ask Groq to generate HTML.
+
+Do NOT introduce another AI call.
+
+Create deterministic rendering for:
+
+### HTML
+
+Include, where available:
+
+* FieldLine alert heading
+* severity
 * title
 * summary
 * details
-* recommendedAction
-* fullMessage
-
-The LLM must NOT be authoritative for:
-
-* anomalyScore
-* anomalySeverity
-* activity identity
-* activityExternalId
-* activityMatchId
-* project identity
+* recommended action
+* project
+* activity
+* activity external ID
 * observation date
-* reporter identity
-* previous progress
-* current reported progress
+* previous canonical progress
+* reported progress
+* anomaly score
+* reporter
+* location
 
-These values must come from trusted server-side data.
+Use the server-owned values from `AnomalyAlertMessage`.
 
-Prefer this architecture:
+### Plain text
 
-```text
-trusted server facts
-        +
-LLM-generated text payload
-        ↓
-final AnomalyAlertMessage
-```
+Produce the same operational information as a readable plaintext email.
 
-not:
-
-```text
-LLM generates everything
-        ↓
-server trusts the result
-```
-
-If the current Zod schema allows the model to generate authoritative metadata, correct it.
+Resend supports both `html` and `text`; use both.
 
 ---
 
-# 4. STRENGTHEN THE PHASE 2 DATA MODEL FOR FUTURE TRACEABILITY
+# 7. HTML SAFETY
 
-Phase 2 is channel-neutral, but future Phase 4 notification persistence will need deterministic correlation.
+Every dynamic value inserted into HTML must be properly HTML-escaped.
 
-Do not prematurely add persistence or notification functionality.
+Treat these as untrusted/dynamic content:
 
-However, ensure that the Phase 2 message object can be traced back to its source anomaly.
+* project name
+* activity name
+* location
+* reporter name
+* title
+* summary
+* details
+* recommended action
+* full message
+* IDs and other dynamic fields
 
-Evaluate the current model and, where appropriate, preserve a stable correlation identifier such as:
+Do not interpolate dynamic strings directly into HTML without escaping.
 
-* `activityMatchId`
-* anomaly evaluation/event identifier
-* project/activity identity
-* observation date
-
-Do not invent fake IDs.
-
-Do not force a new persistence system into Phase 2.
-
-The goal is simply:
-
-**A future notification system must be able to know exactly which anomaly produced a message.**
-
-If the current `activityMatchId` is already sufficient, keep it and ensure it is preserved through the generation result.
+Add tests specifically proving that HTML-sensitive input does not create markup.
 
 ---
 
-# 5. AUDIT THE DETERMINISTIC FALLBACK
+# 8. PRESERVE SERVER OWNERSHIP OF ANOMALY FACTS
 
-The fallback is a critical reliability path.
+The final email must preserve the Phase 2 trust model.
 
-Verify that fallback messaging:
-
-* never requires Groq
-* uses only supplied trusted facts
-* never invents missing information
-* does not accidentally fabricate `previousPercent`
-* does not imply a previous observation when none exists
-* does not invent causes
-* does not accuse anyone of misconduct
-* preserves severity
-* preserves the real anomaly score
-* produces the same structural contract as the Groq path
-
-Particularly inspect this case:
-
-```text
-previousPercent = null
-reportedPercent = 82
-```
-
-The fallback must NOT produce:
-
-> "Progress increased from X% to 82%"
-
-unless X actually exists.
-
-Instead, it should communicate only what is known.
-
-Test both:
-
-```text
-previousPercent present
-previousPercent absent
-```
-
----
-
-# 6. PRESERVE THE SEMANTIC MEANING OF ANOMALY SCORE
-
-The prompt and output must never imply:
-
-```text
-anomalyScore 0.91 = 91% probability of fraud
-```
-
-or:
-
-```text
-91% chance the worker is wrong
-```
-
-or:
-
-```text
-91% chance the report is fake
-```
-
-The correct interpretation is that the observed progression pattern is statistically distant from the learned/expected progression baseline according to Phase 1.
-
-The model may explain this in natural language, but must not change its meaning.
-
-Add or strengthen tests that catch this class of semantic failure.
-
----
-
-# 7. KEEP ACTIVITY MATCH AND ANOMALY AS ORTHOGONAL CONCEPTS
-
-Verify the exact-match scenario:
-
-```text
-activityMatchConfidence = 100%
-anomalySeverity = high
-```
-
-The message must NOT say:
-
-* activity may have been incorrectly identified
-* the report may belong to another activity
-* matching itself is suspicious
-
-The activity can be correctly identified while the reported progression is anomalous.
-
-This distinction must remain explicit in prompt construction and tests.
-
----
-
-# 8. STRENGTHEN OPTIONAL-FIELD HANDLING
-
-Test all combinations where optional fields are absent:
-
-* no `previousPercent`
-* no `reporterName`
-* no `activityLocation`
-* no `activityMatchId`
-
-The LLM and fallback must:
-
-* omit unavailable facts
-* or describe them neutrally as unavailable/unrecorded
-
-They must NEVER invent them.
-
-Especially ensure that the prompt does not encourage the model to fill gaps using “likely” or “reasonable” assumptions.
-
----
-
-# 9. MAKE THE GROQ CONTRACT AS STRICT AS POSSIBLE
-
-Continue using the existing FieldLine AI abstraction.
-
-Do NOT create another Groq client.
-
-Use the existing:
-
-* `AIService.extractStructured(...)`
-* `GroqAIProvider`
-* `MockAIProvider`
-
-The generated payload should be structurally validated with Zod.
-
-Prefer the model to generate ONLY the textual fields:
+Groq-generated fields:
 
 ```text
 title
@@ -294,269 +268,572 @@ recommendedAction
 fullMessage
 ```
 
-Then have the server attach trusted metadata.
-
-Also verify behavior when Groq returns:
-
-* malformed JSON
-* missing fields
-* extra fields
-* empty strings
-* absurdly long strings
-* invalid content
-
-The service should fail safely into deterministic fallback rather than leaking malformed content downstream.
-
----
-
-# 10. VERIFY NORMAL / COLD-START BEHAVIOR
-
-This invariant must remain:
+Server/Phase 1-owned facts:
 
 ```text
-normal → no anomaly alert message
-cold start → no anomaly alert message
+severity
+anomalyScore
+anomalyReasons
+projectName
+activityExternalId
+activityName
+activityLocation
+reportDate
+reporterName
+previousPercent
+reportedPercent
+activityMatchId
 ```
 
-Verify both score and severity boundaries.
+The email renderer must use the authoritative server-owned values.
 
-Phase 2 must never manufacture an alert from a normal observation.
+Do not derive severity from prose.
 
-Also verify that Phase 3 cannot accidentally be triggered by a normal/cold-start generator call.
+Do not derive anomaly score from prose.
 
-Do not add Phase 3 functionality yet; merely make the Phase 2 boundary unambiguous.
+Do not let the email layer recalculate anything.
 
 ---
 
-# 11. TEST THE GENERATOR AS A BEHAVIORAL SYSTEM, NOT JUST A UNIT
+# 9. TRIGGER EMAIL ONLY AFTER PERSISTENCE
 
-Keep the current unit tests, but add/strengthen tests around these behavioral invariants:
+The intended sequence is:
 
-### Case A — High anomaly
+```text
+Anomaly detected
+      ↓
+Activity match / anomaly record persisted
+      ↓
+Persistence succeeds
+      ↓
+Phase 2 AnomalyAlertMessage available
+      ↓
+Phase 3 email delivery
+```
+
+Never send the email merely because anomaly inference returned `high`.
+
+The dashboard/database remains the source of truth.
+
+Email is only a delivery mechanism.
+
+Inspect all relevant current report paths and ensure the completed Phase 1/2 anomaly flow is handled consistently.
+
+Do not accidentally implement email for only one worker-report path.
+
+---
+
+# 10. ANOMALY AND EMAIL FAILURE MUST BE INDEPENDENT
+
+This invariant is mandatory:
+
+```text
+Anomaly persistence success
+        +
+Resend failure
+        =
+anomaly remains valid
+```
+
+For example:
+
+```text
+Phase 1 → HIGH anomaly
+Phase 2 → message generated
+Phase 3 → Resend returns HTTP 503
+```
+
+Expected behavior:
+
+* anomaly remains persisted
+* dashboard remains correct
+* email failure is logged as a delivery failure
+* the original worker operation must not be rolled back solely because email failed
+
+Do NOT:
+
+* delete the anomaly
+* undo the progress record
+* mark the anomaly false
+* throw an error that causes the whole worker report transaction to fail
+
+unless the existing application architecture absolutely requires surfacing a non-fatal delivery result. In that case, preserve the anomaly and clearly separate the delivery status.
+
+---
+
+# 11. NO BACKGROUND EMAIL WORKER
+
+Do not create a new queue or background process for Phase 3.
+
+Do not add:
+
+* email worker
+* cron
+* retry daemon
+* scheduled job
+* Redis queue
+* BullMQ
+* external queue
+
+The current architecture is compatible with an immediate synchronous HTTP delivery attempt.
+
+Use:
+
+```text
+report request
+ ↓
+anomaly processing
+ ↓
+persist
+ ↓
+email HTTP request
+ ↓
+respond
+```
+
+Phase 4 will address durable notification state and retry/idempotency strategy more comprehensively.
+
+---
+
+# 12. USE RESEND IDEMPOTENCY
+
+Resend supports `Idempotency-Key`.
+
+Use a deterministic idempotency key based on the originating anomaly identity, preferably using the actual Phase 2 correlation field such as `activityMatchId` plus an explicit notification purpose.
+
+Do not invent random keys for every retry.
+
+The objective is to reduce duplicate sends for the same anomaly event.
+
+Inspect the actual Phase 2 correlation model before deciding the exact key format.
+
+---
+
+# 13. HANDLE HTTP ERRORS ROBUSTLY
+
+The delivery adapter must handle at least:
+
+* successful 2xx response
+* 400 validation errors
+* 401/403 authentication/authorization errors
+* 429 rate limiting
+* 500/502/503 server failures
+* network failures
+* connection timeout
+* invalid/malformed response body
+
+Use an explicit request timeout.
+
+Prefer `AbortController` or another standard Node mechanism.
+
+Do not hang the worker request indefinitely waiting for Resend.
+
+---
+
+# 14. NEVER LEAK SECRETS
+
+Follow the repository's existing logging/redaction conventions.
+
+The following must never appear in logs or thrown error messages:
+
+* `RESEND_API_KEY`
+* `Authorization: Bearer <key>`
+* raw secret values
+
+A Resend error should be summarized safely.
+
+For example:
+
+```text
+Resend email delivery failed: HTTP 503
+```
+
+is fine.
+
+Dumping the entire request headers object is not.
+
+Add a regression test for secret redaction where appropriate.
+
+---
+
+# 15. RETURN A STRUCTURED DELIVERY RESULT
+
+Use a small result type conceptually equivalent to:
+
+```ts
+{
+  sent: boolean;
+  provider: 'resend';
+  providerMessageId?: string;
+  errorCode?: string;
+}
+```
+
+Adapt the exact naming to repository conventions.
+
+Do not persist this result yet.
+
+Phase 4 will introduce notification state/persistence.
+
+---
+
+# 16. TEST THE ACTUAL HTTP CONTRACT
+
+Do not merely mock `EmailDeliveryService.sendAnomalyAlert()`.
+
+Mock the underlying `fetch()` call and verify the actual outgoing HTTP contract.
+
+Test:
+
+```text
+POST https://api.resend.com/emails
+Authorization: Bearer ...
+Content-Type: application/json
+```
+
+with a payload containing:
+
+```text
+from
+to
+subject
+html
+text
+```
+
+and, when appropriate:
+
+```text
+Idempotency-Key
+```
+
+Validate that the exact values are derived from trusted server-side data.
+
+---
+
+# 17. TEST EMAIL DISABLED MODE
+
+Add a test proving:
+
+```text
+EMAIL_ENABLED=false
+```
+
+causes:
+
+* no network request
+* successful no-op delivery result
+* no exception
+* anomaly pipeline continues normally
+
+This is essential for offline tests and demo reproducibility.
+
+---
+
+# 18. ADD END-TO-END ANOMALY → EMAIL COVERAGE
+
+Add at least one integration-level behavioral test equivalent to:
+
+```text
+worker progress report
+    ↓
+Phase 1 anomaly evaluation
+    ↓
+activity match persistence
+    ↓
+Phase 2 message generation
+    ↓
+Phase 3 email rendering
+    ↓
+mocked Resend HTTP request
+```
+
+Verify that the email contains the correct:
+
+* activity
+* project
+* reported progress
+* anomaly score
+* severity
+* recommended action
+
+Also verify:
+
+```text
+Resend failure
+    ↓
+anomaly still persists
+```
+
+This test is more important than a large number of isolated mocks.
+
+---
+
+# 19. TEST ALL IMPORTANT REPORT PATHS
+
+Inspect the actual worker/report architecture.
+
+Make sure Phase 3 is connected after Phase 2 for every relevant anomaly-producing worker-report path, including direct activity selection and free-form/AI-assisted reports where applicable.
+
+Do not only wire it to the most obvious HTTP endpoint.
+
+Use the current local Phase 1/2 implementation to determine the correct common integration point.
+
+Avoid duplicated email-trigger code in multiple workers whenever a clean common service boundary exists.
+
+---
+
+# 20. DO NOT TOUCH WHATSAPP
+
+Phase 3 is email only.
+
+Do not add:
+
+* WhatsApp SDK
+* WhatsApp API client
+* WhatsApp Web automation
+* QR session management
+* WhatsApp environment variables
+* WhatsApp delivery interfaces beyond whatever minimal generic abstraction already exists
+
+WhatsApp remains Phase 5.
+
+---
+
+# 21. DO NOT ADD NOTIFICATION PERSISTENCE
+
+Do not add:
+
+* notifications table
+* delivery attempts table
+* notification status records
+* sent_at fields
+* retry counters
+* dead-letter queue
+* durable delivery state
+
+Those belong to Phase 4.
+
+The only existing persistence we should rely on is the anomaly/activity match state already established by FieldLine.
+
+---
+
+# 22. KEEP THE GOLDEN DEMO INTACT
+
+Do not alter:
+
+```text
+npm run demo:reset
+npm run demo:verify
+npm run verify:release
+npm test
+```
+
+in a way that makes them require Resend.
+
+Do not add network access to existing unit tests unless explicitly isolated inside new email-specific tests.
+
+The default test/demo behavior must remain deterministic and offline-capable.
+
+---
+
+# 23. REVIEW CURRENT RENDER CONFIGURATION
+
+The current `render.yaml` on `main` still contains:
+
+```yaml
+AI_PROVIDER: gemini
+GEMINI_API_KEY:
+```
+
+Do not silently redesign the AI provider configuration as part of Phase 3.
+
+However, inspect the local Phase 2 implementation and explicitly identify whether the eventual deployed alert path requires:
+
+```text
+AI_PROVIDER=groq
+GROQ_API_KEY_01=...
+...
+```
+
+That is a deployment/configuration consideration, not an excuse to alter Phase 2 behavior unnecessarily.
+
+Also determine which email variables need to be configured in Render.
+
+Never put actual secrets into source control.
+
+---
+
+# 24. BEHAVIORAL / INTUITIVE EVALUATION
+
+In addition to automated tests, run realistic examples.
+
+At minimum evaluate:
+
+### Case A — HIGH anomaly
 
 Example:
 
 ```text
+Refinery Construction
+Piping Installation — Area B
 41% → 82%
-score = 0.91
-severity = high
+anomaly score 0.91
+severity high
 ```
 
-Expected:
+Verify that the received email would make an administrator immediately understand:
 
-* urgent but professional language
-* statistical explanation
-* physical verification recommendation
-* no accusation
+1. which activity is affected,
+2. what changed,
+3. why the system flagged it,
+4. what action should be taken.
 
-### Case B — Review anomaly
+### Case B — REVIEW anomaly
 
-Expected:
+Verify lower urgency than HIGH without weakening actionability.
 
-* lower urgency than high
-* still actionable
-* no accidental escalation to high
+### Case C — exact activity match + high anomaly
 
-### Case C — Exact match + high anomaly
+Verify the email never suggests that activity matching itself is questionable.
 
-Expected:
+### Case D — no previous canonical progress
 
-* activity identity treated as trusted
-* only progression anomaly discussed
+Verify the email does NOT invent a prior percentage.
 
-### Case D — Cold start
+### Case E — missing reporter/location
 
-Expected:
+Verify the email remains professional and does not invent values.
 
-* no generated alert
+### Case F — Resend outage
 
-### Case E — Groq outage
+Verify anomaly remains valid and the delivery failure is isolated.
 
-Expected:
+### Case G — HTML escaping
 
-* deterministic fallback
-* anomaly information preserved
-
-### Case F — Missing previous progress
-
-Expected:
-
-* no fabricated baseline comparison
-
-### Case G — Missing reporter/location
-
-Expected:
-
-* no invented identity/location
-
-### Case H — Hallucination resistance
-
-Given incomplete facts, verify that the resulting message contains no fabricated:
-
-* weather
-* material shortage
-* equipment failure
-* photographs
-* CCTV
-* sensor values
-* conversations
-* site conditions
-* management instructions
-* causes of the anomaly
-
-### Case I — Semantic integrity
-
-Verify that the model never turns anomaly score into a probability of wrongdoing.
+Use an activity/report field containing HTML-like text and verify it appears as text, not markup.
 
 ---
 
-# 12. ADD A STRONGER “MESSAGE QUALITY” EVALUATION
+# 25. RUN VERIFICATION
 
-Do not rely only on string-presence tests.
-
-For representative outputs, manually/behaviorally evaluate:
-
-### Accuracy
-
-Does every factual statement originate from supplied data?
-
-### Clarity
-
-Could a site administrator understand the anomaly in under ~15 seconds?
-
-### Actionability
-
-Does the message clearly state what should be checked next?
-
-### Restraint
-
-Does it avoid accusing the worker, contractor, or reporter?
-
-### Statistical integrity
-
-Does it describe the anomaly score correctly?
-
-### Completeness
-
-Does it communicate the important facts without irrelevant verbosity?
-
-### Missing-data behavior
-
-Does it gracefully handle absent optional information?
-
-Use these evaluations to make targeted corrections to prompts or formatting.
-
-Do not overfit the implementation to exact example wording.
-
----
-
-# 13. CHECK FOR UNNECESSARY COMPLEXITY
-
-Keep Phase 2 narrow.
-
-Do NOT add:
-
-* email sending
-* WhatsApp sending
-* notification persistence
-* retry queues
-* scheduling
-* delivery status
-* webhook handling
-* Resend integration
-* WhatsApp integration
-* dashboard notification history
-
-Those belong to later phases.
-
-Phase 2 should remain:
-
-**trusted anomaly facts → human-readable anomaly message**
-
----
-
-# 14. RUN THE FULL VERIFICATION AFTER CORRECTIONS
-
-Run at minimum:
+At minimum, run:
 
 ```bash
-npx vitest run backend/tests/anomaly_message_generator.test.ts
-npx vitest run backend/tests/architecture.test.ts
+npx vitest run backend/tests/<new-email-tests>
 npx tsc -p tsconfig.backend.json --noEmit
+npm test
 ```
 
-Then run the broader backend/test suite that is appropriate for the repository.
+Also run the relevant Phase 1/2 tests that exercise the anomaly-to-message pipeline.
 
-Also run your existing intuitive evaluation script and update it if necessary.
+Run the actual behavioral/example evaluation you add.
 
-Do not claim success from a command you did not actually execute.
+Do not report a test as passing unless you actually ran it.
+
+Report exact counts.
 
 ---
 
-# 15. FINAL REPORT REQUIREMENTS
+# 26. FINAL REPORT
 
-When finished, return a concise but technically precise report containing:
+When complete, provide:
 
-### A. What you changed
+## A. Architecture added
 
-List only actual changes.
+Show:
 
-### B. Trust-boundary audit
+```text
+Phase 1
+   ↓
+Phase 2
+   ↓
+Phase 3 Email Delivery
+   ↓
+Resend
+```
 
-Explain how Phase 2 now consumes trusted Phase 1 anomaly facts.
+and identify the exact files/classes created or changed.
 
-### C. Metadata ownership
+## B. Configuration
 
-Explicitly state which fields are server-owned and which fields Groq is allowed to generate.
+Show the exact environment variable names required, without exposing any secrets.
 
-### D. Fallback audit
+## C. Integration point
 
-Explain what happens under Groq outage / malformed output / missing facts.
+Explain exactly where the email send is triggered and why it occurs after anomaly persistence.
 
-### E. Tests executed
+## D. Failure semantics
 
-Give exact commands and actual pass/fail counts.
+Explain what happens when:
 
-### F. Behavioral evaluation
+* Resend succeeds
+* Resend fails
+* email is disabled
+* configuration is missing
+* Resend times out
 
-Show representative examples and briefly evaluate:
+## E. Security
+
+Explain:
+
+* secret handling
+* HTML escaping
+* recipient control
+* server-owned anomaly metadata
+
+## F. Tests
+
+Report exact commands and actual pass/fail counts.
+
+## G. Behavioral evaluation
+
+Show representative emails/results and evaluate:
 
 * factuality
 * clarity
 * actionability
-* non-accusatory wording
-* statistical integrity
+* non-accusatory language
+* preservation of anomaly score/severity
+* graceful missing-data handling
 
-### G. Remaining limitations
+## H. Remaining limitations
 
-State honestly anything still unresolved.
-
-Do not simply say “Phase 2 complete” unless the actual implementation satisfies the above constraints.
+Be honest about anything that Phase 4 still needs to solve, especially durable notification state, retries, and stronger cross-request idempotency.
 
 ---
 
-## Definition of done
+# Definition of Done
 
-Phase 2 is considered 10/10 only when all of these are true:
+Phase 3 is complete only when:
 
 ```text
-✓ Phase 1 remains the sole source of anomaly truth
-✓ Phase 2 does not recompute anomaly facts
-✓ Groq generates language, not anomaly decisions
-✓ Server owns score/severity/identity metadata
-✓ Exact-match and anomaly semantics remain orthogonal
-✓ Normal/cold-start produce no alert
-✓ Missing data never gets fabricated
-✓ Groq failure cannot destroy the anomaly
-✓ Deterministic fallback is fully trustworthy
-✓ Output is schema validated
-✓ Correlation to the originating anomaly is preserved
-✓ Behavioral tests cover realistic administrator use
-✓ No Phase 3/4/5 concerns leak into Phase 2
-✓ TypeScript/tests are actually executed and passing
-✓ Implementation matches the written architecture
+✓ Resend HTTP delivery works
+✓ SMTP is not used
+✓ Email sender/recipient are configuration-driven
+✓ API secret is server-side only
+✓ Email can be disabled
+✓ Golden demo remains offline-capable
+✓ HTML + plaintext are generated
+✓ HTML dynamic content is escaped
+✓ Phase 2 remains the source of generated prose
+✓ Server/Phase 1 remains the source of anomaly truth
+✓ Email is triggered only after anomaly persistence
+✓ Email failure cannot invalidate the anomaly
+✓ No background email worker is introduced
+✓ Resend idempotency is used appropriately
+✓ Timeout/error handling is implemented
+✓ Secrets are redacted
+✓ Actual fetch/HTTP contract is tested
+✓ Anomaly → email integration is tested
+✓ Relevant worker-report paths are covered
+✓ No WhatsApp implementation is added
+✓ No notification persistence is added
+✓ Full repository tests remain green
+✓ TypeScript compilation is clean
+✓ Behavioral evaluation is complete
 ```
 
-Make the smallest set of changes necessary to achieve this quality level.
+Implement the smallest clean solution that satisfies these requirements.
 
-**Do not redesign working FieldLine architecture merely for stylistic reasons. Preserve existing conventions wherever they are already sound.**
+Preserve existing FieldLine architecture and conventions wherever they are sound. Do not perform unrelated refactors.

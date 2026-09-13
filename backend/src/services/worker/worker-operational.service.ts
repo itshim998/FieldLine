@@ -31,9 +31,18 @@ import {
   activityMatchingService as defaultMatchingService
 } from '../matching/activity-matching.service.js';
 import {
+  ActivityProgressRepository,
+  activityProgressRepository as defaultActivityProgressRepo
+} from '../../repositories/activity-progress.repository.js';
+import {
   ProgressAnomalyEvaluationService,
   defaultProgressAnomalyEvaluationService
 } from '../anomaly/progress-anomaly-evaluation.service.js';
+import {
+  AnomalyNotificationService,
+  defaultAnomalyNotificationService,
+  isEligibleForAnomalyAlert
+} from '../anomaly/index.js';
 import { AnomalyPrediction } from '../../ml/types.js';
 import {
   ProgressSnapshotService,
@@ -94,6 +103,8 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
   private matchingService: ActivityMatchingService;
   private normalizationService: FieldProgressNormalizationService;
   private anomalyEvaluationService: ProgressAnomalyEvaluationService;
+  private activityProgressRepo: ActivityProgressRepository;
+  private anomalyNotificationService: AnomalyNotificationService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -106,6 +117,8 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     matchingService?: ActivityMatchingService;
     normalizationService?: FieldProgressNormalizationService;
     anomalyEvaluationService?: ProgressAnomalyEvaluationService;
+    activityProgressRepo?: ActivityProgressRepository;
+    anomalyNotificationService?: AnomalyNotificationService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.activityRepo = dependencies?.activityRepo || defaultActivityRepo;
@@ -118,6 +131,10 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
     this.normalizationService = dependencies?.normalizationService || defaultNormalizationService;
     this.anomalyEvaluationService =
       dependencies?.anomalyEvaluationService || defaultProgressAnomalyEvaluationService;
+    this.activityProgressRepo =
+      dependencies?.activityProgressRepo || defaultActivityProgressRepo;
+    this.anomalyNotificationService =
+      dependencies?.anomalyNotificationService || defaultAnomalyNotificationService;
   }
 
   getOperationalTasks(
@@ -339,7 +356,17 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
 
       // Evaluate anomaly BEFORE recording canonical progress so observation does not become its own baseline
       let anomaly: AnomalyPrediction | null = null;
+      let previousPercent: number | null = null;
       if (reportedPercent !== null) {
+        const priorObservation = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+          activity.id,
+          projectId,
+          reportDate
+        );
+        if (priorObservation) {
+          previousPercent = priorObservation.actualPercent;
+        }
+
         anomaly = this.anomalyEvaluationService.evaluateProgressAnomaly({
           projectId,
           activityId: activity.id,
@@ -402,6 +429,30 @@ export class DefaultWorkerOperationalService implements WorkerOperationalService
       logger.info(
         `WorkerOperationalService: Quick report recorded for activity '${activity.externalId}' by '${reporterName}'. Actual percent: ${recorded.actualPercent}%.`
       );
+
+      // Phase 3 Anomaly Notification: Deliver alert strictly after persistence if anomalous
+      if (anomaly && isEligibleForAnomalyAlert(anomaly) && reportedPercent !== null) {
+        try {
+          await this.anomalyNotificationService.notifyAnomalyAlert({
+            prediction: anomaly,
+            context: {
+              projectName: project.name,
+              activityExternalId: activity.externalId,
+              activityName: activity.name,
+              activityLocation: activity.location || null,
+              reportDate,
+              reporterName,
+              previousPercent,
+              reportedPercent,
+              activityMatchId: match.id
+            }
+          });
+        } catch (notifErr: any) {
+          logger.warn(
+            `WorkerOperationalService: Anomaly notification dispatch failed non-fatally for activity '${activity.externalId}': ${notifErr?.message || notifErr}`
+          );
+        }
+      }
 
       return {
         status: 'confirmed',

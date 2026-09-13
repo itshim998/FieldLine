@@ -24,6 +24,11 @@ import {
   DefaultProgressAnomalyEvaluationService,
   defaultProgressAnomalyEvaluationService
 } from '../anomaly/progress-anomaly-evaluation.service.js';
+import {
+  AnomalyNotificationService,
+  defaultAnomalyNotificationService,
+  isEligibleForAnomalyAlert
+} from '../anomaly/index.js';
 import { AnomalyPrediction } from '../../ml/types.js';
 import { NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { logger } from '../../config/logger.js';
@@ -53,6 +58,7 @@ export class ActivityMatchingService {
   private activityProgressRepo: ActivityProgressRepository;
   private anomalyModelService: AnomalyModelService;
   private anomalyEvaluationService: ProgressAnomalyEvaluationService;
+  private anomalyNotificationService: AnomalyNotificationService;
 
   constructor(dependencies?: {
     projectRepo?: ProjectRepository;
@@ -66,6 +72,7 @@ export class ActivityMatchingService {
     activityProgressRepo?: ActivityProgressRepository;
     anomalyModelService?: AnomalyModelService;
     anomalyEvaluationService?: ProgressAnomalyEvaluationService;
+    anomalyNotificationService?: AnomalyNotificationService;
   }) {
     this.projectRepo = dependencies?.projectRepo || defaultProjectRepo;
     this.progressUpdateRepo = dependencies?.progressUpdateRepo || defaultProgressUpdateRepo;
@@ -84,6 +91,8 @@ export class ActivityMatchingService {
         activityRepo: this.activityRepo,
         anomalyModelService: this.anomalyModelService
       });
+    this.anomalyNotificationService =
+      dependencies?.anomalyNotificationService || defaultAnomalyNotificationService;
   }
 
   /**
@@ -193,7 +202,17 @@ export class ActivityMatchingService {
         // Anomaly Evaluation (Review-Prioritization Assistant - Phase 1 & Phase 18)
         // Evaluates candidates with non-null reported progress against prior canonical history
         let anomaly: AnomalyPrediction | undefined = undefined;
+        let previousPercent: number | null = null;
         if (fact.progress_percent !== null && fact.progress_percent !== undefined && act) {
+          const priorObs = this.activityProgressRepo.getLatestByActivityIdAsOfDate(
+            act.id,
+            projectId,
+            reportDate
+          );
+          if (priorObs) {
+            previousPercent = priorObs.actualPercent;
+          }
+
           const evalResult = this.anomalyEvaluationService.evaluateProgressAnomaly({
             projectId,
             activityId: act.id,
@@ -216,7 +235,8 @@ export class ActivityMatchingService {
           anomaly,
           anomalyScore: anomaly ? anomaly.anomalyScore : null,
           anomalySeverity: anomaly ? anomaly.severity : null,
-          anomalyReasons: anomaly ? anomaly.reasons : null
+          anomalyReasons: anomaly ? anomaly.reasons : null,
+          previousPercent
         };
       });
 
@@ -312,13 +332,14 @@ export class ActivityMatchingService {
   ): Promise<MatchReportResult> {
     const { persist = true } = options;
 
-    // 1. Verify progress report exists and belongs to the specified project (strict isolation)
+    // 1. Verify project and progress report exist and belong to the specified project (strict isolation)
+    const project = this.projectRepo.getById(projectId);
+    if (!project) {
+      throw new NotFoundError(`Project with ID '${projectId}' not found`);
+    }
+
     const progressRecord = this.progressUpdateRepo.getByIdAndProjectId(progressUpdateId, projectId);
     if (!progressRecord) {
-      const project = this.projectRepo.getById(projectId);
-      if (!project) {
-        throw new NotFoundError(`Project with ID '${projectId}' not found`);
-      }
       throw new NotFoundError(
         `Progress report with ID '${progressUpdateId}' not found for project '${projectId}'`
       );
@@ -417,6 +438,34 @@ export class ActivityMatchingService {
         events
       });
       logger.debug(`ActivityMatchingService: Atomically persisted ${toPersist.length} matches and ${events.length} events for report ${progressUpdateId}`);
+
+      // Phase 3 Anomaly Notification: Trigger alerts for persisted matches with eligible anomalies
+      for (const r of matchResults) {
+        if (r.bestMatch && r.bestMatch.anomaly && isEligibleForAnomalyAlert(r.bestMatch.anomaly)) {
+          const act = this.activityRepo.getById(r.bestMatch.activityId);
+          const persistedMatch = toPersist.find((m) => m.activityId === r.bestMatch!.activityId);
+          try {
+            await this.anomalyNotificationService.notifyAnomalyAlert({
+              prediction: r.bestMatch.anomaly,
+              context: {
+                projectName: project.name,
+                activityExternalId: r.bestMatch.activityExternalId,
+                activityName: r.bestMatch.activityName,
+                activityLocation: act?.location || null,
+                reportDate: progressRecord.reportDate,
+                reporterName: progressRecord.reporterName,
+                previousPercent: r.bestMatch.previousPercent ?? null,
+                reportedPercent: r.fact.progress_percent ?? 0,
+                activityMatchId: persistedMatch?.id || null
+              }
+            });
+          } catch (notifErr: any) {
+            logger.warn(
+              `ActivityMatchingService: Anomaly notification dispatch failed non-fatally for match '${persistedMatch?.id}': ${notifErr?.message || notifErr}`
+            );
+          }
+        }
+      }
     }
 
     return {

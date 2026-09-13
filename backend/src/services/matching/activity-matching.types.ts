@@ -22,6 +22,7 @@ export interface CandidateMatch {
   anomalyScore?: number | null;
   anomalySeverity?: 'normal' | 'review' | 'high' | null;
   anomalyReasons?: string[] | null;
+  previousPercent?: number | null;
 }
 
 /**
