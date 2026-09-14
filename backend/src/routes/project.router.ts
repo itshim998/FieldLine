@@ -19,8 +19,8 @@ export function createProjectRouter(service: ProjectService = projectService): R
     try {
       let projects = await service.listProjects();
 
-      // On-demand self-healing auto-seed when requested via ?autoSeed=true
-      if (projects.length === 0 && req.query.autoSeed === 'true') {
+      // On-demand self-healing auto-seed when requested via ?autoSeed=true and AUTO_SEED_DEMO is enabled
+      if (projects.length === 0 && req.query.autoSeed === 'true' && env.AUTO_SEED_DEMO) {
         logger.info('🌱 Empty project list with ?autoSeed=true detected. Auto-seeding Golden Demo...');
         try {
           await seedGoldenDemo();

@@ -15,7 +15,7 @@ describe('Environment Configuration Validation', () => {
   it('should parse and coerce custom environment variables properly', () => {
     const custom = {
       PORT: '8080',
-      NODE_ENV: 'production',
+      NODE_ENV: 'development',
       DATABASE_PATH: './custom/db.sqlite',
       UPLOAD_DIR: './custom-uploads',
       VITE_PORT: '5173'
@@ -24,7 +24,7 @@ describe('Environment Configuration Validation', () => {
     const config = getValidatedEnv(custom);
 
     expect(config.PORT).toBe(8080);
-    expect(config.NODE_ENV).toBe('production');
+    expect(config.NODE_ENV).toBe('development');
     expect(config.DATABASE_PATH).toBe('./custom/db.sqlite');
     expect(config.UPLOAD_DIR).toBe('./custom-uploads');
     expect(config.VITE_PORT).toBe(5173);
@@ -223,5 +223,34 @@ describe('Environment Configuration Validation', () => {
       'supervisor@custom.com',
       'lead@custom.com'
     ]);
+  });
+
+  it('enforces NODE_ENV=production must use DATABASE_PROVIDER=postgres and rejects sqlite', () => {
+    // Fails with explicit sqlite in production
+    expect(() =>
+      getValidatedEnv({
+        PORT: '3001',
+        NODE_ENV: 'production',
+        DATABASE_PROVIDER: 'sqlite'
+      })
+    ).toThrow(/DATABASE_PROVIDER=sqlite is not permitted when NODE_ENV=production/);
+
+    // Fails when DATABASE_PROVIDER is omitted in production (defaults to sqlite)
+    expect(() =>
+      getValidatedEnv({
+        PORT: '3001',
+        NODE_ENV: 'production'
+      })
+    ).toThrow(/DATABASE_PROVIDER=sqlite is not permitted when NODE_ENV=production/);
+
+    // Succeeds when postgres + DATABASE_URL are provided
+    const validProd = getValidatedEnv({
+      PORT: '3001',
+      NODE_ENV: 'production',
+      DATABASE_PROVIDER: 'postgres',
+      DATABASE_URL: 'postgresql://postgres:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres'
+    });
+    expect(validProd.NODE_ENV).toBe('production');
+    expect(validProd.DATABASE_PROVIDER).toBe('postgres');
   });
 });

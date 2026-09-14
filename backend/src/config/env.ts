@@ -155,6 +155,14 @@ export const envSchema = z.object({
     parsedAlertRecipients: alertRecipients
   };
 }).superRefine((data, ctx) => {
+  if (data.NODE_ENV === 'production' && data.DATABASE_PROVIDER === 'sqlite') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'DATABASE_PROVIDER=sqlite is not permitted when NODE_ENV=production. Production requires PostgreSQL on Supabase.',
+      path: ['DATABASE_PROVIDER']
+    });
+  }
+
   if (data.DATABASE_PROVIDER === 'postgres') {
     if (!data.DATABASE_URL || data.DATABASE_URL.trim().length === 0) {
       ctx.addIssue({

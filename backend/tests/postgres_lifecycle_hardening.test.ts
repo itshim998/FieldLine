@@ -77,6 +77,54 @@ describe('PostgreSQL / Supabase Production Lifecycle & Hardening Suite', () => {
       });
       expect(parsed.DATABASE_AUTO_MIGRATE).toBe(true);
     });
+
+    it('fails fast when NODE_ENV=production and DATABASE_PROVIDER=sqlite', () => {
+      expect(() =>
+        getValidatedEnv({
+          PORT: '3001',
+          NODE_ENV: 'production',
+          DATABASE_PROVIDER: 'sqlite'
+        })
+      ).toThrow(/DATABASE_PROVIDER=sqlite is not permitted when NODE_ENV=production/);
+    });
+
+    it('succeeds when NODE_ENV=production and DATABASE_PROVIDER=postgres with DATABASE_URL', () => {
+      const parsed = getValidatedEnv({
+        PORT: '3001',
+        NODE_ENV: 'production',
+        DATABASE_PROVIDER: 'postgres',
+        DATABASE_URL: 'postgresql://postgres:secret@aws-0-us-east-1.pooler.supabase.com:5432/postgres'
+      });
+      expect(parsed.NODE_ENV).toBe('production');
+      expect(parsed.DATABASE_PROVIDER).toBe('postgres');
+      expect(parsed.DATABASE_URL).toContain('supabase.com');
+    });
+
+    it('fails when NODE_ENV=production and DATABASE_PROVIDER=postgres but DATABASE_URL is omitted', () => {
+      expect(() =>
+        getValidatedEnv({
+          PORT: '3001',
+          NODE_ENV: 'production',
+          DATABASE_PROVIDER: 'postgres'
+        })
+      ).toThrow(/DATABASE_URL is required when DATABASE_PROVIDER=postgres/);
+    });
+
+    it('allows DATABASE_PROVIDER=sqlite when NODE_ENV=development or NODE_ENV=test', () => {
+      const devParsed = getValidatedEnv({
+        PORT: '3001',
+        NODE_ENV: 'development',
+        DATABASE_PROVIDER: 'sqlite'
+      });
+      expect(devParsed.DATABASE_PROVIDER).toBe('sqlite');
+
+      const testParsed = getValidatedEnv({
+        PORT: '3001',
+        NODE_ENV: 'test',
+        DATABASE_PROVIDER: 'sqlite'
+      });
+      expect(testParsed.DATABASE_PROVIDER).toBe('sqlite');
+    });
   });
 
   describe('2. Schema-Readiness Check', () => {
