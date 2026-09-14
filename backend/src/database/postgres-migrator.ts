@@ -26,6 +26,16 @@ export async function getAppliedPostgresMigrations(client: PoolClient | Pool): P
 
 let activeMigrationPromise: Promise<PostgresMigrationResult> | null = null;
 
+/**
+ * Runs PostgreSQL schema migrations from supabase/migrations/*.sql.
+ * Used primarily for local/offline PostgreSQL development when DATABASE_AUTO_MIGRATE=true.
+ * 
+ * Concurrency Safety:
+ * - Employs in-process in-flight promise deduplication to prevent concurrent callers from executing simultaneously.
+ * - Re-checks schema_migrations inside each migration's transaction before applying.
+ * - Note: This runner does not use PostgreSQL advisory locks; production Supabase relies on GitHub Deployment
+ *   as the sole authoritative migration engine.
+ */
 export async function runPostgresMigrations(targetPool?: Pool): Promise<PostgresMigrationResult> {
   if (activeMigrationPromise) {
     return activeMigrationPromise;

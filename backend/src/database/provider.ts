@@ -25,9 +25,20 @@ export function isPostgresDatabase(): boolean {
 
 export async function initActiveDatabase(): Promise<void> {
   if (isPostgresDatabase()) {
-    await initPostgres({ skipMigrations: true });
+    await initPostgres({ autoMigrate: env.DATABASE_AUTO_MIGRATE });
   } else {
     initDatabase();
+  }
+}
+
+/**
+ * Verifies that the active database has its required schema ready.
+ * For PostgreSQL, asserts that all critical tables are present.
+ */
+export async function assertActiveDatabaseReady(): Promise<void> {
+  if (isPostgresDatabase()) {
+    const { assertPostgresSchemaReady } = await import('./postgres.js');
+    await assertPostgresSchemaReady();
   }
 }
 

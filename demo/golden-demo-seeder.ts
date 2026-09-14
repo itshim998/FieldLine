@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { projectRepository } from '../backend/src/repositories/project.repository.js';
+import { scheduleRepository } from '../backend/src/repositories/schedule.repository.js';
 import { scheduleImportService } from '../backend/src/services/schedule-import.service.js';
 import { activityRepository } from '../backend/src/repositories/activity.repository.js';
 import { evidenceService } from '../backend/src/services/evidence/evidence.service.js';
@@ -88,6 +89,30 @@ export async function seedGoldenDemo(): Promise<SeedGoldenDemoResult> {
     logger.info(`✅ Created Golden Demo Project: [${project.code}] ${project.name} (${project.id})`);
   } else {
     logger.info(`ℹ️ Found existing Golden Demo Project: [${project.code}] (${project.id})`);
+    
+    // Check if the project already has its canonical schedule and activities seeded
+    const existingActivities = await activityRepository.listByProjectId(project.id);
+    const existingSchedules = await scheduleRepository.listByProjectId(project.id);
+    if (existingActivities.length >= goldenManifestInvariants.activityCount && existingSchedules.length > 0) {
+      logger.info(
+        `ℹ️ Golden Demo Project [${project.code}] is already fully populated with ${existingActivities.length} activities. Preserving existing data without duplicate seed.`
+      );
+      const existingEvidence = await evidenceRepository.listByProjectId(project.id);
+      const existingBlockers = await operationalBlockerRepository.listByProjectId(project.id);
+      return {
+        projectId: project.id,
+        projectCode: project.code,
+        projectName: project.name,
+        scheduleId: existingSchedules[0].id,
+        activitiesCount: existingActivities.length,
+        evidenceCount: existingEvidence.length,
+        progressReportsCount: 6,
+        canonicalObservationsCount: 30,
+        accountsCount: 2,
+        operationalBlockersCount: existingBlockers.length,
+        asOfDate: GOLDEN_AS_OF_DATE
+      };
+    }
   }
   const projectId = project.id;
 

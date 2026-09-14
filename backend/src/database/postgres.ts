@@ -10,14 +10,42 @@ let postgresPoolInstance: pg.Pool | null = null;
 export interface PostgresInitOptions {
   connectionString?: string;
   ssl?: boolean;
+  sslRejectUnauthorized?: boolean;
+  sslCa?: string;
   pool?: pg.Pool;
+  autoMigrate?: boolean;
   skipMigrations?: boolean;
   maxConnections?: number;
 }
 
+export const CRITICAL_POSTGRES_TABLES = [
+  'projects',
+  'schedules',
+  'activities',
+  'progress_updates',
+  'evidence',
+  'activity_matches',
+  'activity_progress',
+  'project_events',
+  'processing_jobs',
+  'project_accounts',
+  'operational_blockers',
+  'notification_outbox',
+  'system_metadata'
+] as const;
+
+export type CriticalPostgresTable = (typeof CRITICAL_POSTGRES_TABLES)[number];
+
+export interface PostgresSchemaReadiness {
+  ready: boolean;
+  existingTables: string[];
+  missingTables: string[];
+}
+
 /**
- * Initializes the shared PostgreSQL connection pool and runs pending migrations.
- * Connects directly or via Supabase session pooler on port 5432 or 6543.
+ * Initializes the shared PostgreSQL connection pool.
+ * Does NOT run migrations unless autoMigrate is explicitly enabled (DATABASE_AUTO_MIGRATE=true).
+ * Supabase GitHub Integration is the authoritative schema-migration deployment authority in production.
  */
 export async function initPostgres(options: PostgresInitOptions = {}): Promise<pg.Pool> {
   if (postgresPoolInstance) {
@@ -32,10 +60,15 @@ export async function initPostgres(options: PostgresInitOptions = {}): Promise<p
       throw new Error('DATABASE_URL is required to initialize PostgreSQL connection pool');
     }
 
-    const sslConfig =
-      options.ssl ?? env.DATABASE_SSL
-        ? { rejectUnauthorized: false }
-        : undefined;
+    const isSsl = options.ssl ?? env.DATABASE_SSL;
+    const rejectUnauthorized = options.sslRejectUnauthorized ?? env.DATABASE_SSL_REJECT_UNAUTHORIZED;
+    let sslConfig: pg.ConnectionConfig['ssl'] = undefined;
+    if (isSsl) {
+      sslConfig = {
+        rejectUnauthorized,
+        ca: options.sslCa ?? env.DATABASE_SSL_CA ?? undefined
+      };
+    }
 
     postgresPoolInstance = new Pool({
       connectionString,
@@ -51,8 +84,13 @@ export async function initPostgres(options: PostgresInitOptions = {}): Promise<p
     });
   }
 
-  if (!options.skipMigrations) {
+  const shouldAutoMigrate =
+    options.autoMigrate ??
+    (options.skipMigrations !== undefined ? !options.skipMigrations : env.DATABASE_AUTO_MIGRATE);
+
+  if (shouldAutoMigrate) {
     try {
+      logger.info('DATABASE_AUTO_MIGRATE is enabled. Running PostgreSQL schema migrations...');
       await runPostgresMigrations(postgresPoolInstance);
     } catch (migErr) {
       logger.error('Failed to apply PostgreSQL migrations during initialization:', migErr);
@@ -61,6 +99,49 @@ export async function initPostgres(options: PostgresInitOptions = {}): Promise<p
   }
 
   return postgresPoolInstance;
+}
+
+/**
+ * Checks PostgreSQL schema readiness by verifying that all required domain and operational
+ * tables exist in the public/current database schema.
+ */
+export async function checkPostgresSchemaReadiness(
+  pool?: pg.Pool,
+  requiredTables: readonly string[] = CRITICAL_POSTGRES_TABLES
+): Promise<PostgresSchemaReadiness> {
+  const p = pool || getPostgresPool();
+  const query = `
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_schema = current_schema() OR table_schema = 'public';
+  `;
+  const res = await p.query(query);
+  const existingSet = new Set(
+    (res.rows || []).map((r: { table_name: string }) => r.table_name.toLowerCase())
+  );
+  const missingTables = requiredTables.filter((t) => !existingSet.has(t.toLowerCase()));
+
+  return {
+    ready: missingTables.length === 0,
+    existingTables: Array.from(existingSet),
+    missingTables
+  };
+}
+
+/**
+ * Asserts that the PostgreSQL database schema has all critical tables applied.
+ * Throws a safe diagnostic error without credentials or SQL secrets if any table is missing.
+ */
+export async function assertPostgresSchemaReady(
+  pool?: pg.Pool,
+  requiredTables: readonly string[] = CRITICAL_POSTGRES_TABLES
+): Promise<void> {
+  const check = await checkPostgresSchemaReadiness(pool, requiredTables);
+  if (!check.ready) {
+    throw new Error(
+      `FieldLine database schema is not ready. Missing table(s): ${check.missingTables.join(', ')}. Apply pending Supabase migrations before starting the backend.`
+    );
+  }
 }
 
 /**

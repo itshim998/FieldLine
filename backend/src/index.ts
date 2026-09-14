@@ -5,7 +5,8 @@ import {
   initActiveDatabase,
   closeActiveDatabase,
   isPostgresDatabase,
-  runPostgresMigrations
+  runPostgresMigrations,
+  assertActiveDatabaseReady
 } from './database/provider.js';
 import { projectRepository } from './repositories/project.repository.js';
 import { jobRepository } from './jobs/job.repository.js';
@@ -23,9 +24,14 @@ async function startServer(): Promise<void> {
     if (isPostgresDatabase()) {
       console.log('🐘 Initializing PostgreSQL database connection...');
       await initActiveDatabase();
-      console.log('📦 Running PostgreSQL schema migrations...');
-      const migResult = await runPostgresMigrations();
-      console.log(`✅ PostgreSQL ready. Applied ${migResult.applied.length} migration(s).`);
+      console.log('✅ PostgreSQL connection established.');
+      if (env.DATABASE_AUTO_MIGRATE) {
+        console.log('📦 DATABASE_AUTO_MIGRATE is enabled. Running PostgreSQL schema migrations...');
+        const migResult = await runPostgresMigrations();
+        console.log(`✅ Applied ${migResult.applied.length} migration(s).`);
+      }
+      await assertActiveDatabaseReady();
+      console.log('✅ PostgreSQL schema readiness verified.');
     } else {
       await initActiveDatabase();
       console.log(`📦 SQLite database initialized at: ${env.DATABASE_PATH}`);

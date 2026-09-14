@@ -101,11 +101,22 @@ export const envSchema = z.object({
   DATABASE_PROVIDER: z.enum(['sqlite', 'postgres']).default('sqlite'),
   DATABASE_PATH: z.string().min(1).default('./database/fieldline.db'),
   DATABASE_URL: z.string().optional(),
+  DATABASE_AUTO_MIGRATE: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
+    if (typeof val === 'boolean') return val;
+    return false;
+  }, z.boolean()).default(false),
   DATABASE_SSL: z.preprocess((val) => {
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
     if (typeof val === 'boolean') return val;
     return true;
   }, z.boolean()).default(true),
+  DATABASE_SSL_REJECT_UNAUTHORIZED: z.preprocess((val) => {
+    if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
+    if (typeof val === 'boolean') return val;
+    return false;
+  }, z.boolean()).default(false),
+  DATABASE_SSL_CA: z.string().optional(),
   DATABASE_POOL_MIN: z.coerce.number().int().positive().default(1),
   DATABASE_POOL_MAX: z.coerce.number().int().positive().default(5),
   UPLOAD_DIR: z.string().min(1).default('./uploads'),
@@ -120,8 +131,8 @@ export const envSchema = z.object({
   AUTO_SEED_DEMO: z.preprocess((val) => {
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
     if (typeof val === 'boolean') return val;
-    return true;
-  }, z.boolean()).default(true),
+    return false;
+  }, z.boolean()).default(false),
   EMAIL_ENABLED: z.preprocess((val) => {
     if (typeof val === 'string') return val.toLowerCase() === 'true' || val === '1';
     if (typeof val === 'boolean') return val;
