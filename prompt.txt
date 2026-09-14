@@ -1,555 +1,199 @@
-The Supabase connection is now successful and the FieldLine PostgreSQL baseline migration is being reached/applied.
-
-Current production behavior:
+We have a production PostgreSQL failure on Render:
 
 ```text
-PostgreSQL ready. Applied 1 migration(s).
+DatabaseError: Failed to claim next eligible notification:
+column "updated_at" is of type timestamp with time zone
+but expression is of type text
 ```
 
-However, startup then fails during Golden Demo seeding.
-
-I inspected the current `main` implementation and found two concrete defects plus a broader compatibility risk.
-
-Do NOT redesign the Supabase architecture.
-Do NOT recreate the database.
-Do NOT alter the PostgreSQL schema unless the audit proves a schema defect.
-Do NOT change credentials.
-
-This is a **targeted application-level PostgreSQL compatibility correction**.
-
----
-
-# CRITICAL ISSUE 1 — POSTGRES MIGRATIONS ARE BEING STARTED TWICE
-
-Inspect:
+The error occurs in:
 
 ```text
-backend/src/database/provider.ts
-backend/src/database/postgres.ts
-backend/src/database/postgres-migrator.ts
-backend/src/index.ts
+backend/src/repositories/postgres/postgres-notification-outbox.repository.ts
 ```
 
-Current behavior is effectively:
+inside `claimNextEligible()`.
+
+I have already investigated the current `main` branch and there is a strong indication that this is a PostgreSQL schema/repository timestamp-type mismatch rather than a transient database problem.
+
+## Important findings to verify
+
+Inspect the current repository yourself and confirm the following before modifying anything.
+
+The authoritative Supabase baseline currently defines `notification_outbox` with:
 
 ```text
-startServer()
-  ↓
-initActiveDatabase()
-  ↓
-initPostgres()
-  ↓
-runPostgresMigrations()
-
-THEN
-
-startServer()
-  ↓
-runPostgresMigrations()
+next_attempt_at  TEXT
+locked_at        TEXT
+last_attempt_at  TEXT
+delivered_at     TEXT
+created_at       TIMESTAMPTZ
+updated_at       TIMESTAMPTZ
 ```
 
-`initPostgres()` already runs migrations, while `startServer()` invokes `runPostgresMigrations()` again.
+Meanwhile the PostgreSQL repository uses a shared `effectiveNow` ISO string in multiple places, including SQL statements that assign it to both the TEXT timestamp-like fields and `updated_at`.
 
-Additionally, `initActiveDatabase()` currently does not await `initPostgres()`.
-
-This creates the observed race:
+In particular, investigate all of these methods rather than fixing only the currently logged failure:
 
 ```text
-migration runner A
-+
-migration runner B
+claimNextEligible()
+claimById()
+markDelivered()
+scheduleRetry()
+markFailed()
+requeueStaleProcessing()
+saveMessageSnapshot()
+```
+
+Also inspect the row-mapping logic and the domain/interface types for these timestamp fields.
+
+## What I want from you
+
+First, investigate the problem deeply and establish the exact cause from the current code and migrations.
+
+Do not assume that the Render error is isolated to `claimNextEligible()`.
+
+I expect you to determine whether the following is indeed the underlying mismatch:
+
+```text
+SQLite notification timestamps → TEXT
+PostgreSQL notification timestamps → partially converted
+Postgres repository → shared ISO-string parameters
+```
+
+and whether this creates additional latent failures in the other notification lifecycle methods.
+
+## Preferred solution direction
+
+Use the smallest safe production-correct solution.
+
+My preference is to make the PostgreSQL `notification_outbox` timestamp model internally consistent rather than papering over individual queries with ad-hoc casts.
+
+Because the existing baseline migration has already been deployed to Supabase, do NOT rewrite the already-applied baseline migration as though it were new.
+
+Instead consider an additional forward migration that safely converts the relevant notification-outbox timestamp-like columns to PostgreSQL `TIMESTAMPTZ`.
+
+Before choosing the exact migration SQL, inspect the current migration history and consider whether existing values need conversion handling.
+
+Also update the PostgreSQL repository and row mapping as necessary so that:
+
+* PostgreSQL timestamp columns are handled correctly when `node-postgres` returns `Date` objects.
+* domain-facing values remain consistent with the existing `NotificationOutboxItem` contract.
+* parameter typing is unambiguous.
+* lifecycle operations remain correct under PostgreSQL.
+
+Do not unnecessarily change the SQLite implementation.
+
+## Important
+
+Do not solve this only by adding arbitrary casts such as:
+
+```sql
+$1::text
+$1::timestamptz
+```
+
+everywhere without first deciding what the correct PostgreSQL schema should be.
+
+A tactical cast may hide the deeper schema mismatch.
+
+Likewise, do not rewrite the notification architecture.
+
+Keep:
+
+```text
+activity anomaly persisted
         ↓
-both see baseline migration as pending
+notification_outbox persisted
         ↓
-duplicate schema_migrations.name
-```
-
-Observed production error:
-
-```text
-duplicate key value violates unique constraint "schema_migrations_name_key"
-```
-
-### Required fix
-
-There must be exactly ONE authoritative PostgreSQL migration execution during startup.
-
-Choose the cleanest existing architecture and make startup deterministic.
-
-Requirements:
-
-```text
-✓ initPostgres is awaited
-✓ migration runs exactly once
-✓ no concurrent migration runners
-✓ existing SQLite startup behavior remains intact
-✓ existing migration semantics remain intact
-✓ PostgreSQL startup still verifies/applies pending migrations
-```
-
-Do not merely catch/suppress the duplicate-key error.
-
-Fix the race itself.
-
-Add a regression test proving that startup initialization does not launch two migration runs concurrently.
-
----
-
-# CRITICAL ISSUE 2 — SQLITE SYNC REPOSITORY INTERFACES VS POSTGRES ASYNC IMPLEMENTATIONS
-
-Observed production log:
-
-```text
-Found existing Golden Demo Project: [undefined] (undefined)
-```
-
-followed by:
-
-```text
-TypeError: Cannot read properties of undefined (reading 'id')
-```
-
-and later:
-
-```text
-null value in column "project_id" of relation "schedules" violates not-null constraint
-```
-
-I inspected the current code.
-
-`demo/golden-demo-seeder.ts` calls:
-
-```ts
-projectRepository.getByCode(...)
-```
-
-without `await`.
-
-The SQLite repository interface returns:
-
-```text
-Project | null
-```
-
-but the PostgreSQL implementation returns:
-
-```text
-Promise<Project | null>
-```
-
-The current Proxy-based repository selector allows a PostgreSQL async implementation to be exposed through a repository interface that is typed as synchronous.
-
-This is an unsafe abstraction.
-
-### Required fix
-
-Perform a repository-wide audit of the dual SQLite/PostgreSQL provider system.
-
-Search for all repository/service calls where:
-
-```text
-SQLite implementation = synchronous
-PostgreSQL implementation = asynchronous
-```
-
-and verify that callers correctly support both engines.
-
-Do NOT patch only `getByCode()`.
-
----
-
-# 3. GOLDEN DEMO SEEDER MUST BE FULLY POSTGRES-COMPATIBLE
-
-Audit:
-
-```text
-demo/golden-demo-seeder.ts
-```
-
-from start to finish.
-
-Every database interaction must behave correctly under:
-
-```text
-DATABASE_PROVIDER=sqlite
-```
-
-and:
-
-```text
-DATABASE_PROVIDER=postgres
-```
-
-Identify every operation that may return a Promise under PostgreSQL.
-
-Convert the seeder to a clean async flow where necessary.
-
-Examples include, but are not limited to:
-
-```text
-projectRepository.getByCode
-projectRepository.create
-authService.provisionDefaultAccounts
-scheduleImportService.importSchedule
-activityRepository.listByProjectId
-progressUpdateRepository.create
-activityMatchRepository.create
-evidenceRepository.attachToProgressUpdate
-progressService.normalizeAndRecordProgress
-projectEventRepository.create
-operationalBlockerRepository.create
-```
-
-Do not assume the above list is exhaustive.
-
-Inspect the actual implementations.
-
-The requirement is:
-
-**Golden Demo seeding must complete successfully against PostgreSQL.**
-
----
-
-# 4. AUDIT OTHER PRODUCTION STARTUP / WORKER PATHS
-
-The Golden Demo is only the currently visible failure.
-
-Search for the same sync/async mismatch throughout:
-
-```text
-backend/src/services/
-backend/src/jobs/
-backend/src/repositories/
-backend/src/routes/
-backend/src/ai/
-```
-
-Look for code that assumes repository methods are synchronous.
-
-Do not blindly convert everything.
-
-For each relevant path determine:
-
-```text
-SQLite return type
-Postgres return type
-caller expectation
-```
-
-Any production path that can run with:
-
-```text
-DATABASE_PROVIDER=postgres
-```
-
-must correctly await asynchronous PostgreSQL operations.
-
----
-
-# 5. DO NOT USE `any` TO HIDE THE PROBLEM
-
-Do NOT solve the async mismatch by adding:
-
-```ts
-as any
-```
-
-or unsafe casts throughout the application.
-
-The current Phase 4 notification code already contains some `as any` bridges.
-
-Do not expand that pattern.
-
-Prefer a real type-safe boundary.
-
----
-
-# 6. RE-EVALUATE THE PROVIDER/REPOSITORY PROXY
-
-The current pattern conceptually exposes:
-
-```text
-ProjectRepository (sync interface)
+notification worker
         ↓
-Proxy
-   ↙        ↘
-SQLite      PostgreSQL
-sync        async
-```
-
-This is not type-safe.
-
-Do not necessarily redesign the whole repository architecture, but evaluate whether the active repository contracts should become consistently asynchronous:
-
-```text
-Promise<T>
-```
-
-for both SQLite and PostgreSQL implementations.
-
-This may be the cleanest long-term solution because:
-
-```text
-SQLite can easily return:
-Promise.resolve(value)
-
-PostgreSQL naturally returns:
-Promise<T>
-```
-
-However:
-
-**Do not perform a repository-wide rewrite unless the audit demonstrates it is necessary.**
-
-Choose the smallest safe architecture that eliminates the type contradiction.
-
----
-
-# 7. GOLDEN DEMO AUTO-SEEDING
-
-The current startup behavior is:
-
-```text
-AUTO_SEED_DEMO=true
-+
-projectCount === 0
+Groq explanation
         ↓
-seed Golden Demo
+Resend
 ```
 
-That behavior should remain available for the SIH demonstration.
+intact.
 
-But it must now correctly operate against PostgreSQL.
+## Testing requirements
 
-Verify:
+Add regression coverage for the PostgreSQL notification lifecycle, including at least:
 
 ```text
-fresh Supabase database
- ↓
-schema exists
- ↓
-seedGoldenDemo()
- ↓
-30 activities
- ↓
-evidence
- ↓
-progress reports
- ↓
-matches
- ↓
-canonical progress
- ↓
-events
- ↓
-accounts
- ↓
-notification-related data where applicable
+1. create notification
+2. claimNextEligible
+3. claimById
+4. scheduleRetry
+5. markDelivered
+6. markFailed
+7. stale lease recovery
+8. mapping of PostgreSQL timestamp values returned as Date
 ```
 
-The seed must either:
+Pay particular attention to tests that the current pg-mem setup may not faithfully reproduce.
 
-1. complete successfully, or
-2. fail transactionally/cleanly without leaving an unusable half-seeded database.
+Where practical, add a test that verifies the expected PostgreSQL column types or otherwise ensures the schema/repository contract cannot silently drift again.
 
-Do not silently swallow a failed seed and continue as if production is healthy.
+Do not weaken existing tests to make the patch pass.
 
----
+## Production-migration constraints
 
-# 8. IMPORTANT: THE SEEDING ERROR MUST NOT BE MASKED
-
-The current startup catches:
+Remember that:
 
 ```text
-Auto-seeding Golden Demo encountered an error
-```
-
-and then continues.
-
-For production PostgreSQL, this can produce an application that starts with partially initialized/inconsistent data.
-
-After fixing the underlying issue, review whether the startup semantics should be strengthened so a failed required production seed is clearly surfaced.
-
-Do not make unrelated policy changes.
-
-The key requirement is:
-
-**No silent half-seeded production state.**
-
----
-
-# 9. PostgreSQL MIGRATION STATE
-
-After fixing the startup race, verify:
-
-```text
-fresh database
- ↓
-exactly one migration execution
- ↓
-schema_migrations contains:
-20260913000000_baseline_schema
-```
-
-and subsequent restart produces:
-
-```text
-Applied 0 migration(s)
-```
-
-without duplicate-key errors.
-
-Test both:
-
-```text
-first startup
-second startup
-```
-
-against PostgreSQL.
-
----
-
-# 10. TEST POSTGRESQL USING A REALISTIC DATABASE
-
-Use the existing PostgreSQL test infrastructure and `pg-mem` where appropriate.
-
-But do not rely exclusively on `pg-mem`.
-
-For provider-specific behavior, use the actual PostgreSQL implementation and verify:
-
-```text
-project creation
-project lookup
-schedule creation
-activity creation
-progress creation
-match creation
-notification outbox creation
-transaction rollback
-```
-
-The highest-value test is:
-
-```text
-fresh PostgreSQL schema
- ↓
-seedGoldenDemo()
- ↓
-seed succeeds
-```
-
----
-
-# 11. CANONICAL TRUTH MUST REMAIN UNCHANGED
-
-The migration/correction must not change FieldLine's core invariant:
-
-```text
-only confirmed matches
+Supabase GitHub Integration
         ↓
-canonical activity_progress
+sole production migration authority
 ```
 
-Verify the Golden Demo produces the same canonical truth against PostgreSQL as SQLite.
+The application must NOT regain responsibility for applying production Supabase migrations.
 
----
-
-# 12. NOTIFICATION OUTBOX MUST REMAIN CORRECT
-
-Verify the Phase 4 outbox still uses:
+The new schema migration should therefore live under:
 
 ```text
-real projectId
-real activityMatchId
+supabase/migrations/
 ```
 
-and that foreign-key relationships remain intact.
+and be compatible with the existing production migration workflow.
 
-Do not weaken constraints.
+Do not reintroduce application-side production migration execution.
 
----
+## Regression safety
 
-# 13. VERIFICATION COMMANDS
+Preserve:
 
-Run at minimum:
+* SQLite local development
+* `npm run demo:reset`
+* existing Golden Demo behavior
+* anomaly detection
+* Groq explanation
+* durable notification outbox semantics
+* idempotency
+* retry/backoff
+* stale lease recovery
+* authoritative project/activity match identity
+* current Supabase/Render architecture
 
-```bash
-npx tsc -p tsconfig.backend.json --noEmit
-npm test
-```
+Avoid unrelated refactors.
 
-Plus focused PostgreSQL/startup tests.
+## Verification
 
-Run the Golden Demo seed against PostgreSQL in an isolated test environment.
+After implementation, actually run the relevant tests and type/build checks.
 
-Verify the following sequence:
+Do not rely only on the existing test suite if it is insufficient to reproduce real PostgreSQL behavior.
+
+Report:
 
 ```text
-START #1
-  PostgreSQL initialization
-  migrations applied exactly once
-  Golden Demo seed succeeds
-
-STOP
-
-START #2
-  PostgreSQL initialization
-  migrations applied 0
-  existing Golden Demo preserved
-  no reseed corruption
+- exact root cause
+- exact files changed
+- migration added
+- why the migration is safe
+- notification lifecycle methods audited
+- tests added/updated
+- exact commands run
+- exact results
+- any remaining limitation
 ```
 
-Do not claim success without actually executing these scenarios.
-
----
-
-# 14. FINAL REPORT
-
-Return:
-
-### A. Root causes
-
-Explicitly explain:
-
-1. why `schema_migrations` was being inserted twice
-2. why `projectRepository.getByCode()` produced the `undefined` project behavior
-3. whether other sync/async mismatches were discovered
-
-### B. Changes made
-
-List exact files changed.
-
-### C. Provider architecture
-
-Explain how SQLite and PostgreSQL are now exposed safely to callers.
-
-### D. Golden Demo
-
-Provide actual PostgreSQL seed results:
-
-```text
-project
-activities
-evidence
-reports
-matches
-canonical observations
-accounts
-```
-
-### E. Migration lifecycle
-
-Show first-start and second-start behavior.
-
-### F. Tests
-
-Give exact commands and actual counts.
-
-### G. Remaining limitations
-
-Be honest.
-
-Do not redesign unrelated FieldLine functionality.
-
-The goal is to make the CURRENT FieldLine architecture reliably compatible with PostgreSQL/Supabase.
+Most importantly, reason from the actual current repository rather than assuming the previous implementation report was correct.

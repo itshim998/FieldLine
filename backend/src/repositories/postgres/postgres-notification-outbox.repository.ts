@@ -24,15 +24,27 @@ interface NotificationOutboxDbRow {
   idempotency_key: string;
   attempt_count: number;
   max_attempts: number;
-  next_attempt_at: string | null;
-  locked_at: string | null;
-  last_attempt_at: string | null;
-  delivered_at: string | null;
+  next_attempt_at: string | Date | null;
+  locked_at: string | Date | null;
+  last_attempt_at: string | Date | null;
+  delivered_at: string | Date | null;
   provider_message_id: string | null;
   last_error_code: string | null;
   last_error_summary: string | null;
   created_at: string | Date;
   updated_at: string | Date;
+}
+
+function toNullableIsoString(val: string | Date | null | undefined): string | null {
+  if (!val) return null;
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
+}
+
+function toIsoString(val: string | Date | null | undefined, fallback?: string): string {
+  if (!val) return fallback || new Date().toISOString();
+  if (val instanceof Date) return val.toISOString();
+  return String(val);
 }
 
 function mapRowToNotificationOutbox(row: NotificationOutboxDbRow): NotificationOutboxItem {
@@ -47,15 +59,15 @@ function mapRowToNotificationOutbox(row: NotificationOutboxDbRow): NotificationO
     idempotencyKey: row.idempotency_key,
     attemptCount: Number(row.attempt_count),
     maxAttempts: Number(row.max_attempts),
-    nextAttemptAt: row.next_attempt_at,
-    lockedAt: row.locked_at,
-    lastAttemptAt: row.last_attempt_at,
-    deliveredAt: row.delivered_at,
+    nextAttemptAt: toNullableIsoString(row.next_attempt_at),
+    lockedAt: toNullableIsoString(row.locked_at),
+    lastAttemptAt: toNullableIsoString(row.last_attempt_at),
+    deliveredAt: toNullableIsoString(row.delivered_at),
     providerMessageId: row.provider_message_id,
     lastErrorCode: row.last_error_code,
     lastErrorSummary: row.last_error_summary,
-    createdAt: typeof row.created_at === 'string' ? row.created_at : row.created_at.toISOString(),
-    updatedAt: typeof row.updated_at === 'string' ? row.updated_at : row.updated_at.toISOString()
+    createdAt: toIsoString(row.created_at),
+    updatedAt: toIsoString(row.updated_at)
   };
 }
 
@@ -187,8 +199,8 @@ export class PostgresNotificationOutboxRepository implements NotificationOutboxR
         SELECT id FROM notification_outbox
         WHERE (status = 'pending' OR (status = 'retry_wait' AND (next_attempt_at IS NULL OR next_attempt_at <= $1)))
         ORDER BY created_at ASC, id ASC
-        FOR UPDATE SKIP LOCKED
         LIMIT 1
+        FOR UPDATE SKIP LOCKED
       )
       RETURNING *
     `;

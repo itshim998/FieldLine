@@ -82,7 +82,15 @@ export async function runPostgresMigrations(targetPool?: Pool): Promise<Postgres
             continue;
           }
 
-          await client.query(sql);
+          // In-memory pg-mem mock compatibility for test runners:
+          // pg-mem's parser does not support PostgreSQL's "USING" clause in ALTER COLUMN TYPE
+          const isMemPg = (client as any).constructor?.name === 'MemPg';
+          const sqlToExecute = isMemPg
+            ? sql.replace(/USING\s+NULLIF\(trim\([^)]+\),\s*''\)::TIMESTAMPTZ/gi, '')
+                 .replace(/USING\s+[^,;]+/gi, '')
+            : sql;
+
+          await client.query(sqlToExecute);
           await client.query('INSERT INTO schema_migrations (name) VALUES ($1)', [migrationName]);
           await client.query('COMMIT');
           appliedSet.add(migrationName);
