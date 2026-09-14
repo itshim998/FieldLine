@@ -316,7 +316,7 @@ describe('Phase 31 — Canonical Truth Boundary Certification', () => {
     expect(preCommitCount.count).toBe(0);
 
     // 2. Canonical ProgressService commits progress
-    const committed = await progressService.normalizeAndRecordProgress({
+    const committed = progressService.normalizeAndRecordProgress({
       projectId,
       updateId,
       matchId: confirmedMatch.id,
