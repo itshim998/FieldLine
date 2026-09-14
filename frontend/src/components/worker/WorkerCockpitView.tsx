@@ -349,15 +349,6 @@ export function WorkerCockpitView({
             className="btn btn-warning btn-sm"
             onClick={() => handleOpenCaptureModal(null)}
             title="Open Voice, Quantity & Photo Capture Sheet"
-            style={{
-              background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
-              borderColor: '#f59e0b',
-              color: '#0f172a',
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem'
-            }}
           >
             <Sparkles size={14} />
             <span>Fast Capture</span>

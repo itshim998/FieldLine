@@ -1,199 +1,412 @@
-We have a production PostgreSQL failure on Render:
+We need to make a careful UI-humanization pass on the CURRENT FieldLine main branch.
 
-```text
-DatabaseError: Failed to claim next eligible notification:
-column "updated_at" is of type timestamp with time zone
-but expression is of type text
-```
+This is a stable SIH 2026 presentation build. Please treat the existing implementation as the source of truth and make this a presentation-layer refactor, not a feature refactor.
 
-The error occurs in:
+The goal is to reduce the obvious "AI-generated dashboard" visual language.
 
-```text
-backend/src/repositories/postgres/postgres-notification-outbox.repository.ts
-```
+A major source of that impression is the excessive use of boxed UI:
+dark translucent cards + thin borders + rounded corners + shadows + pill containers.
 
-inside `claimNextEligible()`.
+I want FieldLine to look more like a mature, human-designed enterprise/infrastructure operations product.
 
-I have already investigated the current `main` branch and there is a strong indication that this is a PostgreSQL schema/repository timestamp-type mismatch rather than a transient database problem.
+IMPORTANT:
+Please inspect the repository yourself before modifying anything. Do not blindly follow this prompt if your local inspection reveals that a selector/class/structure differs from what I describe below. I want us to collaborate on the implementation, not treat this as an infallible specification.
 
-## Important findings to verify
+SOURCE OF TRUTH:
+- repository: itshim998/FieldLine
+- branch: main
+- preserve all existing behavior
+- preserve API contracts
+- preserve authentication and routing
+- preserve Golden Demo behavior
+- preserve dashboard calculations
+- preserve AI/ML behavior
+- preserve worker/admin workflows
+- preserve existing functionality and tests
 
-Inspect the current repository yourself and confirm the following before modifying anything.
+The primary styling surface appears to be:
+frontend/src/index.css
 
-The authoritative Supabase baseline currently defines `notification_outbox` with:
+Important React surfaces include:
+frontend/src/App.tsx
+frontend/src/components/auth/ProjectLoginView.tsx
+frontend/src/components/admin/AdminWorkspaceView.tsx
+frontend/src/components/dashboard/*
+frontend/src/components/worker/*
+frontend/src/components/activity/*
+frontend/src/components/assistant/*
 
-```text
-next_attempt_at  TEXT
-locked_at        TEXT
-last_attempt_at  TEXT
-delivered_at     TEXT
-created_at       TIMESTAMPTZ
-updated_at       TIMESTAMPTZ
-```
+FIRST:
+1. Inspect the actual current main branch thoroughly.
+2. Identify the existing visual system/tokens and the selectors responsible for persistent boxed boundaries.
+3. Identify which boundaries are structural/semantic and therefore should remain.
+4. Then implement the flatter visual language with the smallest safe architectural footprint.
 
-Meanwhile the PostgreSQL repository uses a shared `effectiveNow` ISO string in multiple places, including SQL statements that assign it to both the TEXT timestamp-like fields and `updated_at`.
+CORE VISUAL DIRECTION
 
-In particular, investigate all of these methods rather than fixing only the currently logged failure:
+The principle is:
 
-```text
-claimNextEligible()
-claimById()
-markDelivered()
-scheduleRetry()
-markFailed()
-requeueStaleProcessing()
-saveMessageSnapshot()
-```
+"Remove persistent decorative boxes. Keep boundaries only where they communicate a real interaction, containment, danger state, modal state, form control, table structure, or technical content."
 
-Also inspect the row-mapping logic and the domain/interface types for these timestamp fields.
+I do NOT want a blanket:
+border: none;
+everywhere.
 
-## What I want from you
+I want the interface hierarchy to be created primarily through:
+- spacing
+- typography
+- alignment
+- subtle background tonal changes
+- section dividers
+- accent color
+- whitespace
+- hover/active states
 
-First, investigate the problem deeply and establish the exact cause from the current code and migrations.
+The resting UI should feel calm and information-dense rather than card-heavy.
 
-Do not assume that the Render error is isolated to `claimNextEligible()`.
+BUTTONS
 
-I expect you to determine whether the following is indeed the underlying mismatch:
+This is especially important.
 
-```text
-SQLite notification timestamps → TEXT
-PostgreSQL notification timestamps → partially converted
-Postgres repository → shared ISO-string parameters
-```
+Clickable buttons should generally NOT look like permanent boxes.
 
-and whether this creates additional latent failures in the other notification lifecycle methods.
+Default/resting state:
+- transparent background
+- no visible border
+- no permanent box shadow
+- icon + text should carry the control
+- color should communicate importance
 
-## Preferred solution direction
+Hover/focus interaction:
+- show a subtle ghost boundary around the control
+- ghost boundary should be in an appropriate accent color
+- use a method that does not cause layout shift
+- an existing transparent border or equivalent outline/box-shadow is preferable to changing border width on hover
 
-Use the smallest safe production-correct solution.
+Examples:
+- normal/navigation/action button -> subtle neutral ghost boundary
+- primary action -> blue/indigo/cyan accent ghost boundary as appropriate
+- success action -> emerald
+- warning -> amber
+- destructive/cancel/delete/reject -> rose/red
 
-My preference is to make the PostgreSQL `notification_outbox` timestamp model internally consistent rather than papering over individual queries with ad-hoc casts.
+The box should appear because the user is interacting with the control, not because the control permanently exists inside a card.
 
-Because the existing baseline migration has already been deployed to Supabase, do NOT rewrite the already-applied baseline migration as though it were new.
+Please standardize this behavior through the existing CSS system rather than inventing dozens of unrelated one-off hover styles.
 
-Instead consider an additional forward migration that safely converts the relevant notification-outbox timestamp-like columns to PostgreSQL `TIMESTAMPTZ`.
+HIGH-PRIORITY AREAS
 
-Before choosing the exact migration SQL, inspect the current migration history and consider whether existing values need conversion handling.
+1. Application/workspace shell
 
-Also update the PostgreSQL repository and row mapping as necessary so that:
+The current workspace/project header is a major rectangular card.
 
-* PostgreSQL timestamp columns are handled correctly when `node-postgres` returns `Date` objects.
-* domain-facing values remain consistent with the existing `NotificationOutboxItem` contract.
-* parameter typing is unambiguous.
-* lifecycle operations remain correct under PostgreSQL.
+Please investigate:
+- .workspace-header-card
+- .workspace-top-bar
+- .workspace-actions
+- .admin-session-badge-bar
 
-Do not unnecessarily change the SQLite implementation.
+I think these can be flattened substantially.
 
-## Important
+The project identity should feel like a page header rather than a card.
 
-Do not solve this only by adding arbitrary casts such as:
+Example visual direction:
 
-```sql
-$1::text
-$1::timestamptz
-```
+REFINERY-U4   Active
 
-everywhere without first deciding what the correct PostgreSQL schema should be.
+Refinery Expansion — Unit 4
+description...
 
-A tactical cast may hide the deeper schema mismatch.
+Edit Metadata   Delete Project
 
-Likewise, do not rewrite the notification architecture.
+with whitespace and a divider rather than a large enclosing rounded rectangle.
 
-Keep:
+The admin session/status area should similarly become a quiet operational status row rather than a bordered capsule container.
 
-```text
-activity anomaly persisted
-        ↓
-notification_outbox persisted
-        ↓
-notification worker
-        ↓
-Groq explanation
-        ↓
-Resend
-```
+2. Workspace tabs
 
-intact.
+Investigate .workspace-tabs and .workspace-tab.
 
-## Testing requirements
+The current tabs are already partly flat, which is good.
 
-Add regression coverage for the PostgreSQL notification lifecycle, including at least:
+Please keep the active underline/accent concept, but avoid making the active tab look like a little card.
 
-```text
-1. create notification
-2. claimNextEligible
-3. claimById
-4. scheduleRetry
-5. markDelivered
-6. markFailed
-7. stale lease recovery
-8. mapping of PostgreSQL timestamp values returned as Date
-```
+Prefer:
+- text/icon
+- active color
+- active underline
+- subtle hover wash
+rather than persistent rectangular active backgrounds.
 
-Pay particular attention to tests that the current pg-mem setup may not faithfully reproduce.
+3. Project cards
 
-Where practical, add a test that verifies the expected PostgreSQL column types or otherwise ensures the schema/repository contract cannot silently drift again.
+Investigate .project-card.
 
-Do not weaken existing tests to make the patch pass.
+These should be substantially flatter:
+- remove persistent card border
+- greatly reduce/remove floating card shadow
+- preserve enough tonal separation to distinguish project records
+- maintain hover affordance
+- use subtle hover background/accent indication
+- avoid turning every project into a glossy floating widget
 
-## Production-migration constraints
+4. Global button system
 
-Remember that:
+Investigate:
+.btn
+.btn-primary
+.btn-secondary
+.btn-danger
+and the many specialized button selectors throughout index.css.
 
-```text
-Supabase GitHub Integration
-        ↓
-sole production migration authority
-```
+I want the new ghost-button language to become the common visual treatment.
 
-The application must NOT regain responsibility for applying production Supabase migrations.
+Be careful with:
+- disabled state
+- focus-visible
+- loading states
+- destructive semantics
 
-The new schema migration should therefore live under:
+5. Login page
 
-```text
-supabase/migrations/
-```
+Inspect:
+ProjectLoginView.tsx
+and the .login-* CSS.
 
-and be compatible with the existing production migration workflow.
+The current centered login card, input/select boxes, security pill, etc. contribute strongly to the AI-generated impression.
 
-Do not reintroduce application-side production migration execution.
+Please humanize it without damaging usability:
+- flatten the outer login card substantially
+- reduce decorative containment
+- keep form controls visually discoverable
+- preserve secure/password affordances
+- keep clear error states
+- keep the actual login action prominent but not as a glossy gradient AI button
 
-## Regression safety
+6. Dashboard
+
+Inspect:
+ProjectDashboardView.tsx
+ProjectHealth.tsx
+ActivityStatusSummary.tsx
+AttentionSummary.tsx
+MilestoneSummary.tsx
+RecentUpdates.tsx
+
+Reduce the repeated:
+card -> card -> card
+hierarchy.
+
+Use the flatter visual language already present in the Intelligence section as inspiration.
+
+Do not destroy meaningful grouping.
+
+7. Progress / evidence
+
+Reduce nested cards and repeated borders.
+
+In particular, watch for structures like:
+outer card
+  -> item card
+      -> inner content box
+
+Flatten these where possible.
+
+The file upload dropzone is an exception: its visible boundary is useful because it communicates an actual drop interaction.
+
+8. Intelligence
+
+The Intelligence section already contains some good flat styling, especially:
+- transparent controls
+- transparent intelligence cards
+- top dividers rather than enclosing cards
+
+Please use that as an internal design reference and propagate that visual language.
+
+9. Assistant
+
+The assistant outer panel is already fairly flat.
+
+Please reduce unnecessary internal boxes:
+- decorative chips
+- claims wrappers
+- facts cards
+- loading containers where possible
+
+But preserve boundaries around genuinely technical content such as:
+- code
+- structured payloads
+- tables
+- candidate selection when a boundary is needed
+
+10. Human review / matching
+
+Investigate:
+- match-review-panel
+- match-card
+- match-status-badge
+- review action buttons
+
+This area currently has many nested boxes.
+
+Please preserve semantic status cues such as:
+- confirmed = green
+- suggested = amber
+- unresolved = purple
+- rejected = red
+
+But communicate them mainly with typography, color, spacing and perhaps a small status rail rather than a full bordered rectangle around every element.
+
+BOUNDARIES THAT SHOULD GENERALLY REMAIN
+
+Please do NOT indiscriminately remove all borders.
+
+Retain or thoughtfully simplify:
+- modal outer boundary
+- form controls
+- keyboard focus indicators
+- file dropzone
+- important error/warning containers
+- technical/code blocks
+- payload/structured-data regions
+- table structural lines where useful
+- highly important danger confirmations
+
+The goal is not "no borders".
+The goal is "no decorative border unless it has a purpose."
+
+DESIGN SYSTEM
+
+Please inspect the existing :root tokens first.
+
+The current system already defines:
+- card/background colors
+- border colors
+- active borders
+- blue/cyan/indigo/emerald/amber/rose/purple accents
+- multiple border-radius values
+
+Rather than introducing a completely separate styling framework, I would prefer to evolve the existing token system.
+
+Possible semantic tokens could include something like:
+- flat surface
+- subtle surface
+- divider
+- neutral hover ghost
+- accent hover ghost
+- danger hover ghost
+
+But please choose the names and exact values after inspecting the current system.
+
+IMPORTANT IMPLEMENTATION DETAIL
+
+Avoid layout shift on hover.
+
+Do not implement:
+border-width: 0 -> 1px
+
+in a way that changes element dimensions.
+
+Prefer:
+- transparent 1px border already occupying space
+OR
+- outline
+OR
+- box-shadow as the interaction ring
+
+with subtle opacity.
+
+RESPONSIVENESS
+
+Preserve current responsive behavior.
+
+Do not change:
+- grid breakpoints
+- mobile layout logic
+- overflow behavior
+- tab scrolling
+unless a visual change genuinely requires it.
+
+ACCESSIBILITY
 
 Preserve:
+- focus-visible states
+- keyboard usability
+- disabled semantics
+- sufficient contrast
+- hover-independent usability
 
-* SQLite local development
-* `npm run demo:reset`
-* existing Golden Demo behavior
-* anomaly detection
-* Groq explanation
-* durable notification outbox semantics
-* idempotency
-* retry/backoff
-* stale lease recovery
-* authoritative project/activity match identity
-* current Supabase/Render architecture
+Aesthetic simplification must not make controls ambiguous to keyboard users.
 
-Avoid unrelated refactors.
+REGRESSION SAFETY
 
-## Verification
+This is currently a stable main branch.
 
-After implementation, actually run the relevant tests and type/build checks.
+Please do not touch backend/business logic unless absolutely unavoidable.
 
-Do not rely only on the existing test suite if it is insufficient to reproduce real PostgreSQL behavior.
+Avoid modifying:
+- API behavior
+- service logic
+- authentication logic
+- routing logic
+- database code
+- ML/AI code
+- demo seed logic
+- state management
 
-Report:
+Prefer:
+- CSS changes
+- minimal class-level changes
+- minimal markup restructuring only when the current DOM prevents the desired visual hierarchy
 
-```text
-- exact root cause
-- exact files changed
-- migration added
-- why the migration is safe
-- notification lifecycle methods audited
-- tests added/updated
-- exact commands run
-- exact results
-- any remaining limitation
-```
+VALIDATION
 
-Most importantly, reason from the actual current repository rather than assuming the previous implementation report was correct.
+After implementation, please inspect the diff and verify that this is still fundamentally a UI-only refactor.
+
+Run the existing validation/build/test commands appropriate to this repo.
+
+At minimum, please check:
+npm run build
+npm test
+
+and where practical:
+npm run verify:release
+npm run verify:baseline
+
+Also manually inspect the primary UI flow:
+Login
+-> Admin Control Room
+-> Dashboard
+-> Schedules
+-> Progress
+-> Evidence
+-> Intelligence
+-> Activity Detail
+-> Worker Cockpit
+-> Modals
+-> Golden Demo
+
+Please specifically check:
+- no broken click targets
+- no accidental layout shifts
+- no text becoming unreadable
+- no hidden controls
+- no lost borders that were semantically required
+- no changes to behavior
+- no regression in mobile layout
+
+MOST IMPORTANTLY:
+
+Before finalizing, compare the resulting visual language against the original.
+
+The target is:
+"professional infrastructure project-management software designed by a human product team"
+
+NOT:
+"AI dashboard with many glowing cards"
+
+Please make the result flatter, quieter, more typographic, and more spatial.
+
+Do not over-design it.
+
+If, during inspection, you believe one of my assumptions is wrong, prefer the repository evidence and propose the safer implementation rather than mechanically following my wording.

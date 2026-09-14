@@ -3941,10 +3941,6 @@ function MainAppContent(): React.JSX.Element {
               className="btn btn-primary"
               onClick={() => handleSeedGoldenDemo()}
               disabled={isSeedingDemo}
-              style={{
-                background: 'linear-gradient(135deg, #3b82f6 0%, #6366f1 100%)',
-                boxShadow: '0 0 20px rgba(99, 102, 241, 0.4)'
-              }}
             >
               {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <Sparkles size={16} />}
               <span>{isSeedingDemo ? 'Seeding Golden Demo...' : 'Load Golden Demo Project'}</span>
