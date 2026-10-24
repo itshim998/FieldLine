@@ -248,12 +248,12 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
         </AuthProvider>
       );
 
-      expect(screen.getByText('Project Control Room & Execution Access')).toBeDefined();
-      expect(screen.getByText('Golden Demo Instant Access (REFINERY-U4)')).toBeDefined();
+      expect(screen.getByText('Sign in to FieldLine')).toBeDefined();
+      expect(screen.getByText('Try the demo')).toBeDefined();
       expect(screen.getAllByText('Field Worker').length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText(/Admin \/ Project Engineer/i).length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByRole('button', { name: /Field Worker PIN: 4444/i })).toBeDefined();
-      expect(screen.getByRole('button', { name: /Admin \/ Superintendent RefineryAdmin2026!/i })).toBeDefined();
+      expect(screen.getByRole('button', { name: /Field Worker Use demo access/i })).toBeDefined();
+      expect(screen.getByRole('button', { name: /Admin \/ Superintendent Use demo access/i })).toBeDefined();
     });
 
     it('1-click Worker Golden Demo chip authenticates with PIN 4444 and calls onLoginSuccess', async () => {
@@ -295,7 +295,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
         </AuthProvider>
       );
 
-      const workerChip = screen.getByRole('button', { name: /Field Worker PIN: 4444/i });
+      const workerChip = screen.getByRole('button', { name: /Field Worker Use demo access/i });
       fireEvent.click(workerChip);
 
       await waitFor(() => {
@@ -342,7 +342,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
         </AuthProvider>
       );
 
-      const adminChip = screen.getByRole('button', { name: /Admin \/ Superintendent RefineryAdmin2026!/i });
+      const adminChip = screen.getByRole('button', { name: /Admin \/ Superintendent Use demo access/i });
       fireEvent.click(adminChip);
 
       await waitFor(() => {
@@ -378,7 +378,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
       const passcodeField = screen.getByPlaceholderText(/Enter 4-digit PIN/i);
       fireEvent.change(passcodeField, { target: { value: '9999' } });
 
-      const submitBtn = screen.getByRole('button', { name: /Enter Execution Cockpit/i });
+      const submitBtn = screen.getByRole('button', { name: /Sign in/i });
       fireEvent.click(submitBtn);
 
       await waitFor(() => {
@@ -516,7 +516,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
         </AuthProvider>
       );
 
-      expect(screen.getByText('EXECUTION COCKPIT')).toBeDefined();
+      expect(screen.getByText('FieldLine')).toBeDefined();
       expect(screen.getByText(/REFINERY-U4 — Refinery Expansion/i)).toBeDefined();
       expect(screen.getByRole('button', { name: /Today's Work/i })).toBeDefined();
       expect(screen.getByRole('button', { name: /Quick Report/i })).toBeDefined();
