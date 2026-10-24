@@ -1,3 +1,4 @@
+import { FieldLineProgress, Skeleton } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Search,
@@ -174,19 +175,6 @@ export function TodayWorkView({
     }
   };
 
-  const getProgressBarClass = (status: OperationalTaskItem['status']) => {
-    switch (status) {
-      case 'DELAYED':
-        return 'progress-fill-delayed';
-      case 'AT_RISK':
-        return 'progress-fill-at-risk';
-      case 'COMPLETED':
-        return 'progress-fill-completed';
-      default:
-        return 'progress-fill-normal';
-    }
-  };
-
   return (
     <div className="today-work-container" data-testid="today-work-view">
       {/* Cockpit Horizon Header & Summary Counters */}
@@ -245,7 +233,7 @@ export function TodayWorkView({
               onClick={() => setScope('horizon')}
               title="Filter to all operational horizon tasks"
             >
-              <span className="pill-label">Shift Horizon</span>
+              <span className="pill-label">Scheduled</span>
               <strong className="pill-val">{tasks.length}</strong>
             </button>
           </div>
@@ -263,7 +251,7 @@ export function TodayWorkView({
           id="scope-tab-horizon"
         >
           <ClipboardList size={15} />
-          <span>Operational Horizon</span>
+          <span>Scheduled work</span>
         </button>
 
         <button
@@ -275,7 +263,7 @@ export function TodayWorkView({
           id="scope-tab-today"
         >
           <Calendar size={15} />
-          <span>Active Today ({summary?.today ?? '—'})</span>
+          <span>Today ({summary?.today ?? '—'})</span>
         </button>
 
         <button
@@ -287,7 +275,7 @@ export function TodayWorkView({
           id="scope-tab-delayed"
         >
           <AlertTriangle size={15} />
-          <span>Needs Attention ({summary?.delayed ?? '—'})</span>
+          <span>Needs attention ({summary?.delayed ?? '—'})</span>
         </button>
 
         <button
@@ -299,7 +287,7 @@ export function TodayWorkView({
           id="scope-tab-upcoming"
         >
           <Clock size={15} />
-          <span>Upcoming 3-Day ({summary?.upcoming ?? '—'})</span>
+          <span>Next 3 days ({summary?.upcoming ?? '—'})</span>
         </button>
 
         <button
@@ -310,7 +298,7 @@ export function TodayWorkView({
           onClick={() => setScope('all')}
           id="scope-tab-all"
         >
-          <span>All Packages</span>
+          <span>All work</span>
         </button>
       </div>
 
@@ -368,9 +356,8 @@ export function TodayWorkView({
           <span>{error}</span>
           <button
             type="button"
-            className="btn btn-outline btn-sm"
+            className="btn btn-outline btn-sm fl-retry-right"
             onClick={fetchOperationalTasks}
-            style={{ marginLeft: 'auto' }}
           >
             <RefreshCw size={13} />
             <span>Retry</span>
@@ -380,15 +367,11 @@ export function TodayWorkView({
 
       {/* Loading State */}
       {loading ? (
-        <div className="operational-loading-card" data-testid="operational-loading">
-          <RefreshCw size={28} className="pulse-dot" />
-          <h3>Loading today's work...</h3>
-          <p>Checking scheduled work for {asOfDate}</p>
-        </div>
-      ) : filteredTasks.length === 0 ? (
+        <div className="operational-loading-card" data-testid="operational-loading"><Skeleton rows={5} /><span className="sr-only">Loading scheduled work</span></div>
+       ) : filteredTasks.length === 0 ? (
         <div className="operational-empty-card" data-testid="operational-empty">
           <ClipboardList size={36} />
-          <h3>No Operational Tasks Found</h3>
+          <h3>No work scheduled for this date</h3>
           <p>
             {searchQuery
               ? `No packages match "${searchQuery}" in this horizon scope.`
@@ -404,7 +387,7 @@ export function TodayWorkView({
                 setScope('horizon');
               }}
             >
-              Reset Filters
+              Clear filters
             </button>
           )}
         </div>
@@ -490,18 +473,11 @@ export function TodayWorkView({
                     Actual: <strong>{Math.round(task.actualProgress)}%</strong>
                   </span>
                   <span className="progress-label-right">
-                    Target: <span>{Math.round(task.plannedProgress)}%</span>
+                    Planned: <span>{Math.round(task.plannedProgress)}%</span>
                   </span>
                 </div>
 
-                <div className="progress-track-wrapper">
-                  <div className="progress-track">
-                    <div
-                      className={`progress-bar-fill ${getProgressBarClass(task.status)}`}
-                      style={{ width: `${Math.min(100, Math.max(0, task.actualProgress))}%` }}
-                    />
-                  </div>
-                </div>
+                <FieldLineProgress planned={task.plannedProgress} actual={task.actualProgress} label={`Progress for ${task.name}`} />
               </div>
 
               {/* Glove-Friendly Direct Action Buttons */}
@@ -515,7 +491,7 @@ export function TodayWorkView({
                   title={`Log shift progress update for ${task.externalId}`}
                 >
                   <Flame size={15} />
-                  <span>Report Progress</span>
+                  <span>Report progress</span>
                 </button>
 
                 {onLogBlocker && (
@@ -528,7 +504,7 @@ export function TodayWorkView({
                     title={`Flag operational blocker on ${task.externalId}`}
                   >
                     <AlertTriangle size={14} color="var(--accent-amber)" />
-                    <span>Log Blocker</span>
+                    <span>Report blocker</span>
                   </button>
                 )}
 
@@ -641,7 +617,7 @@ export function TodayWorkView({
                 }}
               >
                 <Flame size={16} />
-                <span>Report Progress for this Task</span>
+                <span>Report progress for this Task</span>
               </button>
 
               {onLogBlocker && (
