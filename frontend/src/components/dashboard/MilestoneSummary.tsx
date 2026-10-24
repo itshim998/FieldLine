@@ -48,7 +48,7 @@ export function MilestoneSummary({
       </div>
 
       {totalMilestones === 0 ? (
-        <div className="attention-empty-state" style={{ padding: '2.5rem 1rem' }}>
+        <div className="attention-empty-state" data-fl-style="s5ehtun">
           <div className="empty-state-icon-circle">
             <Flag size={22} color="var(--accent-indigo)" />
           </div>
