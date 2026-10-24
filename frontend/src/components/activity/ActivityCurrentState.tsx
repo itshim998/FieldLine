@@ -1,5 +1,5 @@
 import React from 'react';
-import {,
+import {
   AlertTriangle,
   Clock,
   Calendar,
