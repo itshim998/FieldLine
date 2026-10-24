@@ -2,13 +2,7 @@ import React from 'react';
 import {
   ShieldAlert,
   HardHat,
-  Eye,
-  AlertTriangle,
-  Zap,
-  Flame,
-  Wind,
-  PlusCircle,
-  FileWarning
+  AlertTriangle,,,
 } from 'lucide-react';
 
 export interface WorkAreaSafetyBannerProps {
