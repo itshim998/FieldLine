@@ -197,14 +197,14 @@ export function TodayWorkView({
       <div className="operational-horizon-banner">
         <div className="banner-left">
           <div className="banner-title-row">
-            <h2 className="operational-heading">Today's Execution Cockpit</h2>
+            <h2 className="operational-heading">Today's work</h2>
             <span className="operational-date-chip">
               <Calendar size={13} />
-              <span>Target Shift: {asOfDate}</span>
+              <span>Date: {asOfDate}</span>
             </span>
           </div>
           <p className="operational-subheading">
-            Operational projection bounded to active shift packages, target quantities, and immediate field priorities.
+            
           </p>
         </div>
 
@@ -386,8 +386,8 @@ export function TodayWorkView({
       {loading ? (
         <div className="operational-loading-card" data-testid="operational-loading">
           <RefreshCw size={28} className="pulse-dot" />
-          <h3>Loading Operational Work Packages...</h3>
-          <p>Filtering canonical schedule truth for shift date {asOfDate}</p>
+          <h3>Loading today's work...</h3>
+          <p>Checking scheduled work for {asOfDate}</p>
         </div>
       ) : filteredTasks.length === 0 ? (
         <div className="operational-empty-card" data-testid="operational-empty">
