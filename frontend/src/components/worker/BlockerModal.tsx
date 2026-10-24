@@ -1,3 +1,4 @@
+import { useDialogKeyboard } from '../ui/FieldLine.js';
 import React, { useState, useEffect } from 'react';
 import {
   AlertTriangle,
@@ -139,6 +140,7 @@ export function BlockerModal({
     }
   }, [isOpen, initialTask]);
 
+  const dialogRef = useDialogKeyboard(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleSnippetClick = (snippet: string) => {
@@ -199,8 +201,8 @@ export function BlockerModal({
   };
 
   return (
-    <div className="blocker-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="blocker-modal-sheet">
+    <div className="blocker-modal-backdrop">
+      <div ref={dialogRef} tabIndex={-1} className="blocker-modal-sheet" role="dialog" aria-modal="true" aria-label="Report work blocker">
         {/* Header */}
         <div className="modal-header-row">
           <div className="modal-title-group">
