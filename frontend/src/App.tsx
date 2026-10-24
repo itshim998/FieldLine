@@ -611,11 +611,11 @@ function MainAppContent(): React.JSX.Element {
           setIntelligence(data);
         } else {
           setIntelligenceError(
-            data.error?.message || 'Couldn't load schedule status.'
+            data.error?.message || 'Could not load schedule status.'
           );
         }
       } catch {
-        setIntelligenceError('Couldn't connect to schedule data.');
+        setIntelligenceError('Could not connect to schedule data.');
       } finally {
         setLoadingIntelligence(false);
       }
@@ -1080,14 +1080,14 @@ function MainAppContent(): React.JSX.Element {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Couldn't open demo.');
+        throw new Error(data.error || 'Could not open demo.');
       }
 
       showNotification('success', data.message || 'Demo ready.');
       const targetId = data.project?.id || data.seedResult?.projectId;
       await fetchProjects(targetId);
     } catch (err: any) {
-      showNotification('error', err.message || 'Couldn't open demo. repository');
+      showNotification('error', err.message || 'Could not open demo.');
     } finally {
       setIsSeedingDemo(false);
     }
@@ -1521,7 +1521,7 @@ function MainAppContent(): React.JSX.Element {
 
       const jobId = data.job?.id;
       if (!jobId) {
-        throw new Error('Couldn't process document. Try again.');
+        throw new Error('Could not process document. Try again.');
       }
 
       // 2. Poll job status endpoint
