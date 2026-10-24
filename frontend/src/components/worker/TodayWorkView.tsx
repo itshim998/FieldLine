@@ -3,7 +3,6 @@ import {
   Search,
   Calendar,
   Clock,
-  CheckCircle2,
   AlertTriangle,
   Flame,
   Info,
@@ -11,10 +10,7 @@ import {
   RefreshCw,
   MapPin,
   ClipboardList,
-  Target,
-  ArrowRight,
-  ShieldAlert,
-  ChevronRight
+  Target,,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { WorkAreaSafetyBanner } from './WorkAreaSafetyBanner.js';
