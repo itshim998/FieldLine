@@ -1,3 +1,4 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import {
   User,
@@ -7,7 +8,7 @@ import {
   AlertTriangle,
   Clock,
   Send,
-  Sparkles,
+
   Paperclip,
   FileCheck,
   Search,
@@ -350,7 +351,7 @@ export function WorkerCockpitView({
             onClick={() => handleOpenCaptureModal(null)}
             title="Open Voice, Quantity & Photo Capture Sheet"
           >
-            <Sparkles size={14} />
+            <FieldLineMark size={14} />
             <span>Report progress</span>
           </button>
 
@@ -414,7 +415,7 @@ export function WorkerCockpitView({
           className={`worker-nav-tab ${activeWorkerTab === 'assistant' ? 'active' : ''}`}
           onClick={() => onTabChange('assistant')}
         >
-          <Sparkles size={18} />
+          <FieldLineMark size={18} />
           <div className="tab-meta">
             <span className="tab-title">Field Assistant</span>
             <span className="tab-counter"></span>
@@ -455,7 +456,7 @@ export function WorkerCockpitView({
                   onClick={() => handleOpenCaptureModal(null)}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.6rem' }}
                 >
-                  <Sparkles size={14} color="var(--accent-amber)" />
+                  <FieldLineMark size={14} />
                   <span>Launch Multimodal Capture (Voice, Steppers & Photo)</span>
                 </button>
               </div>
@@ -811,7 +812,7 @@ export function WorkerCockpitView({
               <div className="worker-assistant-response-card">
                 <div className="response-header">
                   <div className="response-badge">
-                    <Sparkles size={14} color="var(--accent-indigo)" />
+                    <FieldLineMark size={14} />
                     <span>Answer</span>
                   </div>
                   <span className="response-asof">As of {assistantResponse.asOfDate}</span>
