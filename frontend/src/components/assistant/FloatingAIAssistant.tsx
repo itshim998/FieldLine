@@ -509,8 +509,8 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                             <div className="floating-ai-response-content">
                               {/* Ambiguous Candidates */}
                               {msg.response.ambiguousCandidates && msg.response.ambiguousCandidates.length > 0 && (
-                                <div className="assistant-candidates-box" style={{ padding: '0.5rem', marginBottom: '0.5rem' }}>
-                                  <span className="assistant-candidates-title" style={{ fontSize: '0.75rem' }}>
+                                <div className="assistant-candidates-box" data-fl-style="s73spmo">
+                                  <span className="assistant-candidates-title" data-fl-style="s1v0dyfx">
                                     Select an activity to query:
                                   </span>
                                   <div className="assistant-candidates-list">
@@ -519,7 +519,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                         key={cand.id}
                                         type="button"
                                         className="assistant-candidate-btn"
-                                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                                        data-fl-style="sirxuku"
                                         onClick={() => handleSendQuery(`What is the status of ${cand.name}?`)}
                                       >
                                         {cand.name} ({cand.externalId})
@@ -560,11 +560,11 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                       {msg.response.verifiedFacts.map((fact) => (
                                         <div key={fact.ref} className="floating-fact-card">
                                           <div className="floating-fact-head">
-                                            <span className="assistant-fact-ref-badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
+                                            <span className="assistant-fact-ref-badge" data-fl-style="su42mu4">
                                               {fact.ref}
                                             </span>
                                             {fact.externalId && (
-                                              <span className="act-id-cell" style={{ fontSize: '0.7rem' }}>
+                                              <span className="act-id-cell" data-fl-style="s1v0dyfx">
                                                 {fact.externalId}
                                               </span>
                                             )}
