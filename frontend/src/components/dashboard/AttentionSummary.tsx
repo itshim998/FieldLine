@@ -3,12 +3,9 @@ import {
   AlertTriangle,
   AlertCircle,
   Clock,
-  ShieldCheck,
   ChevronRight,
   HelpCircle,
-  Sparkles,
   CheckCircle2,
-  Calendar
 } from 'lucide-react';
 
 export interface DelayedFact {
