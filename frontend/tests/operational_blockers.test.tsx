@@ -127,12 +127,13 @@ describe('Frontend Pass 33 — Operational Blockers & Safety Context', () => {
       );
 
       // Area C: Overhead crane lifts
-      expect(screen.getByText(/Active Overhead Crane Lifts/i)).toBeDefined();
+      expect(screen.getByText(/Lifting and working at height/i)).toBeDefined();
       expect(screen.getByText(/Safety Harness \(100% Tie-Off\)/i)).toBeDefined();
+      expect(screen.getByText(/General reminder only/i)).toBeDefined();
 
       // Switch to Area A: Earthmoving & open trenching
       rerender(<WorkAreaSafetyBanner selectedArea="Area A" onOpenReportHazard={vi.fn()} />);
-      expect(screen.getByText(/Heavy Machinery & Open Trenching Zone/i)).toBeDefined();
+      expect(screen.getByText(/Heavy plant and trenches/i)).toBeDefined();
       expect(screen.getByText(/High-Vis Vest/i)).toBeDefined();
     });
 
