@@ -440,7 +440,7 @@ export function WorkerCockpitView({
           <section className="worker-tab-pane">
             <div className="pane-banner">
               <div>
-                <h2 className="pane-title">Fast Field Progress Report</h2>
+                <h2 className="pane-title">Report progress</h2>
                 <p className="pane-desc">
                   
                 </p>
@@ -452,7 +452,7 @@ export function WorkerCockpitView({
                   data-fl-style="s64q9pt"
                 >
                   <FieldLineMark size={14} />
-                  <span>Launch Multimodal Capture (Voice, Steppers & Photo)</span>
+                  <span>Report by voice or photo</span>
                 </button>
               </div>
             </div>
