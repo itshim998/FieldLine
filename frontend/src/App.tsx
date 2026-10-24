@@ -3344,18 +3344,16 @@ function MainAppContent(): React.JSX.Element {
                                 <div className="assistant-fact-card-header">
                                   <span className="assistant-fact-ref-badge">{fact.ref}</span>
                                   {fact.externalId && (
-                                    <span
-                                      className="act-id-cell"
-                                      style={{ cursor: fact.activityId ? 'pointer' : 'default' }}
-                                      onClick={() => {
-                                        if (fact.activityId) {
-                                          handleOpenActivityDetail(fact.activityId);
-                                        }
-                                      }}
-                                      title={fact.activityId ? 'Click to open Activity Detail View' : undefined}
-                                    >
-                                      {fact.externalId}
-                                    </span>
+                                    fact.activityId ? (
+                                      <button
+                                        type="button"
+                                        className="act-id-cell fl-link-button"
+                                        onClick={() => fact.activityId && handleOpenActivityDetail(fact.activityId)}
+                                        aria-label={`Open activity ${fact.externalId}`}
+                                      >
+                                        {fact.externalId}
+                                      </button>
+                                    ) : <span className="act-id-cell">{fact.externalId}</span>
                                   )}
                                   {fact.category && (
                                     <span className="format-tag" data-fl-style="s1v0dyfx">
