@@ -74,7 +74,7 @@ export function ActivityDetailView({
     return (
       <div className="dashboard-loading-container">
         <RefreshCw size={28} className="pulse-dot" color="var(--accent-blue)" />
-        <p className="loading-text">Loading Activity History & Operational Truth...</p>
+        <p className="loading-text">Loading activity...</p>
       </div>
     );
   }
