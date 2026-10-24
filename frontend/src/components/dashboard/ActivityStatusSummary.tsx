@@ -114,7 +114,7 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card ahead"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Ahead')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('AHEAD')}
         >
           <div className="status-card-top">
             <TrendingUp size={16} />
@@ -148,7 +148,7 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card delayed"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Delayed')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('DELAYED')}
         >
           <div className="status-card-top">
             <AlertOctagon size={16} />
@@ -165,7 +165,7 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card completed"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Completed')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('COMPLETED')}
         >
           <div className="status-card-top">
             <CheckCheck size={16} />
