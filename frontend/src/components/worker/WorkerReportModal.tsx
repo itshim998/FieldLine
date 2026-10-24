@@ -12,7 +12,7 @@ import {
   User,
   Building,
   Calendar,
-  Layers,,
+  Layers,
   Check,
   Upload,
   Image as ImageIcon,
