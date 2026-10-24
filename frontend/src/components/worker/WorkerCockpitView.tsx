@@ -10,18 +10,13 @@ import {
   Send,
 
   Paperclip,
-  FileCheck,
-  Search,
-  Filter,
-  ArrowRight,
+  FileCheck,,
   RefreshCw,
   MessageSquare,
   ClipboardList,
   Flame,
-  ChevronRight,
   ShieldCheck,
   Building,
-  HardHat
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { AssistantMarkdown } from '../assistant/AssistantMarkdown.js';
@@ -83,7 +78,7 @@ export function WorkerCockpitView({
 
   // Activities & Schedules state
   const [activities, setActivities] = useState<any[]>([]);
-  const [loadingActivities, setLoadingActivities] = useState<boolean>(true);
+  const [, setLoadingActivities] = useState<boolean>(true);
 
   // Recent Progress Updates state
   const [recentUpdates, setRecentUpdates] = useState<WorkerProgressUpdate[]>([]);
