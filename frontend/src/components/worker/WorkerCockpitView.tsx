@@ -10,7 +10,7 @@ import {
   Send,
 
   Paperclip,
-  FileCheck,,
+  FileCheck,
   RefreshCw,
   MessageSquare,
   ClipboardList,
