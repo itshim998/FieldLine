@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw,
-  Calendar,,
+  Calendar,
   ShieldAlert
 } from 'lucide-react';
 import { ProjectHealth } from './ProjectHealth.js';
