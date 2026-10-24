@@ -35,3 +35,21 @@ jobs:
         run: npm test -- frontend/tests
       - name: Build frontend
         run: npm run build:frontend
+
+  backend-regression:
+    name: Backend contracts and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Compile backend
+        run: npm run build:backend
+      - name: Run backend regression suite
+        run: npm test -- backend/tests
