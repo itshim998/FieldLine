@@ -194,7 +194,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
       </AuthProvider>
     );
 
-    expect(screen.getByText('')).toBeTruthy();
+    expect(screen.getByText('Report on ACT-FOUND-01')).toBeTruthy();
     expect(screen.getByText('Report on ACT-FOUND-01')).toBeTruthy();
     expect(screen.getByText('Foundation Footing Concrete Pour')).toBeTruthy();
     expect(screen.getByText('100 m3')).toBeTruthy();
