@@ -251,7 +251,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
       expect(screen.getByText('Sign in to FieldLine')).toBeDefined();
       expect(screen.getByText('Try the demo')).toBeDefined();
       expect(screen.getAllByText('Field Worker').length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText(/Admin \/ Project Engineer/i).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText(/Project engineer/i).length).toBeGreaterThanOrEqual(1);
       expect(screen.getByRole('button', { name: /Field Worker Use demo access/i })).toBeDefined();
       expect(screen.getByRole('button', { name: /Admin \/ Superintendent Use demo access/i })).toBeDefined();
     });
@@ -548,7 +548,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
         expect(screen.getByText('ACT-CIV-001')).toBeDefined();
       });
 
-      const reportBtn = screen.getAllByRole('button', { name: /Report Progress/i })[0];
+      const reportBtn = screen.getByTestId('report-activity-btn-ACT-CIV-001');
       fireEvent.click(reportBtn);
 
       expect(tabChangeSpy).toHaveBeenCalledWith('report');
@@ -714,7 +714,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
       );
 
       // Verify Admin Control Room session bar
-      expect(screen.getByText('ADMIN CONTROL ROOM')).toBeDefined();
+      expect(screen.getByText('Project engineer')).toBeDefined();
       expect(screen.getByText(/Refinery Project Superintendent/i)).toBeDefined();
 
       // Verify all 6 tabs exist
@@ -722,13 +722,13 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
       expect(screen.getByRole('button', { name: /Schedule Baselines/i })).toBeDefined();
       expect(screen.getByRole('button', { name: /Field Progress Updates/i })).toBeDefined();
       expect(screen.getByRole('button', { name: /Evidence Documents/i })).toBeDefined();
-      expect(screen.getByRole('button', { name: /Project Intelligence/i })).toBeDefined();
+      expect(screen.getByRole('button', { name: /Needs attention/i })).toBeDefined();
 
       // Verify badge counts
       expect(screen.getByText('3')).toBeDefined();
       expect(screen.getByText('12')).toBeDefined();
       expect(screen.getByText('8')).toBeDefined();
-      expect(screen.getByText('15 Facts')).toBeDefined();
+      expect(screen.getByText('15 items')).toBeDefined();
 
       // Verify children rendered
       expect(screen.getByTestId('tab-content')).toBeDefined();
@@ -738,7 +738,7 @@ describe('Dual-Shell Architecture & Authentication (Pass 30)', () => {
       expect(tabChangeSpy).toHaveBeenCalledWith('schedules');
 
       // Verify switch to worker button
-      const switchBtn = screen.getByRole('button', { name: /Worker Cockpit/i });
+      const switchBtn = screen.getByRole('button', { name: /Worker view/i });
       fireEvent.click(switchBtn);
       expect(switchToWorkerSpy).toHaveBeenCalledTimes(1);
     });
