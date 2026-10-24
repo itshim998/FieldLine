@@ -16,7 +16,7 @@ export interface ProjectHealthProps {
   plannedProgress: number;
   variance: number;
   varianceState: 'ahead' | 'on_plan' | 'behind';
-  riskClassification: 'ON_TRACK' | 'AHEAD' | 'AT_RISK' | 'DELAYED' | 'COMPLETED';
+  riskClassification: 'ON_TRACK' | 'AHEAD' | 'AT_RISK' | 'Delayed' | 'Completed';
   asOfDate: string;
   projectName: string;
   projectCode: string;
@@ -38,39 +38,39 @@ export function ProjectHealth({
 }: ProjectHealthProps): React.JSX.Element {
   const getRiskBadge = (classification: string) => {
     switch (classification) {
-      case 'COMPLETED':
+      case 'Completed':
         return (
           <span className="health-classification-badge completed">
             <CheckCircle2 size={16} />
-            <span>COMPLETED</span>
+            <span>Completed</span>
           </span>
         );
       case 'AHEAD':
         return (
           <span className="health-classification-badge ahead">
             <TrendingUp size={16} />
-            <span>AHEAD OF SCHEDULE</span>
+            <span>Ahead of schedule</span>
           </span>
         );
       case 'ON_TRACK':
         return (
           <span className="health-classification-badge on-track">
             <CheckCircle2 size={16} />
-            <span>ON TRACK</span>
+            <span>On track</span>
           </span>
         );
       case 'AT_RISK':
         return (
           <span className="health-classification-badge at-risk">
             <AlertTriangle size={16} />
-            <span>AT RISK</span>
+            <span>At risk</span>
           </span>
         );
-      case 'DELAYED':
+      case 'Delayed':
         return (
           <span className="health-classification-badge delayed">
             <AlertTriangle size={16} />
-            <span>DELAYED</span>
+            <span>Delayed</span>
           </span>
         );
       default:
@@ -176,7 +176,7 @@ export function ProjectHealth({
             <div
               className={`variance-status-tag ${varianceState}`}
             >
-              {varianceState.toUpperCase()}
+              {varianceState.replace(/_/g, ' ')}
             </div>
           </div>
         </div>
