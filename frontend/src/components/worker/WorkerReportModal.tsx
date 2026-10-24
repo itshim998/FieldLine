@@ -1,5 +1,5 @@
 import { FieldLineMark } from '../ui/FieldLine.js';
-import React, { useState, useEffect, useId, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Mic,
   MicOff,
@@ -12,17 +12,11 @@ import {
   User,
   Building,
   Calendar,
-  Layers,
-
-  ArrowRight,
-  Plus,
-  Minus,
+  Layers,,
   Check,
   Upload,
   Image as ImageIcon,
   Clock,
-  HardHat,
-  ChevronRight
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { useLiveVoiceSession, VerifiedProgressUpdate } from '../assistant/live/useLiveVoiceSession.js';
@@ -87,7 +81,7 @@ export function WorkerReportModal({
   const [dedupedBadge, setDedupedBadge] = useState<boolean>(false);
 
   // Live Voice Session Hook
-  const [voiceUpdates, setVoiceUpdates] = useState<VerifiedProgressUpdate[]>([]);
+  const [, setVoiceUpdates] = useState<VerifiedProgressUpdate[]>([]);
   const liveVoice = useLiveVoiceSession({
     projectId,
     role: 'worker',
