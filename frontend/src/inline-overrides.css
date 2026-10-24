@@ -92,3 +92,7 @@
 /* Activity-detail utility styles */
 :root body [data-fl-style="s152gntk"] { display: flex; gap: 0.75rem; margin-top: 1rem; justify-content: center; }
 :root body [data-fl-style="sl2g6zx"] { margin: 0.75rem 1.25rem 1rem; }
+
+/* Dashboard and assistant utility styles */
+:root body [data-fl-style="s1nk60cr"] { color: var(--accent-amber); }
+:root body [data-fl-style="s5ehtun"] { padding: 2.5rem 1rem; }
