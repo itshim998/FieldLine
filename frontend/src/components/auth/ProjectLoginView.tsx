@@ -133,7 +133,7 @@ export function ProjectLoginView({
       }
     }
 
-    const demoPin = targetRole === 'worker' ? '4444' : 'Use demo access';
+    const demoPin = targetRole === 'worker' ? '4444' : 'RefineryAdmin2026!';
     setProjectId(targetProject.id);
     setAccountType(targetRole);
     setPasscode(demoPin);
@@ -286,7 +286,7 @@ export function ProjectLoginView({
                 placeholder={
                   accountType === 'worker'
                     ? 'Enter 4-digit PIN (e.g. 4444)'
-                    : 'Enter password (e.g. Use demo access)'
+                    : 'Enter password'
                 }
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
