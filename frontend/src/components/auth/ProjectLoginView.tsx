@@ -1,9 +1,10 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useId } from 'react';
 import {
   ShieldCheck,
   User,
   Lock,
-  Sparkles,
+
   ArrowRight,
   RefreshCw,
   FolderGit2,
@@ -364,7 +365,7 @@ export function ProjectLoginView({
         {/* 5. Try the demo positioned below */}
         <div className="demo-access-banner" style={{ marginTop: '1.75rem', marginBottom: 0 }}>
           <div className="demo-access-title">
-            <Sparkles size={16} color="var(--accent-indigo)" />
+            <FieldLineMark size={16} />
             <span>Try the demo</span>
           </div>
           <p className="demo-access-desc">
