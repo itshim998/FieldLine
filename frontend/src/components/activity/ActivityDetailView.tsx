@@ -87,7 +87,7 @@ export function ActivityDetailView({
         </div>
         <h3 className="error-title">Unable to Load Activity Detail</h3>
         <p className="error-msg">{error}</p>
-        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', justifyContent: 'center' }}>
+        <div data-fl-style="s152gntk">
           <button type="button" className="btn btn-secondary btn-sm" onClick={onBack}>
             <ArrowLeft size={13} />
             <span>Back to Workspace</span>
