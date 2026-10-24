@@ -256,7 +256,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         id: `ai-net-err-${Date.now()}`,
         role: 'assistant',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        error: 'Network connection issue. Couldn't connect to FieldLine. Try again.'
+        error: 'Network connection issue. Could not connect to FieldLine. Try again.'
       };
       setMessages((prev) => [...prev, netErr]);
     } finally {
