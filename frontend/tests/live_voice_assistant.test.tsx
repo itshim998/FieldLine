@@ -762,7 +762,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       });
 
       // Switch project in dropdown to Project 2 (HBR-02)
-      const projectSelect = screen.getByTitle('Select project context for AI queries');
+      const projectSelect = screen.getByTitle('Choose project');
       await act(async () => {
         fireEvent.change(projectSelect, { target: { value: 'proj-002' } });
       });
