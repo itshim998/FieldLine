@@ -72,7 +72,6 @@ export function ProjectLoginView({
     }
   }, [selectedProjectId, projects, projectId]);
 
-  const activeProject = projects.find((p) => p.id === projectId);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
