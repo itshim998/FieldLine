@@ -44,7 +44,7 @@ export function ActivityStatusSummary({
           <h3 className="section-title">Activity status</h3>
         </div>
         <span className="total-activities-badge">
-          {counts.totalActivities} Total Work Items
+          {counts.totalActivities} activities
         </span>
       </div>
 
@@ -101,7 +101,7 @@ export function ActivityStatusSummary({
         >
           <div className="status-card-top">
             <CheckCircle2 size={16} />
-            <span className="status-card-label">ON TRACK</span>
+            <span className="status-card-label">On track</span>
           </div>
           <div className="status-card-count">{counts.onTrack}</div>
           <div className="status-card-footer">
@@ -114,11 +114,11 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card ahead"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('AHEAD')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Ahead')}
         >
           <div className="status-card-top">
             <TrendingUp size={16} />
-            <span className="status-card-label">AHEAD</span>
+            <span className="status-card-label">Ahead</span>
           </div>
           <div className="status-card-count">{counts.ahead}</div>
           <div className="status-card-footer">
@@ -135,7 +135,7 @@ export function ActivityStatusSummary({
         >
           <div className="status-card-top">
             <AlertTriangle size={16} />
-            <span className="status-card-label">AT RISK</span>
+            <span className="status-card-label">At risk</span>
           </div>
           <div className="status-card-count">{counts.atRisk}</div>
           <div className="status-card-footer">
@@ -148,11 +148,11 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card delayed"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('DELAYED')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Delayed')}
         >
           <div className="status-card-top">
             <AlertOctagon size={16} />
-            <span className="status-card-label">DELAYED</span>
+            <span className="status-card-label">Delayed</span>
           </div>
           <div className="status-card-count">{counts.delayed}</div>
           <div className="status-card-footer">
@@ -165,11 +165,11 @@ export function ActivityStatusSummary({
         <button
           type="button"
           className="status-count-card completed"
-          onClick={() => onSelectStatusFilter && onSelectStatusFilter('COMPLETED')}
+          onClick={() => onSelectStatusFilter && onSelectStatusFilter('Completed')}
         >
           <div className="status-card-top">
             <CheckCheck size={16} />
-            <span className="status-card-label">COMPLETED</span>
+            <span className="status-card-label">Completed</span>
           </div>
           <div className="status-card-count">{counts.completed}</div>
           <div className="status-card-footer">
