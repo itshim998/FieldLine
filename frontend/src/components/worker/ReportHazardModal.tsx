@@ -5,7 +5,6 @@ import {
   ShieldAlert,
   CheckCircle2,
   Loader2,
-  HardHat,
   Eye,
   Flame,
   Zap,
