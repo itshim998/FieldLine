@@ -214,7 +214,7 @@ export function WorkerReportModal({
 
       setSuccessMsg(
         data.message ||
-          `Progress verified: ${activeTask?.name || 'Activity'} saved at ${data.derivedPercent ?? calculatedPercent}%.`
+          `Progress saved: ${activeTask?.name || 'Activity'} saved at ${data.derivedPercent ?? calculatedPercent}%.`
       );
 
       // If a photo was attached in rapid form, upload it now
@@ -300,7 +300,7 @@ export function WorkerReportModal({
       setDedupedBadge(Boolean(evidenceData.deduplicated));
       setSuccessMsg(
         evidenceData.deduplicated
-          ? `Photo matched existing SHA-256 hash (deduplicated). Linked to update.`
+          ? `Photo already attached.`
           : `Photo successfully captured & attached to activity log.`
       );
 
@@ -333,7 +333,7 @@ export function WorkerReportModal({
           <div className="header-badge-group">
             <div className="capture-header-pill">
               <Sparkles size={14} color="var(--accent-amber)" />
-              <span className="pill-text">FRICTIONLESS FIELD CAPTURE</span>
+              <span className="pill-text"></span>
             </div>
             <span className="project-code-chip">{projectCode}</span>
           </div>
@@ -357,12 +357,12 @@ export function WorkerReportModal({
         {/* Modal Title & Subtitle */}
         <div className="worker-capture-title-bar">
           <h2 id="worker-report-modal-title" className="capture-title">
-            {activeTask ? `Report on ${activeTask.externalId}` : 'Fast Field Progress Report'}
+            {activeTask ? `Report on ${activeTask.externalId}` : 'Report progress'}
           </h2>
           <p className="capture-subtitle">
             {activeTask
               ? activeTask.name
-              : 'Submit verified progress via voice dialogue, quick quantities, or camera evidence.'}
+              : ''}
           </p>
         </div>
 
@@ -424,7 +424,7 @@ export function WorkerReportModal({
           <div className="report-success-banner" role="status" style={{ margin: '0 1.25rem 1rem' }}>
             <CheckCircle2 size={16} />
             <span>{successMsg}</span>
-            {dedupedBadge && <span className="deduped-badge">SHA-256 Verified</span>}
+            {dedupedBadge && <span className="deduped-badge">Already attached</span>}
           </div>
         )}
 
@@ -441,10 +441,10 @@ export function WorkerReportModal({
                   <span className={`status-dot ${liveVoice.connectionState}`} />
                   <span className="status-label">
                     {liveVoice.connectionState === 'ready' || liveVoice.connectionState === 'connected'
-                      ? 'Connected & Grounded to Schedule'
+                      ? 'Connected'
                       : liveVoice.connectionState === 'connecting'
-                      ? 'Establishing Multimodal Session...'
-                      : 'Gemini Live Voice Gateway'}
+                      ? 'Connecting...'
+                      : 'Voice connection unavailable'}
                   </span>
                 </div>
 
@@ -485,7 +485,7 @@ export function WorkerReportModal({
                 <div className="verified-updates-section">
                   <h4 className="section-mini-title">
                     <CheckCircle2 size={14} color="var(--accent-green)" />
-                    <span>Verified Real-Time Updates</span>
+                    <span>Saved reports</span>
                   </h4>
                   <div className="verified-updates-list">
                     {liveVoice.verifiedUpdates.map((up) => (
@@ -772,12 +772,12 @@ export function WorkerReportModal({
                 {isSubmitting ? (
                   <>
                     <RefreshCw size={16} className="pulse-dot" />
-                    <span>Committing to Schedule Pipeline...</span>
+                    <span>Saving report...</span>
                   </>
                 ) : (
                   <>
                     <Flame size={16} />
-                    <span>Commit Verified Progress ({calculatedPercent}%)</span>
+                    <span>Save progress ({calculatedPercent}%)</span>
                   </>
                 )}
               </button>
@@ -816,7 +816,7 @@ export function WorkerReportModal({
                     <div className="camera-icon-bubble">
                       <Camera size={28} color="var(--accent-amber)" />
                     </div>
-                    <strong>Snap Photo or Upload Field Evidence</strong>
+                    <strong>Add photo</strong>
                     <span>Camera capture supported on mobile devices</span>
                   </div>
                 ) : (
@@ -922,12 +922,12 @@ export function WorkerReportModal({
                 {isSubmitting ? (
                   <>
                     <RefreshCw size={16} className="pulse-dot" />
-                    <span>Uploading & Hashing Evidence...</span>
+                    <span>Uploading photo...</span>
                   </>
                 ) : (
                   <>
                     <Upload size={16} />
-                    <span>Upload & Attach Photo Evidence</span>
+                    <span>Attach photo</span>
                   </>
                 )}
               </button>
