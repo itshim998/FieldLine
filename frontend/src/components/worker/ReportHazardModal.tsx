@@ -283,7 +283,7 @@ export function ReportHazardModal({
               id="submit-hazard-btn"
               className="btn btn-primary"
               disabled={submitting || !description.trim() || !reporterName.trim()}
-              style={{ backgroundColor: 'var(--accent-rose, #f43f5e)' }}
+              data-fl-style="ss9hc1q"
             >
               {submitting ? (
                 <>
