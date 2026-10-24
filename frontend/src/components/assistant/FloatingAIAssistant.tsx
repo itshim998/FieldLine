@@ -13,7 +13,6 @@ import {
   FolderGit2,
   Mic,
   MicOff,
-  Radio,
   CheckCircle2,
   ExternalLink
 } from 'lucide-react';
@@ -56,7 +55,6 @@ const SUGGESTED_QUESTIONS = [
 export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
   projects,
   currentProject,
-  onNavigateToProject,
   onNavigateToActivity,
   asOfDate = new Date().toISOString().slice(0, 10)
 }) => {
