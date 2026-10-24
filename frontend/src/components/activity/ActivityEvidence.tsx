@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, FileText, Download, ExternalLink, Calendar, HardDrive } from 'lucide-react';
+import { Paperclip, FileText, ExternalLink, Calendar, } from 'lucide-react';
 import { ActivityDetailEvidence } from '../../services/activity-detail/activity-detail.types.js';
 
 export interface ActivityEvidenceProps {
