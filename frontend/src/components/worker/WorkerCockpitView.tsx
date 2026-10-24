@@ -449,7 +449,7 @@ export function WorkerCockpitView({
                   id="launch-multimodal-sheet-btn"
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleOpenCaptureModal(null)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.6rem' }}
+                  data-fl-style="s64q9pt"
                 >
                   <FieldLineMark size={14} />
                   <span>Launch Multimodal Capture (Voice, Steppers & Photo)</span>
@@ -458,14 +458,14 @@ export function WorkerCockpitView({
             </div>
 
             {reportError && (
-              <div className="login-error-alert" role="alert" style={{ marginBottom: '1rem' }}>
+              <div className="login-error-alert" role="alert" data-fl-style="s72wa23">
                 <AlertTriangle size={16} />
                 <span>{reportError}</span>
               </div>
             )}
 
             {reportSuccess && (
-              <div className="report-success-banner" role="status" style={{ marginBottom: '1rem' }}>
+              <div className="report-success-banner" role="status" data-fl-style="s72wa23">
                 <CheckCircle2 size={16} />
                 <span>{reportSuccess}</span>
               </div>
@@ -789,7 +789,7 @@ export function WorkerCockpitView({
 
             {/* Assistant Response Area */}
             {assistantError && (
-              <div className="login-error-alert" role="alert" style={{ marginTop: '1rem' }}>
+              <div className="login-error-alert" role="alert" data-fl-style="sf3g8t3">
                 <AlertTriangle size={16} />
                 <span>{assistantError}</span>
               </div>
