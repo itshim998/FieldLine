@@ -187,7 +187,7 @@ export function ProjectHealth({
             Schedule status
           </span>
           <div className="health-kpi-value-row">
-            <span className="health-kpi-value status-text">{riskClassification.replaceAll("_", " ").toLowerCase()}</span>
+            <span className="health-kpi-value status-text">{riskClassification.replace(/_/g, " ").toLowerCase()}</span>
             
           </div>
         </div>
