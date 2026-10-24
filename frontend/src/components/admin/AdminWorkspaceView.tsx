@@ -64,7 +64,7 @@ export function AdminWorkspaceView({
         <div className="admin-badge-content">
           <div className="admin-role-badge">
             <ShieldCheck size={14} className="admin-badge-icon" />
-            <span>ADMIN CONTROL ROOM</span>
+            <span>Project engineer</span>
           </div>
           <span className="badge-divider">•</span>
           <div className="admin-operator-identity">
@@ -85,11 +85,11 @@ export function AdminWorkspaceView({
               id="admin-switch-to-worker-btn"
               className="btn btn-secondary btn-sm"
               onClick={onSwitchToWorker}
-              title="Open Worker Execution Cockpit"
+              title="Open worker view"
               style={{ gap: '0.4rem', fontSize: '0.8rem' }}
             >
               <User size={14} color="var(--accent-blue)" />
-              <span>Worker Cockpit</span>
+              <span>Worker view</span>
             </button>
           )}
 
@@ -224,10 +224,10 @@ export function AdminWorkspaceView({
           onClick={() => onTabChange('intelligence')}
         >
           <TrendingUp size={16} />
-          <span>Project Intelligence</span>
+          <span>Needs attention</span>
           {typeof intelligenceFactsCount === 'number' && intelligenceFactsCount > 0 && (
             <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
-              {intelligenceFactsCount} Facts
+              {intelligenceFactsCount} items
             </span>
           )}
         </button>
