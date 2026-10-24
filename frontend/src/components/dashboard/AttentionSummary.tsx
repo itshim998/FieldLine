@@ -315,7 +315,7 @@ export function AttentionSummary({
                     <div className="attention-row-main">
                       <div className="attention-pill-group">
                         <span className="code-pill amber">{item.externalId}</span>
-                        <span className="attention-variance-warning" style={{ color: 'var(--accent-amber)' }}>
+                        <span className="attention-variance-warning" data-fl-style="s1nk60cr">
                           {item.progressVariance} pts variance
                         </span>
                       </div>
