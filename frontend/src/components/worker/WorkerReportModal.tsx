@@ -1,4 +1,4 @@
-import { FieldLineMark } from '../ui/FieldLine.js';
+import { FieldLineMark, useDialogKeyboard } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Mic,
@@ -312,17 +312,20 @@ export function WorkerReportModal({
     }
   };
 
+  const handleDismiss = () => {
+    if (liveVoice.isListening) liveVoice.stopSession();
+    onClose();
+  };
+  const dialogRef = useDialogKeyboard(isOpen, handleDismiss);
+
   if (!isOpen) return null;
 
   return (
     <div
       className="modal-backdrop worker-capture-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="worker-report-modal-title"
       id="worker-report-modal"
     >
-      <div className="worker-capture-modal-panel">
+      <div className="worker-capture-modal-panel" role="dialog" aria-modal="true" aria-labelledby="worker-report-modal-title" ref={dialogRef} tabIndex={-1}>
         {/* Header */}
         <header className="worker-capture-header">
           <div className="header-badge-group">
@@ -337,13 +340,9 @@ export function WorkerReportModal({
             type="button"
             id="close-report-modal-btn"
             className="close-modal-btn"
-            onClick={() => {
-              if (liveVoice.isListening) {
-                liveVoice.stopSession();
-              }
-              onClose();
-            }}
+            onClick={handleDismiss}
             title="Close modal"
+            aria-label="Close report"
           >
             <X size={18} />
           </button>
