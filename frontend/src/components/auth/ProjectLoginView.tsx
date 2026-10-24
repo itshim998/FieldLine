@@ -169,9 +169,6 @@ export function ProjectLoginView({
             <span>FieldLine</span>
           </div>
           <h1 className="login-title">Sign in to FieldLine</h1>
-          <p className="login-subtitle">
-            
-          </p>
         </div>
 
         {/* Streamlined Login Form */}
@@ -183,7 +180,7 @@ export function ProjectLoginView({
             </div>
           )}
 
-          {/* 1. Target Infrastructure Project Dropdown */}
+          {/* 1. Project Dropdown */}
           <div className="login-field-group">
             <label htmlFor={projectSelectId} className="login-label">
               <FolderGit2 size={15} />
@@ -225,11 +222,6 @@ export function ProjectLoginView({
                 )}
               </div>
             )}
-            {activeProject && (
-              <span className="login-helper-text">
-                {activeProject.description || 'Active industrial project workspace'}
-              </span>
-            )}
           </div>
 
           {/* 2. Your role Dropdown Menu */}
@@ -255,11 +247,6 @@ export function ProjectLoginView({
                 <option value="worker">Site worker</option>
               </select>
             </div>
-            <span className="login-helper-text">
-              {accountType === 'worker'
-                ? 'Field Worker: Mobile crew shift tasks, 1-touch progress reporting, and voice assistant.'
-                : 'Admin / Project Engineer: Dashboard, schedules and progress reports.'}
-            </span>
           </div>
 
           {/* 3. Password Placeholder Input */}
@@ -267,50 +254,31 @@ export function ProjectLoginView({
             <label htmlFor={passcodeFieldId} className="login-label">
               {accountType === 'worker' ? <KeyRound size={15} /> : <Lock size={15} />}
               <span>
-                {accountType === 'worker' ? 'Worker Passcode / PIN' : 'Administrator Password'}
+                {accountType === 'worker' ? 'Worker PIN' : 'Password'}
               </span>
             </label>
-            <div className="passcode-input-wrapper" style={{ position: 'relative' }}>
+            <div className="passcode-input-wrapper">
               <input
                 id={passcodeFieldId}
-                type={
-                  accountType === 'worker'
-                    ? 'text'
-                    : showPassword
-                    ? 'text'
-                    : 'password'
-                }
+                type={showPassword ? 'text' : 'password'}
                 inputMode={accountType === 'worker' ? 'numeric' : 'text'}
                 autoComplete="current-password"
-                className="login-input"
+                className={`login-input ${accountType === 'admin' ? 'login-input--with-reveal' : ''}`}
                 placeholder={
                   accountType === 'worker'
-                    ? 'Enter 4-digit PIN (e.g. 4444)'
+                    ? 'Enter 4-digit PIN'
                     : 'Enter password'
                 }
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 disabled={isSubmitting || isLoading}
-                style={{ paddingRight: accountType === 'admin' ? '2.5rem' : '0.9rem' }}
                 autoFocus
               />
               {accountType === 'admin' && (
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '0.75rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    padding: '0.2rem',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
+                  className="login-password-toggle"
                   title={showPassword ? 'Hide password' : 'Show password'}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
@@ -318,11 +286,6 @@ export function ProjectLoginView({
                 </button>
               )}
             </div>
-            <span className="login-helper-text">
-              {accountType === 'worker'
-                ? 'PIN is shared among verified field crew personnel on this project.'
-                : 'Project Superintendent or Field Engineer credentials.'}
-            </span>
           </div>
 
           {/* 4. Login Button */}
@@ -350,11 +313,7 @@ export function ProjectLoginView({
                 </>
               ) : (
                 <>
-                  <span>
-                    {accountType === 'worker'
-                      ? 'Sign in'
-                      : 'Sign in'}
-                  </span>
+                  <span>Sign in</span>
                   <ArrowRight size={16} />
                 </>
               )}
@@ -363,14 +322,11 @@ export function ProjectLoginView({
         </form>
 
         {/* 5. Try the demo positioned below */}
-        <div className="demo-access-banner" style={{ marginTop: '1.75rem', marginBottom: 0 }}>
+        <div className="demo-access-banner demo-access-banner--separated">
           <div className="demo-access-title">
             <FieldLineMark size={16} />
             <span>Try the demo</span>
           </div>
-          <p className="demo-access-desc">
-            
-          </p>
           <div className="demo-chips-grid">
             <button
               type="button"
