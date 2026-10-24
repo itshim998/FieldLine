@@ -10,7 +10,7 @@ import {
   RefreshCw,
   MapPin,
   ClipboardList,
-  Target,,
+  Target,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { WorkAreaSafetyBanner } from './WorkAreaSafetyBanner.js';
