@@ -86,7 +86,7 @@ export function AdminWorkspaceView({
               className="btn btn-secondary btn-sm"
               onClick={onSwitchToWorker}
               title="Open worker view"
-              style={{ gap: '0.4rem', fontSize: '0.8rem' }}
+              data-fl-style="sz94rau"
             >
               <User size={14} color="var(--accent-blue)" />
               <span>Worker view</span>
@@ -99,7 +99,7 @@ export function AdminWorkspaceView({
             className="btn btn-outline btn-sm logout-btn"
             onClick={onLogout}
             title="Sign out of Admin session"
-            style={{ gap: '0.4rem', fontSize: '0.8rem' }}
+            data-fl-style="sz94rau"
           >
             <LogOut size={14} />
             <span>Sign Out</span>
@@ -144,7 +144,7 @@ export function AdminWorkspaceView({
 
         <div className="workspace-identity">
           <div className="workspace-title-section">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <div data-fl-style="se5vrh2">
               <span className="workspace-code-badge">{project.code}</span>
               <span className={`status-badge ${project.status}`}>{project.status}</span>
             </div>
@@ -152,7 +152,7 @@ export function AdminWorkspaceView({
             {project.description ? (
               <p className="workspace-project-desc">{project.description}</p>
             ) : (
-              <p className="workspace-project-desc" style={{ fontStyle: 'italic', opacity: 0.6 }}>
+              <p className="workspace-project-desc" data-fl-style="s1d18hi1">
                 No project description provided.
               </p>
             )}
@@ -181,7 +181,7 @@ export function AdminWorkspaceView({
           <FileSpreadsheet size={16} />
           <span>Schedule Baselines</span>
           {typeof schedulesCount === 'number' && schedulesCount > 0 && (
-            <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+            <span className="status-badge active" data-fl-style="sslt4a2">
               {schedulesCount}
             </span>
           )}
@@ -196,7 +196,7 @@ export function AdminWorkspaceView({
           <Activity size={16} />
           <span>Field Progress Updates</span>
           {typeof progressCount === 'number' && progressCount > 0 && (
-            <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+            <span className="status-badge active" data-fl-style="sslt4a2">
               {progressCount}
             </span>
           )}
@@ -211,7 +211,7 @@ export function AdminWorkspaceView({
           <FileText size={16} />
           <span>Evidence Documents</span>
           {typeof evidenceCount === 'number' && evidenceCount > 0 && (
-            <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+            <span className="status-badge active" data-fl-style="sslt4a2">
               {evidenceCount}
             </span>
           )}
@@ -226,7 +226,7 @@ export function AdminWorkspaceView({
           <TrendingUp size={16} />
           <span>Needs attention</span>
           {typeof intelligenceFactsCount === 'number' && intelligenceFactsCount > 0 && (
-            <span className="status-badge active" style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}>
+            <span className="status-badge active" data-fl-style="sslt4a2">
               {intelligenceFactsCount} items
             </span>
           )}
