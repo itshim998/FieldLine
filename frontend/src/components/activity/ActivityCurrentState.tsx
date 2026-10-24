@@ -1,12 +1,9 @@
 import React from 'react';
-import {
-  TrendingUp,
+import {,
   AlertTriangle,
-  CheckCircle2,
   Clock,
   Calendar,
   AlertCircle,
-  ShieldAlert,
   ShieldCheck
 } from 'lucide-react';
 import {
