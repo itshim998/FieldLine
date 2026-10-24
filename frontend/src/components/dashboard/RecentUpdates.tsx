@@ -144,7 +144,7 @@ export function RecentUpdates({
       </div>
 
       {updates.length === 0 ? (
-        <div className="empty-state-card" style={{ padding: '2.5rem 1rem' }}>
+        <div className="empty-state-card" data-fl-style="s5ehtun">
           <div className="empty-icon-wrapper">
             <Activity size={28} />
           </div>
