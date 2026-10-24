@@ -1,10 +1,11 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Send,
   RefreshCw,
   MessageSquare,
-  Sparkles,
+
   AlertCircle,
   ChevronDown,
   ChevronUp,
@@ -292,7 +293,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         type="button"
       >
         <div className="floating-ai-trigger-inner">
-          <Sparkles size={20} color="#ffffff" />
+          <FieldLineMark size={20} />
         </div>
       </button>
 
@@ -469,7 +470,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
               {messages.length === 0 ? (
                 <div className="floating-ai-welcome">
                   <div className="floating-ai-welcome-badge">
-                    <Sparkles size={22} />
+                    <FieldLineMark size={22} />
                   </div>
                   <h4 className="floating-ai-welcome-title">Ask about work, progress or dates</h4>
 
