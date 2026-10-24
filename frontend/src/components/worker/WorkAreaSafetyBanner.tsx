@@ -2,7 +2,7 @@ import React from 'react';
 import {
   ShieldAlert,
   HardHat,
-  AlertTriangle,,,
+  AlertTriangle,
 } from 'lucide-react';
 
 export interface WorkAreaSafetyBannerProps {
@@ -31,7 +31,7 @@ const SAFETY_PROFILES: Record<string, AreaSafetyProfile> = {
   'Area B': {
     areaName: 'Area B — Heavy Foundations & Deep Piling',
     hazardTitle: 'Piling Rig Operation & Heavy Ground Vibrations',
-    hazardDesc: 'Strict 25m rotary piling exclusion perimeter active. Hearing protection mandatory within 30m. Ground stability checks verified daily.',
+    hazardDesc: 'Strict 25m rotary piling exclusion perimeter active. Hearing protection mandatory within 30m. Check ground stability requirements with your supervisor before starting.',
     requiredPpe: ['Hard Hat with Chin Strap', 'Hearing Protection', 'Safety Glasses', 'Steel-Toe Boots'],
     severity: 'high',
     accentColor: '#ef4444'
