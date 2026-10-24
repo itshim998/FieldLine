@@ -83,12 +83,6 @@ export function ProjectHealth({
     }
   };
 
-  const getVarianceColor = () => {
-    if (varianceState === 'ahead') return 'var(--accent-emerald)';
-    if (varianceState === 'behind') return 'var(--accent-rose)';
-    return 'var(--accent-cyan)';
-  };
-
   return (
     <div className="project-health-hero-card">
       <div className="health-hero-top">
@@ -142,12 +136,6 @@ export function ProjectHealth({
             <span className="health-kpi-value">{actualProgress.toFixed(1)}%</span>
             <span className="health-kpi-subtext">Reported progress</span>
           </div>
-          <div className="health-progress-track">
-            <div
-              className="health-progress-fill actual"
-              style={{ width: `${Math.min(100, Math.max(0, actualProgress))}%` }}
-            />
-          </div>
         </div>
 
         <div className="health-kpi-card planned">
@@ -158,12 +146,6 @@ export function ProjectHealth({
           <div className="health-kpi-value-row">
             <span className="health-kpi-value">{plannedProgress.toFixed(1)}%</span>
             <span className="health-kpi-subtext">Planned by this date</span>
-          </div>
-          <div className="health-progress-track">
-            <div
-              className="health-progress-fill planned"
-              style={{ width: `${Math.min(100, Math.max(0, plannedProgress))}%` }}
-            />
           </div>
         </div>
 
@@ -178,8 +160,7 @@ export function ProjectHealth({
           </span>
           <div className="health-kpi-value-row">
             <span
-              className="health-kpi-value"
-              style={{ color: getVarianceColor() }}
+              className={`health-kpi-value health-kpi-value--${varianceState}`}
             >
               {variance > 0 ? `+${variance.toFixed(1)}` : variance.toFixed(1)} pts
             </span>
@@ -206,10 +187,7 @@ export function ProjectHealth({
             Schedule status
           </span>
           <div className="health-kpi-value-row">
-            <span className="health-kpi-value status-text">{riskClassification}</span>
-            <span className="health-kpi-subtext"></span>
-          </div>
-          <div className="canonical-guarantee-tag" aria-hidden="true">
+            <span className="health-kpi-value status-text">{riskClassification.replaceAll("_", " ").toLowerCase()}</span>
             
           </div>
         </div>
