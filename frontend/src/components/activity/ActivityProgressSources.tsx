@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, User, Calendar, Clock, CheckCircle2 } from 'lucide-react';
+import { FileText, User, Calendar, } from 'lucide-react';
 import { ActivityDetailProgressUpdateItem } from '../../services/activity-detail/activity-detail.types.js';
 
 export interface ActivityProgressSourcesProps {
@@ -8,8 +8,7 @@ export interface ActivityProgressSourcesProps {
 }
 
 export function ActivityProgressSources({
-  progressUpdates,
-  onSelectUpdate
+  progressUpdates
 }: ActivityProgressSourcesProps): React.JSX.Element {
   if (!progressUpdates || progressUpdates.length === 0) {
     return (
