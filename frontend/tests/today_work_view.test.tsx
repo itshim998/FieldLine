@@ -357,7 +357,7 @@ describe('TodayWorkView Component (Pass 31)', () => {
     });
 
     // Click "Active Today" tab
-    const todayTab = screen.getByRole('tab', { name: /active today/i });
+    const todayTab = screen.getByRole('tab', { name: /today/i });
     fireEvent.click(todayTab);
 
     await waitFor(() => {
