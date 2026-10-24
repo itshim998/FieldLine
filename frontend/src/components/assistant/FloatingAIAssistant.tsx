@@ -149,7 +149,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
           id: `err-${Date.now()}`,
           role: 'assistant',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          error: 'Please create or select a project first to query the AI assistant.'
+          error: 'Choose a project first.'
         }
       ]);
       return;
@@ -255,7 +255,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         id: `ai-net-err-${Date.now()}`,
         role: 'assistant',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        error: 'Network connection issue. Unable to reach FieldLine AI intelligence service.'
+        error: 'Network connection issue. Couldn't connect to FieldLine. Try again.'
       };
       setMessages((prev) => [...prev, netErr]);
     } finally {
@@ -287,8 +287,8 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         id="floating-ai-assistant-btn"
         className={`floating-ai-trigger ${isOpen ? 'active' : ''}`}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="Toggle FieldLine AI Assistant"
-        title="Ask FieldLine AI Assistant"
+        aria-label="Toggle Ask FieldLine Assistant"
+        title="Ask Ask FieldLine Assistant"
         type="button"
       >
         <div className="floating-ai-trigger-inner">
@@ -319,7 +319,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
             <div className="floating-ai-header">
               <div className="floating-ai-title-wrap">
                 <h3 id="floating-ai-title" className="floating-ai-title">
-                  FieldLine AI
+                  Ask FieldLine
                 </h3>
               </div>
 
@@ -334,7 +334,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                     onChange={(e) => {
                       setSelectedProjectId(e.target.value);
                     }}
-                    title="Select project context for AI queries"
+                    title="Choose project"
                   >
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -381,19 +381,19 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       <span className={`live-status-dot ${liveSession.connectionState === 'error' ? 'error' : liveSession.connectionState === 'connecting' ? 'connecting' : liveSession.isSpeaking ? 'speaking' : liveSession.connectionState === 'handover' ? 'handover' : 'listening'}`} />
                       <span className="live-status-text">
                         {liveSession.connectionState === 'connecting'
-                          ? 'CONNECTING TO LIVE VOICE...'
+                          ? 'Connecting...'
                           : liveSession.connectionState === 'error'
                           ? (liveSession.error || 'CONNECTION FAILED')
                           : liveSession.connectionState === 'handover'
-                          ? 'SESSION HANDOVER...'
+                          ? 'Switching...'
                           : liveSession.isSpeaking
-                          ? 'ASSISTANT SPEAKING...'
-                          : 'LISTENING...'}
+                          ? 'Speaking...'
+                          : 'Listening...'}
                       </span>
                     </div>
                     <div className="live-hud-badges">
                       {liveSession.activeSlot && (
-                        <span className="live-slot-badge" title="Active Key Slot">
+                        <span className="live-slot-badge" title="Connection">
                           Slot {liveSession.activeSlot}
                         </span>
                       )}
@@ -440,7 +440,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                           <div className="verified-card-header">
                             <div className="verified-card-title-wrap">
                               <CheckCircle2 size={15} className="verified-check-icon" />
-                              <span className="verified-card-title">Update Verified &amp; Saved</span>
+                              <span className="verified-card-title">Progress saved</span>
                             </div>
                             <span className="verified-progress-pill">{upd.progressPercent}%</span>
                           </div>
@@ -471,7 +471,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                   <div className="floating-ai-welcome-badge">
                     <Sparkles size={22} />
                   </div>
-                  <h4 className="floating-ai-welcome-title">How can I assist your project?</h4>
+                  <h4 className="floating-ai-welcome-title">Ask about work, progress or dates</h4>
 
                   {/* Quick-start Suggestions */}
                   <div className="floating-ai-suggestions-box">
@@ -551,7 +551,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                     onClick={() => toggleFactsAccordion(msg.id)}
                                   >
                                     <span>
-                                      Citations &amp; Fact Set ({msg.response.verifiedFacts.length})
+                                      Based on ({msg.response.verifiedFacts.length})
                                     </span>
                                     {expandedFactsMap[msg.id] ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                                   </button>
@@ -591,7 +591,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       <div className="floating-ai-bubble loading">
                         <RefreshCw size={15} className="pulse-dot" color="#818cf8" />
                         <span className="floating-loading-text">
-                          Evaluating verified facts for {activeTargetProject?.code || 'project'}...
+                          Checking project records for {activeTargetProject?.code || 'project'}...
                         </span>
                       </div>
                     </div>
