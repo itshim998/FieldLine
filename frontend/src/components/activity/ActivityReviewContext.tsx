@@ -69,8 +69,8 @@ export function ActivityReviewContext({
         </div>
       </div>
 
-      <div className="canonical-protection-banner" style={{ margin: '0.75rem 1.25rem 1rem' }}>
-        <CheckCircle2 size={16} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
+      <div className="canonical-protection-banner" data-fl-style="sl2g6zx">
+        <CheckCircle2 size={16} color="var(--accent-emerald)" data-fl-style="sdq2mnb" />
         <span>
           <strong>Progress review:</strong> Only confirmed matches update activity progress.
         </span>
