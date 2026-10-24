@@ -1,3 +1,4 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useId, useRef } from 'react';
 import {
   Mic,
@@ -12,7 +13,7 @@ import {
   Building,
   Calendar,
   Layers,
-  Sparkles,
+
   ArrowRight,
   Plus,
   Minus,
@@ -332,7 +333,7 @@ export function WorkerReportModal({
         <header className="worker-capture-header">
           <div className="header-badge-group">
             <div className="capture-header-pill">
-              <Sparkles size={14} color="var(--accent-amber)" />
+              <FieldLineMark size={14} />
               <span className="pill-text"></span>
             </div>
             <span className="project-code-chip">{projectCode}</span>
