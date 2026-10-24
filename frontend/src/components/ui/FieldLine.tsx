@@ -49,10 +49,61 @@ export function Panel({ children, className = '' }: { children: React.ReactNode;
 export function Table({ children, label }: { children: React.ReactNode; label: string }) {
   return <div className="fl-table-scroller" tabIndex={0} role="region" aria-label={label}><table className="fl-table">{children}</table></div>;
 }
+/**
+ * Keep keyboard focus inside an open modal, close it on Escape, and restore the
+ * trigger's focus on unmount. This hook intentionally does not change form data.
+ */
+export function useDialogKeyboard(open: boolean, onClose: () => void): React.RefObject<HTMLDivElement> {
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const closeRef = React.useRef(onClose);
+  closeRef.current = onClose;
+
+  React.useEffect(() => {
+    if (!open) return;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = () => Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) ?? []
+    );
+    const first = focusable()[0] ?? dialogRef.current;
+    first?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusable();
+      const start = items[0];
+      const end = items[items.length - 1];
+      if (!start || !end) {
+        event.preventDefault();
+        dialogRef.current?.focus();
+      } else if (event.shiftKey && (document.activeElement === start || !dialogRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        end.focus();
+      } else if (!event.shiftKey && (document.activeElement === end || !dialogRef.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        start.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [open]);
+
+  return dialogRef;
+}
 export function Sheet({ open, title, children, onClose }: { open: boolean; title: string; children: React.ReactNode; onClose: () => void }) {
+  const dialogRef = useDialogKeyboard(open, onClose);
   if (!open) return null;
   return <div className="fl-sheet-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
-    <div className="fl-sheet" role="dialog" aria-modal="true" aria-label={title}>
+    <div ref={dialogRef} tabIndex={-1} className="fl-sheet" role="dialog" aria-modal="true" aria-label={title}>
       <header className="fl-sheet__header"><h2>{title}</h2><Button onClick={onClose} aria-label="Close"><X size={20}/></Button></header>{children}
     </div>
   </div>;
