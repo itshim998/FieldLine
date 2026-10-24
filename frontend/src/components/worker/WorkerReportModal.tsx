@@ -342,7 +342,7 @@ export function WorkerReportModal({
             className="close-modal-btn"
             onClick={handleDismiss}
             title="Close modal"
-            aria-label="Close report"
+            aria-label="Close modal"
           >
             <X size={18} />
           </button>
