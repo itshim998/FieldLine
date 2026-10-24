@@ -41,7 +41,7 @@ export function ActivityStatusSummary({
       <div className="status-summary-header">
         <div className="status-summary-title-group">
           <Layers size={18} color="var(--accent-cyan)" />
-          <h3 className="section-title">Activity Execution Breakdown</h3>
+          <h3 className="section-title">Activity status</h3>
         </div>
         <span className="total-activities-badge">
           {counts.totalActivities} Total Work Items
