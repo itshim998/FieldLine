@@ -409,14 +409,14 @@ export function WorkerReportModal({
 
         {/* Status Alerts */}
         {errorMsg && (
-          <div className="login-error-alert" role="alert" style={{ margin: '0 1.25rem 1rem' }}>
+          <div className="login-error-alert" role="alert" data-fl-style="sjhnvoz">
             <AlertTriangle size={16} />
             <span>{errorMsg}</span>
           </div>
         )}
 
         {successMsg && (
-          <div className="report-success-banner" role="status" style={{ margin: '0 1.25rem 1rem' }}>
+          <div className="report-success-banner" role="status" data-fl-style="sjhnvoz">
             <CheckCircle2 size={16} />
             <span>{successMsg}</span>
             {dedupedBadge && <span className="deduped-badge">Already attached</span>}
