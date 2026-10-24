@@ -16,7 +16,7 @@ export interface ProjectHealthProps {
   plannedProgress: number;
   variance: number;
   varianceState: 'ahead' | 'on_plan' | 'behind';
-  riskClassification: 'ON_TRACK' | 'AHEAD' | 'AT_RISK' | 'Delayed' | 'Completed';
+  riskClassification: 'ON_TRACK' | 'AHEAD' | 'AT_RISK' | 'DELAYED' | 'COMPLETED';
   asOfDate: string;
   projectName: string;
   projectCode: string;
@@ -38,7 +38,7 @@ export function ProjectHealth({
 }: ProjectHealthProps): React.JSX.Element {
   const getRiskBadge = (classification: string) => {
     switch (classification) {
-      case 'Completed':
+      case 'COMPLETED':
         return (
           <span className="health-classification-badge completed">
             <CheckCircle2 size={16} />
@@ -66,7 +66,7 @@ export function ProjectHealth({
             <span>At risk</span>
           </span>
         );
-      case 'Delayed':
+      case 'DELAYED':
         return (
           <span className="health-classification-badge delayed">
             <AlertTriangle size={16} />
