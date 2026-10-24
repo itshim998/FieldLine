@@ -9903,3 +9903,20 @@ body { background-color: var(--fl-canvas); color: var(--fl-text); }
  .worker-cockpit-shell .card-actions-row .blocker-action-btn,.worker-cockpit-shell .card-actions-row .detail-action-btn { flex: 1 1 auto; }
  .fl-schedule-priorities .table-responsive,.fl-schedule-reference .table-responsive { overflow-x: auto; }
 }
+
+/* Activity links are real buttons, preserving Enter/Space navigation. */
+.fl-link-button, [data-fl-link="true"] {
+  background: transparent;
+  border: 0;
+  border-radius: var(--fl-radius-sm);
+  padding: 0;
+  color: var(--fl-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--fl-hairline);
+  text-underline-offset: 3px;
+}
+.fl-link-button:hover, [data-fl-link="true"]:hover { text-decoration-color: var(--fl-accent); color: var(--fl-accent); }
+.fl-link-button:focus-visible, [data-fl-link="true"]:focus-visible { outline: 3px solid var(--fl-accent); outline-offset: 3px; }
