@@ -1,4 +1,4 @@
-import { FieldLineMark } from './components/ui/FieldLine.js';
+import { FieldLineMark, FieldLineProgress } from './components/ui/FieldLine.js';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers,
@@ -3423,7 +3423,9 @@ function MainAppContent(): React.JSX.Element {
 
                   {/* 7 Structured Fact Sections */}
                   <div className="intelligence-sections-stack">
-                    {/* Section 1: Delayed Activities */}
+                    <section className="fl-schedule-priorities" aria-labelledby="fl-schedule-priorities-heading">
+                      <h3 id="fl-schedule-priorities-heading" className="fl-schedule-group-heading">Needs attention</h3>
+                      {/* Section 1: Delayed Activities */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3497,7 +3499,8 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 2: At-Risk Activities */}
+                    
+{/* Section 2: At-Risk Activities */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3573,7 +3576,8 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 3: Behind Schedule */}
+                    
+{/* Section 3: Behind Schedule */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3627,7 +3631,10 @@ function MainAppContent(): React.JSX.Element {
                                     </strong>
                                   </td>
                                   <td><span className="date-cell">{b.plannedProgress}%</span></td>
-                                  <td><span className="qty-cell">{b.actualProgress}%</span></td>
+                                  <td>
+                                     <span className="qty-cell">{b.actualProgress}%</span>
+                                     <FieldLineProgress planned={b.plannedProgress} actual={b.actualProgress} label={`Progress for ${b.name}`} />
+                                   </td>
                                   <td>
                                     <span data-fl-style="s11cs6le">
                                       {b.progressVariance}%
@@ -3643,71 +3650,8 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 4: Completed on Selected Date */}
-                    <div className="intelligence-card">
-                      <div className="intelligence-card-header">
-                        <div className="intelligence-card-title-group">
-                          <CheckCircle2 size={18} color="var(--accent-emerald)" />
-                          <h3 className="intelligence-card-title">Completed on selected date</h3>
-                          <span className="intelligence-card-count">{intelligence.completedToday.length}</span>
-                        </div>
-                        <span className="status-badge active" data-fl-style="s1v0dyfx">
-                          Observed as-of {intelligence.asOfDate}
-                        </span>
-                      </div>
-
-                      {intelligence.completedToday.length === 0 ? (
-                        <p className="empty-desc" data-fl-style="s1gdiwu0">
-                          No activities recorded completion observations on {intelligence.asOfDate}.
-                        </p>
-                      ) : (
-                        <div className="table-responsive">
-                          <table className="activities-table">
-                            <thead>
-                              <tr>
-                                <th>Activity ID</th>
-                                <th>Name</th>
-                                <th>Progress Update ID</th>
-                                <th>Observation Date</th>
-                                <th>Actual Progress</th>
-                                <th>Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {intelligence.completedToday.map((c) => (
-                                <tr key={c.activityId}>
-                                  <td>
-                                    <span
-                                      className="act-id-cell"
-                                      data-fl-style="spyafsr"
-                                      onClick={() => handleOpenActivityDetail(c.activityId)}
-                                      title="View complete activity history"
-                                    >
-                                      {c.externalId}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <strong
-                                      data-fl-style="spyafsr"
-                                      onClick={() => handleOpenActivityDetail(c.activityId)}
-                                      title="View complete activity history"
-                                    >
-                                      {c.name}
-                                    </strong>
-                                  </td>
-                                  <td><span className="mono" data-fl-style="s44g9gl">{c.progressUpdateId || 'Direct'}</span></td>
-                                  <td><span className="date-cell">{c.asOfDate}</span></td>
-                                  <td><span className="qty-cell">{c.actualPercent}%</span></td>
-                                  <td><span className="baseline-tag">{c.status}</span></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Section 5: Approaching Milestones */}
+                    
+{/* Section 5: Approaching Milestones */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3775,7 +3719,8 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 6: Activities With No Recent Updates (Stale) */}
+                    
+{/* Section 6: Activities With No Recent Updates (Stale) */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3834,7 +3779,76 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 7: Recent Project Changes */}
+                    
+                    </section>
+                    <section className="fl-schedule-reference" aria-labelledby="fl-schedule-reference-heading">
+                      <h3 id="fl-schedule-reference-heading" className="fl-schedule-group-heading">For reference</h3>
+                      {/* Section 4: Completed on Selected Date */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <CheckCircle2 size={18} color="var(--accent-emerald)" />
+                          <h3 className="intelligence-card-title">Completed on selected date</h3>
+                          <span className="intelligence-card-count">{intelligence.completedToday.length}</span>
+                        </div>
+                        <span className="status-badge active" data-fl-style="s1v0dyfx">
+                          Observed as-of {intelligence.asOfDate}
+                        </span>
+                      </div>
+
+                      {intelligence.completedToday.length === 0 ? (
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
+                          No activities recorded completion observations on {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Progress Update ID</th>
+                                <th>Observation Date</th>
+                                <th>Actual Progress</th>
+                                <th>Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.completedToday.map((c) => (
+                                <tr key={c.activityId}>
+                                  <td>
+                                    <span
+                                      className="act-id-cell"
+                                      data-fl-style="spyafsr"
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.externalId}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    <strong
+                                      data-fl-style="spyafsr"
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.name}
+                                    </strong>
+                                  </td>
+                                  <td><span className="mono" data-fl-style="s44g9gl">{c.progressUpdateId || 'Direct'}</span></td>
+                                  <td><span className="date-cell">{c.asOfDate}</span></td>
+                                  <td><span className="qty-cell">{c.actualPercent}%</span></td>
+                                  <td><span className="baseline-tag">{c.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    
+{/* Section 7: Recent Project Changes */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
@@ -3884,6 +3898,7 @@ function MainAppContent(): React.JSX.Element {
                         </div>
                       )}
                     </div>
+                    </section>
                   </div>
                 </>
               ) : null}
