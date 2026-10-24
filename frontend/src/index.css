@@ -9924,3 +9924,13 @@ body { background-color: var(--fl-canvas); color: var(--fl-text); }
 /* One elevated layer for dialogs. All cards, navigation and tooltips stay flat. */
 .modal-card,.capture-modal-card,.operational-modal-card,.floating-ai-panel,
 .modal-content,.modal-overlay > section[role="dialog"] { box-shadow: var(--fl-shadow-overlay); }
+
+/* Safety card uses urgency as a state, not a rainbow of inline colours. */
+.work-area-safety-banner { border-left: 4px solid var(--fl-status-info); background: var(--fl-surface); color: var(--fl-text); }
+.work-area-safety-banner[data-severity="medium"] { border-left-color: var(--fl-status-risk); }
+.work-area-safety-banner[data-severity="high"] { border-left-color: var(--fl-status-late); }
+.work-area-safety-banner .safety-indicator-chip { background: transparent; color: var(--fl-text); border: 0; padding: 0; }
+.work-area-safety-banner .safety-area-label,.work-area-safety-banner .safety-hazard-desc { color: var(--fl-text-muted); }
+.work-area-safety-banner .safety-hazard-title { color: var(--fl-text); }
+.work-area-safety-banner .safety-briefing-disclaimer { margin-top: 8px; color: var(--fl-text-muted); font-size: var(--fl-text-sm); }
+.work-area-safety-banner .ppe-chip { background: transparent; color: var(--fl-text); border: 1px solid var(--fl-hairline); border-radius: var(--fl-radius-sm); }
