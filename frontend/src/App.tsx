@@ -1,3 +1,4 @@
+import { FieldLineMark } from './components/ui/FieldLine.js';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers,
@@ -35,7 +36,7 @@ import {
   ChevronUp,
   MessageSquare,
   LayoutDashboard,
-  Sparkles,
+
   LogOut,
   Cpu
 } from 'lucide-react';
@@ -1697,7 +1698,7 @@ function MainAppContent(): React.JSX.Element {
               title="Try the demo"
               style={{ fontSize: '0.75rem', gap: '0.35rem' }}
             >
-              {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <Sparkles size={13} color="var(--accent-indigo)" />}
+              {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <FieldLineMark size={13} />}
               <span>{isSeedingDemo ? 'Preparing…' : 'Demo'}</span>
             </button>
           )}
@@ -3942,7 +3943,7 @@ function MainAppContent(): React.JSX.Element {
               onClick={() => handleSeedGoldenDemo()}
               disabled={isSeedingDemo}
             >
-              {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <Sparkles size={16} />}
+              {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <FieldLineMark size={16} />}
               <span>{isSeedingDemo ? 'Seeding Demo...' : 'Try the demo'}</span>
             </button>
             <button
@@ -3990,7 +3991,7 @@ function MainAppContent(): React.JSX.Element {
                 disabled={isSeedingDemo}
                 title="Reset demo"
               >
-                {isSeedingDemo ? <RefreshCw size={14} className="pulse-dot" /> : <Sparkles size={14} color="var(--accent-indigo)" />}
+                {isSeedingDemo ? <RefreshCw size={14} className="pulse-dot" /> : <FieldLineMark size={14} />}
                 <span>{isSeedingDemo ? 'Resetting...' : 'Reset Demo Data'}</span>
               </button>
               <button
