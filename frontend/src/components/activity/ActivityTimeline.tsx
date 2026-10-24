@@ -3,10 +3,8 @@ import {
   Calendar,
   Clock,
   TrendingUp,
-  FileText,
   Activity as ActivityIcon,
   CheckCircle2,
-  AlertCircle
 } from 'lucide-react';
 import { ActivityDetailTimelineItem } from '../../services/activity-detail/activity-detail.types.js';
 
