@@ -126,13 +126,13 @@ export function ProjectLoginView({
       }
       targetProject = projects.find((p) => p.code === 'REFINERY-U4');
       if (!targetProject) {
-        setError('Golden Demo project not found. Please click "Seed Demo" first.');
+        setError('Demo unavailable. Try again.');
         setIsSubmitting(false);
         return;
       }
     }
 
-    const demoPin = targetRole === 'worker' ? '4444' : 'RefineryAdmin2026!';
+    const demoPin = targetRole === 'worker' ? '4444' : 'Use demo access';
     setProjectId(targetProject.id);
     setAccountType(targetRole);
     setPasscode(demoPin);
@@ -165,11 +165,11 @@ export function ProjectLoginView({
         <div className="login-card-header">
           <div className="login-badge-pill">
             <ShieldCheck size={14} className="login-badge-icon" />
-            <span>FieldLine Secure Gateway</span>
+            <span>FieldLine</span>
           </div>
-          <h1 className="login-title">Project Control Room & Execution Access</h1>
+          <h1 className="login-title">Sign in to FieldLine</h1>
           <p className="login-subtitle">
-            Select project and operational shell to authenticate and enter workspace.
+            
           </p>
         </div>
 
@@ -219,7 +219,7 @@ export function ProjectLoginView({
                     onClick={onSeedGoldenDemo}
                     disabled={isSeedingDemo}
                   >
-                    {isSeedingDemo ? 'Seeding...' : 'Load Golden Demo'}
+                    {isSeedingDemo ? 'Seeding...' : 'Try the demo'}
                   </button>
                 )}
               </div>
@@ -231,11 +231,11 @@ export function ProjectLoginView({
             )}
           </div>
 
-          {/* 2. Access Type / Operational Shell Dropdown Menu */}
+          {/* 2. Your role Dropdown Menu */}
           <div className="login-field-group">
             <label htmlFor={operationalShellSelectId} className="login-label">
               {accountType === 'worker' ? <User size={15} /> : <ShieldCheck size={15} />}
-              <span>Access Type / Operational Shell</span>
+              <span>Your role</span>
             </label>
             <div className="select-wrapper">
               <select
@@ -250,14 +250,14 @@ export function ProjectLoginView({
                 }}
                 disabled={isSubmitting}
               >
-                <option value="admin">Admin / Project Engineer (Control Room)</option>
-                <option value="worker">Field Worker (Execution Cockpit)</option>
+                <option value="admin">Project engineer</option>
+                <option value="worker">Site worker</option>
               </select>
             </div>
             <span className="login-helper-text">
               {accountType === 'worker'
                 ? 'Field Worker: Mobile crew shift tasks, 1-touch progress reporting, and voice assistant.'
-                : 'Admin / Project Engineer: Full command dashboard, schedule baselines, and variance intelligence.'}
+                : 'Admin / Project Engineer: Dashboard, schedules and progress reports.'}
             </span>
           </div>
 
@@ -285,7 +285,7 @@ export function ProjectLoginView({
                 placeholder={
                   accountType === 'worker'
                     ? 'Enter 4-digit PIN (e.g. 4444)'
-                    : 'Enter password (e.g. RefineryAdmin2026!)'
+                    : 'Enter password (e.g. Use demo access)'
                 }
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
@@ -351,8 +351,8 @@ export function ProjectLoginView({
                 <>
                   <span>
                     {accountType === 'worker'
-                      ? 'Enter Execution Cockpit'
-                      : 'Enter Admin Control Room'}
+                      ? 'Sign in'
+                      : 'Sign in'}
                   </span>
                   <ArrowRight size={16} />
                 </>
@@ -361,14 +361,14 @@ export function ProjectLoginView({
           </div>
         </form>
 
-        {/* 5. Golden Demo Instant Access (REFINERY-U4) positioned below */}
+        {/* 5. Try the demo positioned below */}
         <div className="demo-access-banner" style={{ marginTop: '1.75rem', marginBottom: 0 }}>
           <div className="demo-access-title">
             <Sparkles size={16} color="var(--accent-indigo)" />
-            <span>Golden Demo Instant Access (REFINERY-U4)</span>
+            <span>Try the demo</span>
           </div>
           <p className="demo-access-desc">
-            One-click sign-in to the SIH 2026 presentation dataset with pre-configured accounts:
+            
           </p>
           <div className="demo-chips-grid">
             <button
@@ -381,7 +381,7 @@ export function ProjectLoginView({
               <User size={15} />
               <div className="demo-chip-text">
                 <strong>Field Worker</strong>
-                <span>PIN: 4444</span>
+                <span>Use demo access</span>
               </div>
             </button>
 
@@ -395,7 +395,7 @@ export function ProjectLoginView({
               <ShieldCheck size={15} />
               <div className="demo-chip-text">
                 <strong>Admin / Superintendent</strong>
-                <span>RefineryAdmin2026!</span>
+                <span>Use demo access</span>
               </div>
             </button>
           </div>
