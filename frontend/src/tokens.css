@@ -18,9 +18,9 @@
   --fl-text-muted: #bdc6cc;
   --fl-text-subtle: #98a7b2;
   --fl-hairline: #45515b;
-  --fl-accent: #b6532d;
-  --fl-accent-hover: #a84720;
-  --fl-accent-contrast: #ffffff;
+  --fl-accent: #f1a47c;
+  --fl-accent-hover: #e89061;
+  --fl-accent-contrast: #111a24;
   --fl-status-good: #75d6a4;
   --fl-status-risk: #f2c574;
   --fl-status-late: #fa8b88;
@@ -60,6 +60,9 @@
 :root:has(.worker-cockpit-shell), :root:has(.login-shell-container) {
   color-scheme: light;
   --fl-canvas: var(--fl-paper);
+  --fl-accent: #a4401f;
+  --fl-accent-hover: #893519;
+  --fl-accent-contrast: #ffffff;
   --fl-surface: var(--fl-white);
   --fl-surface-raised: var(--fl-paper-muted);
   --fl-hover: var(--fl-paper-muted);
