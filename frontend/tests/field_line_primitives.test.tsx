@@ -48,6 +48,35 @@ describe('FieldLine UI primitives', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('traps Tab within a sheet, closes on Escape and restores focus to the trigger', () => {
+    const onClose = vi.fn();
+    function Example() {
+      const [open, setOpen] = React.useState(false);
+      return <>
+        <button onClick={() => setOpen(true)}>Open report</button>
+        <Sheet open={open} title="Report progress" onClose={() => { onClose(); setOpen(false); }}>
+          <button>Save progress</button>
+        </Sheet>
+      </>;
+    }
+    render(<Example />);
+    const trigger = screen.getByRole('button', { name: 'Open report' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const close = screen.getByRole('button', { name: 'Close' });
+    const save = screen.getByRole('button', { name: 'Save progress' });
+    expect(document.activeElement).toBe(close);
+    save.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(save);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('communicates status in words, not only through colour', () => {
     const { container } = render(<StatusDot status="late" label="Delayed" />);
     expect(screen.getByText('Delayed')).toBeTruthy();
