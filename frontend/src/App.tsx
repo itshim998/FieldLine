@@ -2100,23 +2100,23 @@ function MainAppContent(): React.JSX.Element {
                             {activities.map((act) => (
                               <tr key={act.id}>
                                 <td>
-                                  <span
+                                  <button type="button" data-fl-link="true"
                                     className="act-id-cell"
                                     data-fl-style="spyafsr"
                                     onClick={() => handleOpenActivityDetail(act.id)}
                                     title="View full activity history"
                                   >
                                     {act.externalId}
-                                  </span>
+                                  </button>
                                 </td>
                                 <td data-fl-style="s1tfn5t1">
-                                  <span
+                                  <button type="button" data-fl-link="true"
                                     data-fl-style="s8h39qv"
                                     onClick={() => handleOpenActivityDetail(act.id)}
                                     title="View full activity history"
                                   >
                                     {act.name}
-                                  </span>
+                                  </button>
                                 </td>
                                 <td>
                                   {act.wbsCode ? (
@@ -3457,23 +3457,23 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.delayed.map((d) => (
                                 <tr key={d.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(d.activityId)}
                                       title="View complete activity history"
                                     >
                                       {d.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
+                                    <button type="button" data-fl-link="true"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(d.activityId)}
                                       title="View complete activity history"
                                     >
                                       {d.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{d.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{d.actualProgress}%</span></td>
@@ -3532,23 +3532,23 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.atRisk.map((r) => (
                                 <tr key={r.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(r.activityId)}
                                       title="View complete activity history"
                                     >
                                       {r.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
+                                    <button type="button" data-fl-link="true"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(r.activityId)}
                                       title="View complete activity history"
                                     >
                                       {r.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{r.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{r.actualProgress}%</span></td>
@@ -3610,23 +3610,23 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.behindSchedule.map((b) => (
                                 <tr key={b.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(b.activityId)}
                                       title="View complete activity history"
                                     >
                                       {b.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
+                                    <button type="button" data-fl-link="true"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(b.activityId)}
                                       title="View complete activity history"
                                     >
                                       {b.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{b.plannedProgress}%</span></td>
                                   <td>
@@ -3683,23 +3683,23 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.approachingMilestones.map((m) => (
                                 <tr key={m.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(m.activityId)}
                                       title="View complete activity history"
                                     >
                                       {m.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
+                                    <button type="button" data-fl-link="true"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(m.activityId)}
                                       title="View complete activity history"
                                     >
                                       {m.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{m.milestoneDate}</span></td>
                                   <td>
@@ -3815,23 +3815,23 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.completedToday.map((c) => (
                                 <tr key={c.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(c.activityId)}
                                       title="View complete activity history"
                                     >
                                       {c.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
+                                    <button type="button" data-fl-link="true"
                                       data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(c.activityId)}
                                       title="View complete activity history"
                                     >
                                       {c.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="mono" data-fl-style="s44g9gl">{c.progressUpdateId || 'Direct'}</span></td>
                                   <td><span className="date-cell">{c.asOfDate}</span></td>
