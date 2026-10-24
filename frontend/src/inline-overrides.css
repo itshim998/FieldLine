@@ -88,3 +88,7 @@
 :root body [data-fl-style="sf3g8t3"] { margin-top: 1rem; }
 :root body [data-fl-style="sjhnvoz"] { margin: 0 1.25rem 1rem; }
 :root body [data-fl-style="ss9hc1q"] { background-color: var(--accent-rose, #f43f5e); }
+
+/* Activity-detail utility styles */
+:root body [data-fl-style="s152gntk"] { display: flex; gap: 0.75rem; margin-top: 1rem; justify-content: center; }
+:root body [data-fl-style="sl2g6zx"] { margin: 0.75rem 1.25rem 1rem; }
