@@ -1,0 +1,37 @@
+name: UI refresh validation
+
+on:
+  push:
+    branches:
+      - ui/refresh
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Frontend types, tests and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Type-check frontend
+        run: npx tsc -p tsconfig.frontend.json --noEmit
+      - name: Run frontend regression tests
+        run: npm test -- frontend/tests
+      - name: Build frontend
+        run: npm run build:frontend
