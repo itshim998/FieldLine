@@ -4,11 +4,9 @@ import {
   Layers,
   ShieldCheck,
   Plus,
-  ArrowLeft,
   Calendar,
   Clock,
   FolderGit2,
-  Edit3,
   Trash2,
   Search,
   CheckCircle2,
@@ -35,7 +33,6 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
-  LayoutDashboard,
 
   LogOut,
   Cpu
@@ -44,7 +41,7 @@ import { ProjectDashboardView } from './components/dashboard/ProjectDashboardVie
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
 import { FloatingAIAssistant } from './components/assistant/FloatingAIAssistant.js';
-import { AuthProvider, useAuth, AccountType } from './context/AuthContext.js';
+import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { ProjectLoginView } from './components/auth/ProjectLoginView.js';
 import { AdminWorkspaceView } from './components/admin/AdminWorkspaceView.js';
 import { WorkerCockpitView } from './components/worker/WorkerCockpitView.js';
@@ -335,7 +332,7 @@ interface HealthData {
 const STORAGE_KEY_SELECTED_PROJECT = 'fieldline_selected_project_id';
 
 function MainAppContent(): React.JSX.Element {
-  const { session, token, project: authProject, isAuthenticated, logout, authFetch, isLoading: isAuthLoading } = useAuth();
+  const { session, token, logout, isLoading: isAuthLoading } = useAuth();
 
   // Dual-Shell & Login State (PASS 30)
   const [isLoginView, setIsLoginView] = useState<boolean>(false);
@@ -382,7 +379,7 @@ function MainAppContent(): React.JSX.Element {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
-  const [loadingSchedules, setLoadingSchedules] = useState<boolean>(false);
+  const [, setLoadingSchedules] = useState<boolean>(false);
   const [loadingActivities, setLoadingActivities] = useState<boolean>(false);
 
   // Progress Updates State (PASS 7)
@@ -4529,11 +4526,6 @@ function MainAppContent(): React.JSX.Element {
       />
     </div>
   );
-}
-
-function envDatabaseDisplay(health: HealthData | null): string {
-  if (!health) return 'SQLite';
-  return health.database.path;
 }
 
 export function App(): React.JSX.Element {
