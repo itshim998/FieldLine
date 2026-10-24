@@ -30,7 +30,7 @@ export function ActivityReviewContext({
         </div>
         <div className="empty-matches-state">
           <ShieldCheck size={24} color="var(--text-muted)" />
-          <p className="empty-text">No AI matches are associated with this activity.</p>
+          <p className="empty-text">No reports to review.</p>
         </div>
       </div>
     );
@@ -72,7 +72,7 @@ export function ActivityReviewContext({
       <div className="canonical-protection-banner" style={{ margin: '0.75rem 1.25rem 1rem' }}>
         <CheckCircle2 size={16} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
         <span>
-          <strong>Canonical Truth Protection:</strong> Only confirmed matches are eligible to produce canonical progress observations. Suggested or rejected matches do not alter project truth.
+          <strong>Progress review:</strong> Only confirmed matches update activity progress.
         </span>
       </div>
 
@@ -93,7 +93,7 @@ export function ActivityReviewContext({
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
                           <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
@@ -111,7 +111,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -142,7 +142,7 @@ export function ActivityReviewContext({
                       )}
                     </div>
                     <span className="canonical-truth-pill eligible">
-                      ✓ Canonical Progress Eligible
+                      Included in activity progress
                     </span>
                   </div>
                 </div>
@@ -167,7 +167,7 @@ export function ActivityReviewContext({
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
                           <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
@@ -182,7 +182,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -201,9 +201,9 @@ export function ActivityReviewContext({
                   {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
 
                   <div className="match-card-bottom-row">
-                    <span className="reviewer-meta">Awaiting Human Review</span>
+                    <span className="reviewer-meta">Needs review</span>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>
@@ -228,7 +228,7 @@ export function ActivityReviewContext({
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
                           <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
                       <span className="status-badge-unresolved">Unresolved</span>
@@ -240,7 +240,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -257,7 +257,7 @@ export function ActivityReviewContext({
                   <div className="match-card-bottom-row">
                     <span className="reviewer-meta">Requires Assignment</span>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>
@@ -287,7 +287,7 @@ export function ActivityReviewContext({
                       <span>Rejected by {m.reviewedBy || 'Reviewer'}</span>
                     </div>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>
