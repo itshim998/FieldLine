@@ -5,8 +5,6 @@ import {
   Clock,
   Flag,
   AlertTriangle,
-  ChevronRight,
-  Sparkles
 } from 'lucide-react';
 
 export interface MilestoneItem {
