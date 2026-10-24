@@ -177,7 +177,7 @@ describe('TodayWorkView Component (Pass 31)', () => {
 
     // Assert loading state disappears and tasks render
     await waitFor(() => {
-      expect(screen.getByText("Today's Execution Cockpit")).toBeTruthy();
+      expect(screen.getByText("Today's work")).toBeTruthy();
       expect(screen.getByText('ACT-C01')).toBeTruthy();
       expect(screen.getByText('ACT-A02')).toBeTruthy();
       expect(screen.getByText('ACT-B03')).toBeTruthy();
