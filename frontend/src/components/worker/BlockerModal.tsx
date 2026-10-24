@@ -183,7 +183,7 @@ export function BlockerModal({
         throw new Error(data.error?.message || data.message || 'Failed to log operational blocker');
       }
 
-      setSuccess(`Blocker logged successfully! Routed directly into Risk Engine.`);
+      setSuccess(`Blocker reported.`);
       if (onBlockerLogged) {
         onBlockerLogged(data.blocker);
       }
@@ -210,7 +210,7 @@ export function BlockerModal({
             <div>
               <h2 className="modal-sheet-title">Log Operational Blocker</h2>
               <p className="modal-sheet-subtitle">
-                Flag constraints stopping field crews. Blockers immediately signal the Risk Engine and Admin Dashboard.
+                Report what is stopping work.
               </p>
             </div>
           </div>
