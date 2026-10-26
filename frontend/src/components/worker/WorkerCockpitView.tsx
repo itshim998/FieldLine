@@ -1,3 +1,4 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useCallback, useId } from 'react';
 import {
   User,
@@ -7,20 +8,15 @@ import {
   AlertTriangle,
   Clock,
   Send,
-  Sparkles,
+
   Paperclip,
   FileCheck,
-  Search,
-  Filter,
-  ArrowRight,
   RefreshCw,
   MessageSquare,
   ClipboardList,
   Flame,
-  ChevronRight,
   ShieldCheck,
   Building,
-  HardHat
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext.js';
 import { AssistantMarkdown } from '../assistant/AssistantMarkdown.js';
@@ -82,7 +78,7 @@ export function WorkerCockpitView({
 
   // Activities & Schedules state
   const [activities, setActivities] = useState<any[]>([]);
-  const [loadingActivities, setLoadingActivities] = useState<boolean>(true);
+  const [, setLoadingActivities] = useState<boolean>(true);
 
   // Recent Progress Updates state
   const [recentUpdates, setRecentUpdates] = useState<WorkerProgressUpdate[]>([]);
@@ -327,7 +323,7 @@ export function WorkerCockpitView({
         <div className="worker-identity-group">
           <div className="worker-role-badge">
             <span className="live-pulse-dot" />
-            <strong>EXECUTION COCKPIT</strong>
+            <strong>FieldLine</strong>
           </div>
           <div className="worker-project-meta">
             <h1 className="worker-project-title">
@@ -350,8 +346,8 @@ export function WorkerCockpitView({
             onClick={() => handleOpenCaptureModal(null)}
             title="Open Voice, Quantity & Photo Capture Sheet"
           >
-            <Sparkles size={14} />
-            <span>Fast Capture</span>
+            <FieldLineMark size={14} />
+            <span>Report progress</span>
           </button>
 
           {onSwitchToAdmin && (
@@ -360,10 +356,10 @@ export function WorkerCockpitView({
               id="switch-to-admin-btn"
               className="btn btn-secondary btn-sm"
               onClick={onSwitchToAdmin}
-              title="Switch to Admin Control Room"
+              title="Switch to engineer view"
             >
               <ShieldCheck size={14} color="var(--accent-indigo)" />
-              <span>Admin Control Room</span>
+              <span>Engineer view</span>
             </button>
           )}
 
@@ -404,7 +400,7 @@ export function WorkerCockpitView({
           <Flame size={18} />
           <div className="tab-meta">
             <span className="tab-title">Quick Report</span>
-            <span className="tab-counter">Fast Field Entry</span>
+            <span className="tab-counter"></span>
           </div>
         </button>
 
@@ -414,10 +410,10 @@ export function WorkerCockpitView({
           className={`worker-nav-tab ${activeWorkerTab === 'assistant' ? 'active' : ''}`}
           onClick={() => onTabChange('assistant')}
         >
-          <Sparkles size={18} />
+          <FieldLineMark size={18} />
           <div className="tab-meta">
             <span className="tab-title">Field Assistant</span>
-            <span className="tab-counter">Grounded AI</span>
+            <span className="tab-counter"></span>
           </div>
         </button>
       </nav>
@@ -444,32 +440,32 @@ export function WorkerCockpitView({
           <section className="worker-tab-pane">
             <div className="pane-banner">
               <div>
-                <h2 className="pane-title">Fast Field Progress Report</h2>
+                <h2 className="pane-title">Report progress</h2>
                 <p className="pane-desc">
-                  Log operational updates directly from the field. Updates are automatically routed to the schedule-matching engine.
+                  
                 </p>
                 <button
                   type="button"
                   id="launch-multimodal-sheet-btn"
                   className="btn btn-secondary btn-sm"
                   onClick={() => handleOpenCaptureModal(null)}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.6rem' }}
+                  data-fl-style="s64q9pt"
                 >
-                  <Sparkles size={14} color="var(--accent-amber)" />
-                  <span>Launch Multimodal Capture (Voice, Steppers & Photo)</span>
+                  <FieldLineMark size={14} />
+                  <span>Report by voice or photo</span>
                 </button>
               </div>
             </div>
 
             {reportError && (
-              <div className="login-error-alert" role="alert" style={{ marginBottom: '1rem' }}>
+              <div className="login-error-alert" role="alert" data-fl-style="s72wa23">
                 <AlertTriangle size={16} />
                 <span>{reportError}</span>
               </div>
             )}
 
             {reportSuccess && (
-              <div className="report-success-banner" role="status" style={{ marginBottom: '1rem' }}>
+              <div className="report-success-banner" role="status" data-fl-style="s72wa23">
                 <CheckCircle2 size={16} />
                 <span>{reportSuccess}</span>
               </div>
@@ -707,16 +703,16 @@ export function WorkerCockpitView({
           <section className="worker-tab-pane">
             <div className="pane-banner">
               <div>
-                <h2 className="pane-title">Operational Field Assistant</h2>
+                <h2 className="pane-title">Ask FieldLine</h2>
                 <p className="pane-desc">
-                  Ask grounded questions about project tasks, critical delays, and scheduled work packages.
+                  
                 </p>
               </div>
             </div>
 
             {/* Quick Query Suggestions */}
             <div className="assistant-suggestions-bar">
-              <span className="suggestion-label">Suggested Queries:</span>
+              <span className="suggestion-label"></span>
               <div className="suggestion-chips-grid">
                 <button
                   type="button"
@@ -793,7 +789,7 @@ export function WorkerCockpitView({
 
             {/* Assistant Response Area */}
             {assistantError && (
-              <div className="login-error-alert" role="alert" style={{ marginTop: '1rem' }}>
+              <div className="login-error-alert" role="alert" data-fl-style="sf3g8t3">
                 <AlertTriangle size={16} />
                 <span>{assistantError}</span>
               </div>
@@ -802,8 +798,8 @@ export function WorkerCockpitView({
             {assistantLoading && (
               <div className="assistant-thinking-card">
                 <RefreshCw size={24} className="pulse-dot" />
-                <h4>Consulting Project Schedule & Verification Facts...</h4>
-                <p>Grounded in active SQLite schedule activities and verified field evidence.</p>
+                <h4>Checking the schedule...</h4>
+                <p></p>
               </div>
             )}
 
@@ -811,8 +807,8 @@ export function WorkerCockpitView({
               <div className="worker-assistant-response-card">
                 <div className="response-header">
                   <div className="response-badge">
-                    <Sparkles size={14} color="var(--accent-indigo)" />
-                    <span>Grounded Field Intelligence</span>
+                    <FieldLineMark size={14} />
+                    <span>Answer</span>
                   </div>
                   <span className="response-asof">As of {assistantResponse.asOfDate}</span>
                 </div>
@@ -824,7 +820,7 @@ export function WorkerCockpitView({
                 {/* Verified Facts Chips */}
                 {assistantResponse.verifiedFacts && assistantResponse.verifiedFacts.length > 0 && (
                   <div className="response-facts-section">
-                    <h4 className="facts-title">Verified Facts ({assistantResponse.verifiedFacts.length})</h4>
+                    <h4 className="facts-title">Based on ({assistantResponse.verifiedFacts.length})</h4>
                     <div className="facts-grid">
                       {assistantResponse.verifiedFacts.map((fact: any) => (
                         <div key={fact.ref} className="verified-fact-chip">

@@ -3,12 +3,9 @@ import {
   AlertTriangle,
   AlertCircle,
   Clock,
-  ShieldCheck,
   ChevronRight,
   HelpCircle,
-  Sparkles,
   CheckCircle2,
-  Calendar
 } from 'lucide-react';
 
 export interface DelayedFact {
@@ -109,13 +106,13 @@ export function AttentionSummary({
       <div className="attention-header">
         <div className="attention-title-group">
           <AlertCircle size={18} color="var(--accent-amber)" />
-          <h3 className="section-title">Items Requiring Attention</h3>
+          <h3 className="section-title">Needs attention</h3>
         </div>
         <span
           className={`attention-total-badge ${totalAttentionItems > 0 ? 'warning' : 'success'}`}
         >
           {totalAttentionItems === 0
-            ? '✓ All Healthy'
+            ? 'Nothing needs review'
             : `${totalAttentionItems} Action ${totalAttentionItems === 1 ? 'Item' : 'Items'}`}
         </span>
       </div>
@@ -125,9 +122,9 @@ export function AttentionSummary({
           <div className="empty-state-icon-circle success">
             <CheckCircle2 size={24} color="var(--accent-emerald)" />
           </div>
-          <h4 className="attention-empty-title">Zero Operational Blockers</h4>
+          <h4 className="attention-empty-title">Nothing needs attention</h4>
           <p className="attention-empty-desc">
-            No activities are delayed, at risk, or stale, and all AI matches have been confirmed into canonical truth.
+            All scheduled work has been reported or reviewed.
           </p>
         </div>
       ) : (
@@ -199,7 +196,7 @@ export function AttentionSummary({
                 <div className="attention-block-title-group">
                   <HelpCircle size={15} color="#c084fc" />
                   <span className="attention-block-title">
-                    Unresolved Match Reviews ({unresolvedMatchesCount})
+                    Reports to match ({unresolvedMatchesCount})
                   </span>
                 </div>
                 <button
@@ -207,7 +204,7 @@ export function AttentionSummary({
                   className="attention-action-link purple"
                   onClick={() => onNavigateToProgressReview && onNavigateToProgressReview()}
                 >
-                  <span>Open Review Queue</span>
+                  <span>Review reports</span>
                   <ChevronRight size={13} />
                 </button>
               </div>
@@ -318,7 +315,7 @@ export function AttentionSummary({
                     <div className="attention-row-main">
                       <div className="attention-pill-group">
                         <span className="code-pill amber">{item.externalId}</span>
-                        <span className="attention-variance-warning" style={{ color: 'var(--accent-amber)' }}>
+                        <span className="attention-variance-warning" data-fl-style="s1nk60cr">
                           {item.progressVariance} pts variance
                         </span>
                       </div>
@@ -341,7 +338,7 @@ export function AttentionSummary({
                 <div className="attention-block-title-group">
                   <Clock size={15} color="var(--accent-indigo)" />
                   <span className="attention-block-title">
-                    Stale Field Updates ({staleCount})
+                    Missing reports ({staleCount})
                   </span>
                 </div>
                 <button
@@ -349,7 +346,7 @@ export function AttentionSummary({
                   className="attention-action-link indigo"
                   onClick={() => onNavigateToIntelligence && onNavigateToIntelligence()}
                 >
-                  <span>View Stale Feed</span>
+                  <span>View activities</span>
                   <ChevronRight size={13} />
                 </button>
               </div>

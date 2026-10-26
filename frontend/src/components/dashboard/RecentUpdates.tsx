@@ -144,7 +144,7 @@ export function RecentUpdates({
       </div>
 
       {updates.length === 0 ? (
-        <div className="empty-state-card" style={{ padding: '2.5rem 1rem' }}>
+        <div className="empty-state-card" data-fl-style="s5ehtun">
           <div className="empty-icon-wrapper">
             <Activity size={28} />
           </div>
@@ -198,7 +198,7 @@ export function RecentUpdates({
                 <div className="update-observations-bar">
                   <div className="obs-header-label">
                     <CheckCircle2 size={13} color="var(--accent-emerald)" />
-                    <span>Canonical Progress Recorded:</span>
+                    <span>Progress recorded:</span>
                   </div>
                   <div className="obs-chips-list">
                     {upd.canonicalObservations.map((obs) => (
@@ -283,7 +283,7 @@ export function RecentUpdates({
                           type="button"
                           className="btn-evidence-trace"
                           onClick={() => onTraceEvidence && onTraceEvidence(ev.id)}
-                          title={`Trace Provenance: ${ev.fileName}`}
+                          title={`View related file: ${ev.fileName}`}
                         >
                           <Paperclip size={12} />
                           <span>Evidence: {ev.fileName}</span>

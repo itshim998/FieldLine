@@ -603,13 +603,13 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         />
       );
 
-      const triggerBtn = screen.getByRole('button', { name: /Toggle FieldLine AI Assistant/i });
+      const triggerBtn = screen.getByRole('button', { name: /Toggle Ask FieldLine Assistant/i });
       expect(triggerBtn).toBeDefined();
 
       // Open panel
       fireEvent.click(triggerBtn);
       expect(screen.getByRole('dialog')).toBeDefined();
-      expect(screen.getByText('FieldLine AI')).toBeDefined();
+      expect(screen.getByText('Ask FieldLine')).toBeDefined();
       expect(screen.getByRole('button', { name: /Start Live Voice Assistant/i })).toBeDefined();
     });
 
@@ -622,7 +622,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       );
 
       // Open panel
-      fireEvent.click(screen.getByRole('button', { name: /Toggle FieldLine AI Assistant/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Toggle Ask FieldLine Assistant/i }));
 
       // Locate Live Voice mic button in footer
       const micBtn = screen.getByRole('button', { name: /Start Live Voice Assistant/i });
@@ -636,7 +636,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       // Verify HUD renders with status, badges, and visualizer
       expect(document.getElementById('floating-ai-live-hud')).toBeDefined();
       expect(screen.getByText('Live Voice', { selector: '.live-model-badge' })).toBeDefined();
-      expect(screen.getByLabelText('Audio Visualizer')).toBeDefined();
+      expect(screen.getByLabelText('Voice activity')).toBeDefined();
 
       const ws = MockWebSocket.lastInstance!;
       await act(async () => {
@@ -648,9 +648,8 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         });
       });
 
-      // Active slot badge should show Slot 05
-      expect(screen.getByText('Slot 05')).toBeDefined();
-      expect(screen.getByText('LISTENING...')).toBeDefined();
+      // Connection routing details remain internal; workers only see the voice state.
+      expect(screen.getByText('Listening...')).toBeDefined();
 
       // Click mic button again to stop Live Voice
       await act(async () => {
@@ -668,7 +667,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /Toggle FieldLine AI Assistant/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Toggle Ask FieldLine Assistant/i }));
       const micBtn = screen.getByRole('button', { name: /Start Live Voice Assistant/i });
 
       await act(async () => {
@@ -705,7 +704,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /Toggle FieldLine AI Assistant/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Toggle Ask FieldLine Assistant/i }));
       const micBtn = screen.getByRole('button', { name: /Start Live Voice Assistant/i });
 
       await act(async () => {
@@ -726,7 +725,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       });
 
       // Verify progress confirmation card
-      expect(screen.getByText('Update Verified & Saved')).toBeDefined();
+      expect(screen.getByText('Progress saved')).toBeDefined();
       expect(screen.getByText('75%')).toBeDefined();
       expect(screen.getByText('Update verified: Bridge Deck Pour is saved at 75%.')).toBeDefined();
 
@@ -746,7 +745,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /Toggle FieldLine AI Assistant/i }));
+      fireEvent.click(screen.getByRole('button', { name: /Toggle Ask FieldLine Assistant/i }));
       const micBtn = screen.getByRole('button', { name: /Start Live Voice Assistant/i });
 
       // Start live voice on Project 1
@@ -762,7 +761,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       });
 
       // Switch project in dropdown to Project 2 (HBR-02)
-      const projectSelect = screen.getByTitle('Select project context for AI queries');
+      const projectSelect = screen.getByTitle('Choose project');
       await act(async () => {
         fireEvent.change(projectSelect, { target: { value: 'proj-002' } });
       });

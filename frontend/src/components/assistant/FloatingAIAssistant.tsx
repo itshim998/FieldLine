@@ -1,10 +1,11 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Send,
   RefreshCw,
   MessageSquare,
-  Sparkles,
+
   AlertCircle,
   ChevronDown,
   ChevronUp,
@@ -12,7 +13,6 @@ import {
   FolderGit2,
   Mic,
   MicOff,
-  Radio,
   CheckCircle2,
   ExternalLink
 } from 'lucide-react';
@@ -55,7 +55,6 @@ const SUGGESTED_QUESTIONS = [
 export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
   projects,
   currentProject,
-  onNavigateToProject,
   onNavigateToActivity,
   asOfDate = new Date().toISOString().slice(0, 10)
 }) => {
@@ -149,7 +148,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
           id: `err-${Date.now()}`,
           role: 'assistant',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          error: 'Please create or select a project first to query the AI assistant.'
+          error: 'Choose a project first.'
         }
       ]);
       return;
@@ -255,7 +254,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         id: `ai-net-err-${Date.now()}`,
         role: 'assistant',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        error: 'Network connection issue. Unable to reach FieldLine AI intelligence service.'
+        error: 'Network connection issue. Could not connect to FieldLine. Try again.'
       };
       setMessages((prev) => [...prev, netErr]);
     } finally {
@@ -287,12 +286,12 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
         id="floating-ai-assistant-btn"
         className={`floating-ai-trigger ${isOpen ? 'active' : ''}`}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="Toggle FieldLine AI Assistant"
-        title="Ask FieldLine AI Assistant"
+        aria-label="Toggle Ask FieldLine Assistant"
+        title="Ask Ask FieldLine Assistant"
         type="button"
       >
         <div className="floating-ai-trigger-inner">
-          <Sparkles size={20} color="#ffffff" />
+          <FieldLineMark size={20} />
         </div>
       </button>
 
@@ -319,7 +318,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
             <div className="floating-ai-header">
               <div className="floating-ai-title-wrap">
                 <h3 id="floating-ai-title" className="floating-ai-title">
-                  FieldLine AI
+                  Ask FieldLine
                 </h3>
               </div>
 
@@ -334,7 +333,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                     onChange={(e) => {
                       setSelectedProjectId(e.target.value);
                     }}
-                    title="Select project context for AI queries"
+                    title="Choose project"
                   >
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
@@ -381,28 +380,23 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       <span className={`live-status-dot ${liveSession.connectionState === 'error' ? 'error' : liveSession.connectionState === 'connecting' ? 'connecting' : liveSession.isSpeaking ? 'speaking' : liveSession.connectionState === 'handover' ? 'handover' : 'listening'}`} />
                       <span className="live-status-text">
                         {liveSession.connectionState === 'connecting'
-                          ? 'CONNECTING TO LIVE VOICE...'
+                          ? 'Connecting...'
                           : liveSession.connectionState === 'error'
-                          ? (liveSession.error || 'CONNECTION FAILED')
+                          ? (liveSession.error || 'Connection failed')
                           : liveSession.connectionState === 'handover'
-                          ? 'SESSION HANDOVER...'
+                          ? 'Switching...'
                           : liveSession.isSpeaking
-                          ? 'ASSISTANT SPEAKING...'
-                          : 'LISTENING...'}
+                          ? 'Speaking...'
+                          : 'Listening...'}
                       </span>
                     </div>
                     <div className="live-hud-badges">
-                      {liveSession.activeSlot && (
-                        <span className="live-slot-badge" title="Active Key Slot">
-                          Slot {liveSession.activeSlot}
-                        </span>
-                      )}
                       <span className="live-model-badge">Live Voice</span>
                     </div>
                   </div>
 
                   {/* Audio Equalizer Frequency Bars */}
-                  <div className="live-voice-visualizer" aria-label="Audio Visualizer">
+                  <div className="live-voice-visualizer" aria-label="Voice activity">
                     {liveSession.frequencyBars.map((height, idx) => (
                       <div
                         key={idx}
@@ -440,7 +434,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                           <div className="verified-card-header">
                             <div className="verified-card-title-wrap">
                               <CheckCircle2 size={15} className="verified-check-icon" />
-                              <span className="verified-card-title">Update Verified &amp; Saved</span>
+                              <span className="verified-card-title">Progress saved</span>
                             </div>
                             <span className="verified-progress-pill">{upd.progressPercent}%</span>
                           </div>
@@ -469,9 +463,9 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
               {messages.length === 0 ? (
                 <div className="floating-ai-welcome">
                   <div className="floating-ai-welcome-badge">
-                    <Sparkles size={22} />
+                    <FieldLineMark size={22} />
                   </div>
-                  <h4 className="floating-ai-welcome-title">How can I assist your project?</h4>
+                  <h4 className="floating-ai-welcome-title">Ask about work, progress or dates</h4>
 
                   {/* Quick-start Suggestions */}
                   <div className="floating-ai-suggestions-box">
@@ -510,8 +504,8 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                             <div className="floating-ai-response-content">
                               {/* Ambiguous Candidates */}
                               {msg.response.ambiguousCandidates && msg.response.ambiguousCandidates.length > 0 && (
-                                <div className="assistant-candidates-box" style={{ padding: '0.5rem', marginBottom: '0.5rem' }}>
-                                  <span className="assistant-candidates-title" style={{ fontSize: '0.75rem' }}>
+                                <div className="assistant-candidates-box" data-fl-style="s73spmo">
+                                  <span className="assistant-candidates-title" data-fl-style="s1v0dyfx">
                                     Select an activity to query:
                                   </span>
                                   <div className="assistant-candidates-list">
@@ -520,7 +514,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                         key={cand.id}
                                         type="button"
                                         className="assistant-candidate-btn"
-                                        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem' }}
+                                        data-fl-style="sirxuku"
                                         onClick={() => handleSendQuery(`What is the status of ${cand.name}?`)}
                                       >
                                         {cand.name} ({cand.externalId})
@@ -551,7 +545,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                     onClick={() => toggleFactsAccordion(msg.id)}
                                   >
                                     <span>
-                                      Citations &amp; Fact Set ({msg.response.verifiedFacts.length})
+                                      Based on ({msg.response.verifiedFacts.length})
                                     </span>
                                     {expandedFactsMap[msg.id] ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                                   </button>
@@ -561,11 +555,11 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                                       {msg.response.verifiedFacts.map((fact) => (
                                         <div key={fact.ref} className="floating-fact-card">
                                           <div className="floating-fact-head">
-                                            <span className="assistant-fact-ref-badge" style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem' }}>
+                                            <span className="assistant-fact-ref-badge" data-fl-style="su42mu4">
                                               {fact.ref}
                                             </span>
                                             {fact.externalId && (
-                                              <span className="act-id-cell" style={{ fontSize: '0.7rem' }}>
+                                              <span className="act-id-cell" data-fl-style="s1v0dyfx">
                                                 {fact.externalId}
                                               </span>
                                             )}
@@ -591,7 +585,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       <div className="floating-ai-bubble loading">
                         <RefreshCw size={15} className="pulse-dot" color="#818cf8" />
                         <span className="floating-loading-text">
-                          Evaluating verified facts for {activeTargetProject?.code || 'project'}...
+                          Checking project records for {activeTargetProject?.code || 'project'}...
                         </span>
                       </div>
                     </div>

@@ -1,12 +1,9 @@
 import React from 'react';
 import {
-  TrendingUp,
   AlertTriangle,
-  CheckCircle2,
   Clock,
   Calendar,
   AlertCircle,
-  ShieldAlert,
   ShieldCheck
 } from 'lucide-react';
 import {
@@ -68,8 +65,8 @@ export function ActivityCurrentState({
       <div className="current-state-card-header">
         <div className="current-state-title-group">
           <ShieldCheck size={18} color="var(--accent-blue)" />
-          <h3 className="current-state-section-title">CURRENT STATE</h3>
-          <span className="as-of-badge">Evaluated as of {current.asOfDate}</span>
+          <h3 className="current-state-section-title">Current progress</h3>
+          <span className="as-of-badge">As of {current.asOfDate}</span>
         </div>
 
         <div className="current-state-header-badges">
@@ -82,7 +79,7 @@ export function ActivityCurrentState({
           {current.flaggedForVerification && (
             <span className="verification-flag-pill">
               <AlertTriangle size={13} />
-              <span>Last update flagged for supervisor verification</span>
+              <span>Supervisor review needed</span>
             </span>
           )}
           <span className={`risk-classification-pill ${getRiskBadgeClass(current.riskClassification)}`}>
@@ -179,7 +176,7 @@ export function ActivityCurrentState({
         <div className="current-risk-reasons-panel">
           <div className="risk-reasons-title">
             <AlertCircle size={14} color="var(--accent-amber)" />
-            <span>Risk Analysis Signals & Deterministic Reasons:</span>
+            <span>Reasons for risk</span>
           </div>
           <div className="risk-reasons-list">
             {current.riskReasons.map((r: any, idx: number) => (

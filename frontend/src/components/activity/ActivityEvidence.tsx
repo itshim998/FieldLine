@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paperclip, FileText, Download, ExternalLink, Calendar, HardDrive } from 'lucide-react';
+import { Paperclip, FileText, ExternalLink, Calendar, } from 'lucide-react';
 import { ActivityDetailEvidence } from '../../services/activity-detail/activity-detail.types.js';
 
 export interface ActivityEvidenceProps {
@@ -17,14 +17,14 @@ export function ActivityEvidence({
         <div className="evidence-header">
           <div className="evidence-title-group">
             <Paperclip size={18} color="var(--accent-blue)" />
-            <h3 className="evidence-section-title">ORIGINATING EVIDENCE</h3>
+            <h3 className="evidence-section-title">Photos & documents</h3>
           </div>
         </div>
         <div className="empty-evidence-state">
           <Paperclip size={24} color="var(--text-muted)" />
           <p className="empty-text">No evidence is linked to this activity.</p>
           <span className="empty-subtext">
-            Evidence uploaded and confirmed through field progress reports will be traceable here.
+            
           </span>
         </div>
       </div>
@@ -59,7 +59,7 @@ export function ActivityEvidence({
       <div className="evidence-header">
         <div className="evidence-title-group">
           <Paperclip size={18} color="var(--accent-blue)" />
-          <h3 className="evidence-section-title">ORIGINATING EVIDENCE</h3>
+          <h3 className="evidence-section-title">Photos & documents</h3>
           <span className="evidence-count-badge">
             {evidence.length} {evidence.length === 1 ? 'File' : 'Files'}
           </span>
@@ -96,7 +96,7 @@ export function ActivityEvidence({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn btn-secondary btn-sm evidence-open-btn"
-                title="Open evidence file securely"
+                title="Open file"
               >
                 <ExternalLink size={12} />
                 <span>View</span>

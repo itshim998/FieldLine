@@ -65,7 +65,7 @@ describe('Pass 34 — Worker Cockpit Field Assistant & Query Suggestions Tests',
       </AuthProvider>
     );
 
-    expect(screen.getByText(/Operational Field Assistant/i)).toBeDefined();
+    expect(screen.getByText(/Ask FieldLine/i)).toBeDefined();
 
     // Verify Pass 34 quick query suggestion chips
     expect(screen.getByText('"What are we doing in Area C?"')).toBeDefined();

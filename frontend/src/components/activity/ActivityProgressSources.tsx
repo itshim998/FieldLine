@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, User, Calendar, Clock, CheckCircle2 } from 'lucide-react';
+import { FileText, User, Calendar, } from 'lucide-react';
 import { ActivityDetailProgressUpdateItem } from '../../services/activity-detail/activity-detail.types.js';
 
 export interface ActivityProgressSourcesProps {
@@ -8,8 +8,7 @@ export interface ActivityProgressSourcesProps {
 }
 
 export function ActivityProgressSources({
-  progressUpdates,
-  onSelectUpdate
+  progressUpdates
 }: ActivityProgressSourcesProps): React.JSX.Element {
   if (!progressUpdates || progressUpdates.length === 0) {
     return (
@@ -17,7 +16,7 @@ export function ActivityProgressSources({
         <div className="sources-header">
           <div className="sources-title-group">
             <FileText size={18} color="var(--accent-blue)" />
-            <h3 className="sources-section-title">ORIGINATING PROGRESS REPORTS</h3>
+            <h3 className="sources-section-title">Progress reports</h3>
           </div>
         </div>
         <div className="empty-sources-state">
@@ -49,7 +48,7 @@ export function ActivityProgressSources({
       <div className="sources-header">
         <div className="sources-title-group">
           <FileText size={18} color="var(--accent-blue)" />
-          <h3 className="sources-section-title">ORIGINATING PROGRESS REPORTS</h3>
+          <h3 className="sources-section-title">Progress reports</h3>
           <span className="sources-count-badge">
             {progressUpdates.length} {progressUpdates.length === 1 ? 'Report' : 'Reports'}
           </span>

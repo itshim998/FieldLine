@@ -132,7 +132,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
             status: 201,
             json: async () => ({
               status: 'confirmed',
-              message: `Update verified: Foundation Footing Concrete Pour saved at ${derivedPct}%.`,
+              message: `Progress saved: Foundation Footing Concrete Pour saved at ${derivedPct}%.`,
               derivedPercent: derivedPct,
               progressUpdate: {
                 id: 'up-12345',
@@ -194,7 +194,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
       </AuthProvider>
     );
 
-    expect(screen.getByText('FRICTIONLESS FIELD CAPTURE')).toBeTruthy();
+    expect(screen.getByText('Report on ACT-FOUND-01')).toBeTruthy();
     expect(screen.getByText('Report on ACT-FOUND-01')).toBeTruthy();
     expect(screen.getByText('Foundation Footing Concrete Pour')).toBeTruthy();
     expect(screen.getByText('100 m3')).toBeTruthy();
@@ -229,8 +229,8 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
     const photoTabBtn = screen.getByRole('button', { name: /Photo Capture/i });
     fireEvent.click(photoTabBtn);
 
-    expect(screen.getByText(/Snap Photo or Upload Field Evidence/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /Upload & Attach Photo Evidence/i })).toBeTruthy();
+    expect(screen.getByText(/Add photo/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Attach photo/i })).toBeTruthy();
   });
 
   it('3. Rapid Quantity tab: calculates percentage from actual quantity and steppers adjust percent', async () => {
@@ -290,7 +290,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
     fireEvent.change(qtyInput, { target: { value: '80' } });
 
     // Submit form
-    const submitBtn = screen.getByRole('button', { name: /Commit Verified Progress/i });
+    const submitBtn = screen.getByRole('button', { name: /Save progress/i });
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
@@ -304,7 +304,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
 
     // Check success banner appears
     await waitFor(() => {
-      expect(screen.getByText(/Update verified/i)).toBeTruthy();
+      expect(screen.getByText(/Progress saved/i)).toBeTruthy();
     });
   });
 
@@ -349,7 +349,7 @@ describe('Pass 32 — WorkerReportModal Component Tests', () => {
     });
 
     // Submit photo report
-    const submitPhotoBtn = screen.getByRole('button', { name: /Upload & Attach Photo Evidence/i });
+    const submitPhotoBtn = screen.getByRole('button', { name: /Attach photo/i });
     fireEvent.click(submitPhotoBtn);
 
     await waitFor(() => {

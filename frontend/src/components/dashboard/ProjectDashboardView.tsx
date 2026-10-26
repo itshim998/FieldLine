@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   RefreshCw,
-  AlertCircle,
   Calendar,
-  Layers,
-  ArrowRight,
-  TrendingUp,
   ShieldAlert
 } from 'lucide-react';
 import { ProjectHealth } from './ProjectHealth.js';
@@ -210,7 +206,7 @@ export function ProjectDashboardView({
     return (
       <div className="dashboard-loading-container">
         <RefreshCw size={28} className="pulse-dot" color="var(--accent-blue)" />
-        <p className="loading-text">Composing Project Operational Snapshot...</p>
+        <p className="loading-text">Loading dashboard...</p>
       </div>
     );
   }

@@ -1,9 +1,10 @@
+import { FieldLineMark } from '../ui/FieldLine.js';
 import React, { useState, useEffect, useId } from 'react';
 import {
   ShieldCheck,
   User,
   Lock,
-  Sparkles,
+
   ArrowRight,
   RefreshCw,
   FolderGit2,
@@ -71,7 +72,6 @@ export function ProjectLoginView({
     }
   }, [selectedProjectId, projects, projectId]);
 
-  const activeProject = projects.find((p) => p.id === projectId);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -126,7 +126,7 @@ export function ProjectLoginView({
       }
       targetProject = projects.find((p) => p.code === 'REFINERY-U4');
       if (!targetProject) {
-        setError('Golden Demo project not found. Please click "Seed Demo" first.');
+        setError('Demo unavailable. Try again.');
         setIsSubmitting(false);
         return;
       }
@@ -165,12 +165,9 @@ export function ProjectLoginView({
         <div className="login-card-header">
           <div className="login-badge-pill">
             <ShieldCheck size={14} className="login-badge-icon" />
-            <span>FieldLine Secure Gateway</span>
+            <span>FieldLine</span>
           </div>
-          <h1 className="login-title">Project Control Room & Execution Access</h1>
-          <p className="login-subtitle">
-            Select project and operational shell to authenticate and enter workspace.
-          </p>
+          <h1 className="login-title">Sign in to FieldLine</h1>
         </div>
 
         {/* Streamlined Login Form */}
@@ -182,7 +179,7 @@ export function ProjectLoginView({
             </div>
           )}
 
-          {/* 1. Target Infrastructure Project Dropdown */}
+          {/* 1. Project Dropdown */}
           <div className="login-field-group">
             <label htmlFor={projectSelectId} className="login-label">
               <FolderGit2 size={15} />
@@ -219,23 +216,18 @@ export function ProjectLoginView({
                     onClick={onSeedGoldenDemo}
                     disabled={isSeedingDemo}
                   >
-                    {isSeedingDemo ? 'Seeding...' : 'Load Golden Demo'}
+                    {isSeedingDemo ? 'Seeding...' : 'Try the demo'}
                   </button>
                 )}
               </div>
             )}
-            {activeProject && (
-              <span className="login-helper-text">
-                {activeProject.description || 'Active industrial project workspace'}
-              </span>
-            )}
           </div>
 
-          {/* 2. Access Type / Operational Shell Dropdown Menu */}
+          {/* 2. Your role Dropdown Menu */}
           <div className="login-field-group">
             <label htmlFor={operationalShellSelectId} className="login-label">
               {accountType === 'worker' ? <User size={15} /> : <ShieldCheck size={15} />}
-              <span>Access Type / Operational Shell</span>
+              <span>Your role</span>
             </label>
             <div className="select-wrapper">
               <select
@@ -250,15 +242,10 @@ export function ProjectLoginView({
                 }}
                 disabled={isSubmitting}
               >
-                <option value="admin">Admin / Project Engineer (Control Room)</option>
-                <option value="worker">Field Worker (Execution Cockpit)</option>
+                <option value="admin">Project engineer</option>
+                <option value="worker">Site worker</option>
               </select>
             </div>
-            <span className="login-helper-text">
-              {accountType === 'worker'
-                ? 'Field Worker: Mobile crew shift tasks, 1-touch progress reporting, and voice assistant.'
-                : 'Admin / Project Engineer: Full command dashboard, schedule baselines, and variance intelligence.'}
-            </span>
           </div>
 
           {/* 3. Password Placeholder Input */}
@@ -266,50 +253,31 @@ export function ProjectLoginView({
             <label htmlFor={passcodeFieldId} className="login-label">
               {accountType === 'worker' ? <KeyRound size={15} /> : <Lock size={15} />}
               <span>
-                {accountType === 'worker' ? 'Worker Passcode / PIN' : 'Administrator Password'}
+                {accountType === 'worker' ? 'Worker PIN' : 'Password'}
               </span>
             </label>
-            <div className="passcode-input-wrapper" style={{ position: 'relative' }}>
+            <div className="passcode-input-wrapper">
               <input
                 id={passcodeFieldId}
-                type={
-                  accountType === 'worker'
-                    ? 'text'
-                    : showPassword
-                    ? 'text'
-                    : 'password'
-                }
+                type={showPassword ? 'text' : 'password'}
                 inputMode={accountType === 'worker' ? 'numeric' : 'text'}
                 autoComplete="current-password"
-                className="login-input"
+                className={`login-input ${accountType === 'admin' ? 'login-input--with-reveal' : ''}`}
                 placeholder={
                   accountType === 'worker'
-                    ? 'Enter 4-digit PIN (e.g. 4444)'
-                    : 'Enter password (e.g. RefineryAdmin2026!)'
+                    ? 'Enter 4-digit PIN'
+                    : 'Enter password'
                 }
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
                 disabled={isSubmitting || isLoading}
-                style={{ paddingRight: accountType === 'admin' ? '2.5rem' : '0.9rem' }}
                 autoFocus
               />
               {accountType === 'admin' && (
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  style={{
-                    position: 'absolute',
-                    right: '0.75rem',
-                    top: '50%',
-                    transform: 'translateY(-50%)',
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    padding: '0.2rem',
-                    display: 'flex',
-                    alignItems: 'center'
-                  }}
+                  className="login-password-toggle"
                   title={showPassword ? 'Hide password' : 'Show password'}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
@@ -317,11 +285,6 @@ export function ProjectLoginView({
                 </button>
               )}
             </div>
-            <span className="login-helper-text">
-              {accountType === 'worker'
-                ? 'PIN is shared among verified field crew personnel on this project.'
-                : 'Project Superintendent or Field Engineer credentials.'}
-            </span>
           </div>
 
           {/* 4. Login Button */}
@@ -349,11 +312,7 @@ export function ProjectLoginView({
                 </>
               ) : (
                 <>
-                  <span>
-                    {accountType === 'worker'
-                      ? 'Enter Execution Cockpit'
-                      : 'Enter Admin Control Room'}
-                  </span>
+                  <span>Sign in</span>
                   <ArrowRight size={16} />
                 </>
               )}
@@ -361,15 +320,12 @@ export function ProjectLoginView({
           </div>
         </form>
 
-        {/* 5. Golden Demo Instant Access (REFINERY-U4) positioned below */}
-        <div className="demo-access-banner" style={{ marginTop: '1.75rem', marginBottom: 0 }}>
+        {/* 5. Try the demo positioned below */}
+        <div className="demo-access-banner demo-access-banner--separated">
           <div className="demo-access-title">
-            <Sparkles size={16} color="var(--accent-indigo)" />
-            <span>Golden Demo Instant Access (REFINERY-U4)</span>
+            <FieldLineMark size={16} />
+            <span>Try the demo</span>
           </div>
-          <p className="demo-access-desc">
-            One-click sign-in to the SIH 2026 presentation dataset with pre-configured accounts:
-          </p>
           <div className="demo-chips-grid">
             <button
               type="button"
@@ -381,7 +337,7 @@ export function ProjectLoginView({
               <User size={15} />
               <div className="demo-chip-text">
                 <strong>Field Worker</strong>
-                <span>PIN: 4444</span>
+                <span>Use demo access</span>
               </div>
             </button>
 
@@ -395,7 +351,7 @@ export function ProjectLoginView({
               <ShieldCheck size={15} />
               <div className="demo-chip-text">
                 <strong>Admin / Superintendent</strong>
-                <span>RefineryAdmin2026!</span>
+                <span>Use demo access</span>
               </div>
             </button>
           </div>

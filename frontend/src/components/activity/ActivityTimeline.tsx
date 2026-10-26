@@ -3,10 +3,8 @@ import {
   Calendar,
   Clock,
   TrendingUp,
-  FileText,
   Activity as ActivityIcon,
   CheckCircle2,
-  AlertCircle
 } from 'lucide-react';
 import { ActivityDetailTimelineItem } from '../../services/activity-detail/activity-detail.types.js';
 
@@ -25,7 +23,7 @@ export function ActivityTimeline({
         <div className="timeline-header">
           <div className="timeline-title-group">
             <ActivityIcon size={18} color="var(--accent-blue)" />
-            <h3 className="timeline-section-title">ACTIVITY PROGRESS TIMELINE</h3>
+            <h3 className="timeline-section-title">Progress history</h3>
           </div>
         </div>
         <div className="empty-timeline-state">
@@ -64,7 +62,7 @@ export function ActivityTimeline({
       <div className="timeline-header">
         <div className="timeline-title-group">
           <ActivityIcon size={18} color="var(--accent-blue)" />
-          <h3 className="timeline-section-title">ACTIVITY PROGRESS TIMELINE</h3>
+          <h3 className="timeline-section-title">Progress history</h3>
           <span className="timeline-count-badge">
             {timeline.length} {timeline.length === 1 ? 'Observation' : 'Observations'}
           </span>

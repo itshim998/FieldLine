@@ -7,8 +7,7 @@ import {
   User,
   Clock,
   Check,
-  HelpCircle,
-  Cpu
+  HelpCircle
 } from 'lucide-react';
 import { ActivityDetailMatch } from '../../services/activity-detail/activity-detail.types.js';
 
@@ -25,12 +24,12 @@ export function ActivityReviewContext({
         <div className="matches-header">
           <div className="matches-title-group">
             <ShieldCheck size={18} color="var(--accent-blue)" />
-            <h3 className="matches-section-title">MATCH & REVIEW CONTEXT</h3>
+            <h3 className="matches-section-title">Report matching</h3>
           </div>
         </div>
         <div className="empty-matches-state">
           <ShieldCheck size={24} color="var(--text-muted)" />
-          <p className="empty-text">No AI matches are associated with this activity.</p>
+          <p className="empty-text">No reports to review.</p>
         </div>
       </div>
     );
@@ -62,17 +61,17 @@ export function ActivityReviewContext({
       <div className="matches-header">
         <div className="matches-title-group">
           <ShieldCheck size={18} color="var(--accent-blue)" />
-          <h3 className="matches-section-title">MATCH & REVIEW CONTEXT</h3>
+          <h3 className="matches-section-title">Report matching</h3>
           <span className="matches-count-badge">
-            {matches.length} {matches.length === 1 ? 'Match Record' : 'Match Records'}
+            {matches.length} {matches.length === 1 ? 'report' : 'reports'}
           </span>
         </div>
       </div>
 
-      <div className="canonical-protection-banner" style={{ margin: '0.75rem 1.25rem 1rem' }}>
-        <CheckCircle2 size={16} color="var(--accent-emerald)" style={{ flexShrink: 0 }} />
+      <div className="canonical-protection-banner" data-fl-style="sl2g6zx">
+        <CheckCircle2 size={16} color="var(--accent-emerald)" data-fl-style="sdq2mnb" />
         <span>
-          <strong>Canonical Truth Protection:</strong> Only confirmed matches are eligible to produce canonical progress observations. Suggested or rejected matches do not alter project truth.
+          <strong>Progress review:</strong> Only confirmed matches update activity progress.
         </span>
       </div>
 
@@ -82,22 +81,21 @@ export function ActivityReviewContext({
           <div className="match-review-subgroup">
             <div className="subgroup-header confirmed">
               <CheckCircle2 size={14} />
-              <span>Confirmed Matches ({confirmedMatches.length})</span>
+              <span>Confirmed ({confirmedMatches.length})</span>
             </div>
             <div className="match-cards-grid">
               {confirmedMatches.map((m) => (
                 <div key={m.matchId} className="detail-match-card confirmed">
                   <div className="match-card-top-row">
-                    <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
+                    
                     <div className="match-pills-row">
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
-                          <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
-                        {(m.confidenceTier || 'HIGH').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
+                        {`${(m.confidenceTier || 'high').toLowerCase()} match`} &bull; {Math.round(m.confidenceScore * 100)}%
                       </span>
                       <span className="status-badge-confirmed">
                         <Check size={11} />
@@ -111,7 +109,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -122,7 +120,7 @@ export function ActivityReviewContext({
 
                   {m.matchedText && (
                     <div className="matched-text-box">
-                      <span className="matched-label">Matched Text:</span>
+                      <span className="matched-label">Report text:</span>
                       <span className="matched-content">"{m.matchedText}"</span>
                     </div>
                   )}
@@ -142,7 +140,7 @@ export function ActivityReviewContext({
                       )}
                     </div>
                     <span className="canonical-truth-pill eligible">
-                      ✓ Canonical Progress Eligible
+                      Included in activity progress
                     </span>
                   </div>
                 </div>
@@ -156,22 +154,21 @@ export function ActivityReviewContext({
           <div className="match-review-subgroup">
             <div className="subgroup-header suggested">
               <AlertTriangle size={14} />
-              <span>Suggested / Awaiting Review ({suggestedMatches.length})</span>
+              <span>Needs review ({suggestedMatches.length})</span>
             </div>
             <div className="match-cards-grid">
               {suggestedMatches.map((m) => (
                 <div key={m.matchId} className="detail-match-card suggested">
                   <div className="match-card-top-row">
-                    <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
+                    
                     <div className="match-pills-row">
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
-                          <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
                       <span className={`tier-badge ${getTierClass(m.confidenceTier)}`}>
-                        {(m.confidenceTier || 'MED').toUpperCase()} &bull; {Math.round(m.confidenceScore * 100)}%
+                        {`${(m.confidenceTier || 'medium').toLowerCase()} match`} &bull; {Math.round(m.confidenceScore * 100)}%
                       </span>
                       <span className="status-badge-suggested">Suggested</span>
                     </div>
@@ -182,7 +179,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -193,7 +190,7 @@ export function ActivityReviewContext({
 
                   {m.matchedText && (
                     <div className="matched-text-box">
-                      <span className="matched-label">Matched Text:</span>
+                      <span className="matched-label">Report text:</span>
                       <span className="matched-content">"{m.matchedText}"</span>
                     </div>
                   )}
@@ -201,9 +198,9 @@ export function ActivityReviewContext({
                   {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
 
                   <div className="match-card-bottom-row">
-                    <span className="reviewer-meta">Awaiting Human Review</span>
+                    <span className="reviewer-meta">Needs review</span>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>
@@ -217,21 +214,20 @@ export function ActivityReviewContext({
           <div className="match-review-subgroup">
             <div className="subgroup-header unresolved">
               <HelpCircle size={14} />
-              <span>Unresolved Candidates ({unresolvedMatches.length})</span>
+              <span>Needs activity assignment ({unresolvedMatches.length})</span>
             </div>
             <div className="match-cards-grid">
               {unresolvedMatches.map((m) => (
                 <div key={m.matchId} className="detail-match-card unresolved">
                   <div className="match-card-top-row">
-                    <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
+                    
                     <div className="match-pills-row">
                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                         <span className="match-ml-badge">
-                          <Cpu size={11} />
-                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                         </span>
                       )}
-                      <span className="status-badge-unresolved">Unresolved</span>
+                      <span className="status-badge-unresolved">Unassigned</span>
                     </div>
                   </div>
 
@@ -240,7 +236,7 @@ export function ActivityReviewContext({
                       <AlertTriangle size={14} className="anomaly-icon" />
                       <div className="anomaly-body">
                         <span className="anomaly-title">
-                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                         </span>
                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -250,14 +246,14 @@ export function ActivityReviewContext({
                   )}
                   {m.matchedText && (
                     <div className="matched-text-box">
-                      <span className="matched-label">Matched Text:</span>
+                      <span className="matched-label">Report text:</span>
                       <span className="matched-content">"{m.matchedText}"</span>
                     </div>
                   )}
                   <div className="match-card-bottom-row">
-                    <span className="reviewer-meta">Requires Assignment</span>
+                    <span className="reviewer-meta">Choose activity</span>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>
@@ -271,13 +267,13 @@ export function ActivityReviewContext({
           <div className="match-review-subgroup">
             <div className="subgroup-header rejected">
               <XCircle size={14} />
-              <span>Rejected Candidates ({rejectedMatches.length})</span>
+              <span>Rejected ({rejectedMatches.length})</span>
             </div>
             <div className="match-cards-grid">
               {rejectedMatches.map((m) => (
                 <div key={m.matchId} className="detail-match-card rejected">
                   <div className="match-card-top-row">
-                    <div className="match-method-tag">{m.matchMethod.replace('_', ' ').toUpperCase()}</div>
+                    
                     <span className="status-badge-rejected">Rejected</span>
                   </div>
                   {m.rationale && <p className="match-rationale-text">{m.rationale}</p>}
@@ -287,7 +283,7 @@ export function ActivityReviewContext({
                       <span>Rejected by {m.reviewedBy || 'Reviewer'}</span>
                     </div>
                     <span className="canonical-truth-pill not-canonical">
-                      Not Canonical Truth
+                      Not included in progress
                     </span>
                   </div>
                 </div>

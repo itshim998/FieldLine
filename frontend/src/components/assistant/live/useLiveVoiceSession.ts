@@ -485,8 +485,8 @@ export function useLiveVoiceSession({
           if (isSessionActiveRef.current || wsRef.current) {
             const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
             const timeoutMsg = isLocal
-              ? 'Connection timed out. Please verify the FieldLine backend is running on port 3001 and your voice services are configured.'
-              : 'Connection timed out connecting to Live Voice Gateway at fieldline-backend-pcs3.onrender.com. Please verify the Render service is running.';
+              ? 'Voice connection timed out. Try again.'
+              : 'Voice connection timed out. Try again.';
             setError(timeoutMsg);
             setConnectionState('error');
             onError?.(timeoutMsg);
@@ -647,7 +647,7 @@ export function useLiveVoiceSession({
                     activityCode: msg.activityCode || 'ACT',
                     activityName: msg.activityName || 'Activity',
                     progressPercent: typeof msg.progressPercent === 'number' ? msg.progressPercent : 100,
-                    message: msg.message || `Update verified: ${msg.activityName} is saved at ${msg.progressPercent}%.`,
+                    message: msg.message || `Progress saved: ${msg.activityName} is saved at ${msg.progressPercent}%.`,
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   };
                   setVerifiedUpdates((prev) => [update, ...prev]);
@@ -681,7 +681,7 @@ export function useLiveVoiceSession({
           const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
           const errMsg = isLocal
             ? 'WebSocket connection to Live Voice Gateway failed. Is the backend running on port 3001?'
-            : 'WebSocket connection to Live Voice Gateway failed (fieldline-backend-pcs3.onrender.com). Please verify the backend is active on Render.';
+            : 'Voice connection lost. Try again.';
           setError(errMsg);
           setConnectionState('error');
           onError?.(errMsg);

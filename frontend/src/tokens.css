@@ -1,0 +1,82 @@
+/* FieldLine design tokens — all application-wide visual decisions live here. */
+:root {
+  color-scheme: dark;
+  --fl-ink-950: #111a24;
+  --fl-ink-900: #182431;
+  --fl-ink-800: #23313e;
+  --fl-ink-700: #344553;
+  --fl-ink-600: #536576;
+  --fl-ink-400: #9eacb6;
+  --fl-paper: #faf9f4;
+  --fl-paper-muted: #f1efe8;
+  --fl-white: #ffffff;
+  --fl-canvas: var(--fl-ink-950);
+  --fl-surface: var(--fl-ink-900);
+  --fl-surface-raised: var(--fl-ink-800);
+  --fl-hover: var(--fl-ink-800);
+  --fl-text: #f5f4ef;
+  --fl-text-muted: #bdc6cc;
+  --fl-text-subtle: #98a7b2;
+  --fl-hairline: #45515b;
+  --fl-accent: #f1a47c;
+  --fl-accent-hover: #e89061;
+  --fl-accent-contrast: #111a24;
+  --fl-status-good: #75d6a4;
+  --fl-status-risk: #f2c574;
+  --fl-status-late: #fa8b88;
+  --fl-status-info: #b9c6d0;
+  --fl-font-sans: 'Source Sans 3', 'Segoe UI', system-ui, sans-serif;
+  --fl-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --fl-text-xs: 0.8125rem;
+  --fl-text-sm: 0.875rem;
+  --fl-text-md: 1rem;
+  --fl-text-lg: 1.125rem;
+  --fl-text-xl: 1.375rem;
+  --fl-text-2xl: 1.75rem;
+  --fl-text-3xl: 2.25rem;
+  --fl-space-1: 4px;
+  --fl-space-2: 8px;
+  --fl-space-3: 12px;
+  --fl-space-4: 16px;
+  --fl-space-5: 20px;
+  --fl-space-6: 24px;
+  --fl-space-8: 32px;
+  --fl-space-10: 40px;
+  --fl-space-12: 48px;
+  --fl-radius-sm: 4px;
+  --fl-radius-md: 8px;
+  --fl-radius-lg: 12px;
+  --fl-shadow-flat: none;
+  --fl-shadow-overlay: 0 18px 48px rgba(0, 0, 0, .35);
+  --fl-motion-fast: 120ms ease-out;
+  --fl-motion-base: 180ms ease-out;
+  --radius-xs: var(--fl-radius-sm);
+  --transition-fast: var(--fl-motion-fast);
+  --border-focus: var(--fl-accent);
+  --primary-color: var(--fl-accent);
+  --surface-base: var(--fl-surface);
+  --accent-red: var(--fl-status-late);
+}
+:root:has(.worker-cockpit-shell), :root:has(.login-shell-container) {
+  color-scheme: light;
+  --fl-canvas: var(--fl-paper);
+  --fl-accent: #a4401f;
+  --fl-accent-hover: #893519;
+  --fl-accent-contrast: #ffffff;
+  --fl-surface: var(--fl-white);
+  --fl-surface-raised: var(--fl-paper-muted);
+  --fl-hover: var(--fl-paper-muted);
+  --fl-text: #192b36;
+  --fl-text-muted: #394b57;
+  --fl-text-subtle: #526372;
+  --fl-hairline: #cbd1cd;
+  --fl-status-good: #176d44;
+  --fl-status-risk: #8d5500;
+  --fl-status-late: #aa3333;
+  --fl-status-info: #3b5568;
+  --fl-shadow-overlay: 0 16px 40px rgba(25, 43, 54, .16);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --fl-motion-fast: 0ms; --fl-motion-base: 0ms; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

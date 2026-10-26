@@ -1,13 +1,12 @@
+import { FieldLineMark, FieldLineProgress } from './components/ui/FieldLine.js';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Layers,
   ShieldCheck,
   Plus,
-  ArrowLeft,
   Calendar,
   Clock,
   FolderGit2,
-  Edit3,
   Trash2,
   Search,
   CheckCircle2,
@@ -34,8 +33,7 @@ import {
   ChevronDown,
   ChevronUp,
   MessageSquare,
-  LayoutDashboard,
-  Sparkles,
+
   LogOut,
   Cpu
 } from 'lucide-react';
@@ -43,7 +41,7 @@ import { ProjectDashboardView } from './components/dashboard/ProjectDashboardVie
 import { ActivityDetailView } from './components/activity/ActivityDetailView.js';
 import { AssistantMarkdown } from './components/assistant/AssistantMarkdown.js';
 import { FloatingAIAssistant } from './components/assistant/FloatingAIAssistant.js';
-import { AuthProvider, useAuth, AccountType } from './context/AuthContext.js';
+import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { ProjectLoginView } from './components/auth/ProjectLoginView.js';
 import { AdminWorkspaceView } from './components/admin/AdminWorkspaceView.js';
 import { WorkerCockpitView } from './components/worker/WorkerCockpitView.js';
@@ -334,7 +332,7 @@ interface HealthData {
 const STORAGE_KEY_SELECTED_PROJECT = 'fieldline_selected_project_id';
 
 function MainAppContent(): React.JSX.Element {
-  const { session, token, project: authProject, isAuthenticated, logout, authFetch, isLoading: isAuthLoading } = useAuth();
+  const { session, token, logout, isLoading: isAuthLoading } = useAuth();
 
   // Dual-Shell & Login State (PASS 30)
   const [isLoginView, setIsLoginView] = useState<boolean>(false);
@@ -381,7 +379,7 @@ function MainAppContent(): React.JSX.Element {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null);
   const [activities, setActivities] = useState<ScheduleActivity[]>([]);
-  const [loadingSchedules, setLoadingSchedules] = useState<boolean>(false);
+  const [, setLoadingSchedules] = useState<boolean>(false);
   const [loadingActivities, setLoadingActivities] = useState<boolean>(false);
 
   // Progress Updates State (PASS 7)
@@ -458,7 +456,7 @@ function MainAppContent(): React.JSX.Element {
   const [health, setHealth] = useState<HealthData | null>(null);
   const [latency, setLatency] = useState<number | null>(null);
 
-  // Golden Demo Seeding State
+  // Demo Seeding State
   const [isSeedingDemo, setIsSeedingDemo] = useState<boolean>(false);
 
   // Show notification helper
@@ -610,11 +608,11 @@ function MainAppContent(): React.JSX.Element {
           setIntelligence(data);
         } else {
           setIntelligenceError(
-            data.error?.message || 'Failed to fetch project intelligence facts'
+            data.error?.message || 'Could not load schedule status.'
           );
         }
       } catch {
-        setIntelligenceError('Network error connecting to intelligence service');
+        setIntelligenceError('Could not connect to schedule data.');
       } finally {
         setLoadingIntelligence(false);
       }
@@ -1066,11 +1064,11 @@ function MainAppContent(): React.JSX.Element {
     }
   };
 
-  // Seed or Reset Golden Demo Repository
+  // Seed or Reset Demo Repository
   const handleSeedGoldenDemo = async (force: boolean = false) => {
     setIsSeedingDemo(true);
     try {
-      showNotification('info', 'Initializing Golden Demo Project (Refinery Expansion — Unit 4)...');
+      showNotification('info', 'Preparing demo…');
       const res = await fetch('/api/demo/seed', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1079,14 +1077,14 @@ function MainAppContent(): React.JSX.Element {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to initialize Golden Demo');
+        throw new Error(data.error || 'Could not open demo.');
       }
 
-      showNotification('success', data.message || 'Golden Demo initialized successfully!');
+      showNotification('success', data.message || 'Demo ready.');
       const targetId = data.project?.id || data.seedResult?.projectId;
       await fetchProjects(targetId);
     } catch (err: any) {
-      showNotification('error', err.message || 'Failed to initialize Golden Demo repository');
+      showNotification('error', err.message || 'Could not open demo.');
     } finally {
       setIsSeedingDemo(false);
     }
@@ -1520,7 +1518,7 @@ function MainAppContent(): React.JSX.Element {
 
       const jobId = data.job?.id;
       if (!jobId) {
-        throw new Error('No processing job ID returned by backend');
+        throw new Error('Could not process document. Try again.');
       }
 
       // 2. Poll job status endpoint
@@ -1644,24 +1642,15 @@ function MainAppContent(): React.JSX.Element {
           {session ? (
             <div
               className="header-session-chip"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                padding: '0.3rem 0.65rem',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-                borderRadius: '8px',
-                fontSize: '0.75rem'
-              }}
+              data-fl-style="sggzj69"
             >
               {session.accountType === 'worker' ? (
                 <User size={13} color="var(--accent-amber)" />
               ) : (
                 <ShieldCheck size={13} color="var(--accent-indigo)" />
               )}
-              <span style={{ fontWeight: 600 }}>{session.displayName}</span>
-              <span style={{ opacity: 0.6, fontSize: '0.7rem' }}>
+              <span data-fl-style="s16kgpua">{session.displayName}</span>
+              <span data-fl-style="sj4kdwz">
                 ({session.accountType === 'worker' ? 'Worker' : 'Admin'})
               </span>
               <button
@@ -1673,15 +1662,7 @@ function MainAppContent(): React.JSX.Element {
                   handleBackToProjects();
                 }}
                 title="Sign out"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  padding: '0.1rem',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
+                data-fl-style="sudfxy"
               >
                 <LogOut size={13} />
               </button>
@@ -1694,22 +1675,22 @@ function MainAppContent(): React.JSX.Element {
               className="btn btn-secondary btn-sm"
               onClick={() => handleSeedGoldenDemo()}
               disabled={isSeedingDemo}
-              title="Seed or restore the presentation-ready Golden Demo repository (Refinery Expansion — Unit 4)"
-              style={{ fontSize: '0.75rem', gap: '0.35rem' }}
+              title="Try the demo"
+              data-fl-style="sdgdxzg"
             >
-              {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <Sparkles size={13} color="var(--accent-indigo)" />}
-              <span>{isSeedingDemo ? 'Seeding Demo...' : 'Golden Demo'}</span>
+              {isSeedingDemo ? <RefreshCw size={13} className="pulse-dot" /> : <FieldLineMark size={13} />}
+              <span>{isSeedingDemo ? 'Preparing…' : 'Demo'}</span>
             </button>
           )}
 
           <button
             className="system-status-trigger"
             onClick={() => setIsDiagnosticsOpen(true)}
-            title="Inspect system diagnostics and SQLite persistence"
+            title="Connection details"
           >
             <div className={`status-dot ${isOnline ? 'online' : 'offline'}`} />
-            <span>{isOnline ? 'System Online' : 'System Degraded'}</span>
-            {latency !== null && <span style={{ opacity: 0.6 }}>({latency}ms)</span>}
+            <span>{isOnline ? 'Connected' : 'Connection problem'}</span>
+            {latency !== null && <span data-fl-style="s1oya5rt">({latency}ms)</span>}
           </button>
         </div>
       </header>
@@ -1740,7 +1721,7 @@ function MainAppContent(): React.JSX.Element {
             <RefreshCw size={28} className="pulse-dot" />
           </div>
           <h2 className="empty-title">Loading FieldLine Projects...</h2>
-          <p className="empty-desc">Connecting to local SQLite database service</p>
+          <p className="empty-desc">Loading projects…</p>
         </div>
       ) : isLoginView || (!session && !token) ? (
         <ProjectLoginView
@@ -1988,7 +1969,7 @@ function MainAppContent(): React.JSX.Element {
                     </div>
                   </div>
                 ) : uploadError && (
-                  <div className="notification-banner error" style={{ marginTop: '1rem', marginBottom: '0' }}>
+                  <div className="notification-banner error" data-fl-style="se6yd6u">
                     <div className="banner-content">
                       <AlertCircle size={18} />
                       <span>{uploadError}</span>
@@ -2036,7 +2017,7 @@ function MainAppContent(): React.JSX.Element {
                   <div className="toolbar-left">
                     <h3 className="section-title">Schedule Activities</h3>
                     {selectedSchedule && (
-                      <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
+                      <span className="status-badge active" data-fl-style="s1v0dyfx">
                         {selectedSchedule.name} &bull; {activities.length} Work Items
                       </span>
                     )}
@@ -2045,10 +2026,10 @@ function MainAppContent(): React.JSX.Element {
                   {/* Schedule Selector if multiple exist */}
                   {schedules.length > 1 && (
                     <div className="toolbar-right">
-                      <label className="form-label" style={{ margin: 0, fontSize: '0.8rem' }}>Schedule:</label>
+                      <label className="form-label" data-fl-style="sgijd8a">Schedule:</label>
                       <select
                         className="form-select"
-                        style={{ width: 'auto', padding: '0.35rem 0.75rem', fontSize: '0.85rem' }}
+                        data-fl-style="s11u2sse"
                         value={selectedSchedule?.id || ''}
                         onChange={(e) => {
                           const sched = schedules.find((s) => s.id === e.target.value);
@@ -2086,7 +2067,7 @@ function MainAppContent(): React.JSX.Element {
                           </span>
                         </div>
                         {selectedSchedule.isBaseline && (
-                          <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
+                          <span className="status-badge active" data-fl-style="s1v0dyfx">
                             Official Baseline
                           </span>
                         )}
@@ -2095,9 +2076,9 @@ function MainAppContent(): React.JSX.Element {
 
                     {/* Activity Verification Table */}
                     {loadingActivities ? (
-                      <div style={{ padding: '2rem', textAlign: 'center' }}>
+                      <div data-fl-style="skvbzhi">
                         <RefreshCw size={20} className="pulse-dot" />
-                        <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activities...</p>
+                        <p className="empty-desc" data-fl-style="s9ytplt">Loading activities...</p>
                       </div>
                     ) : activities.length > 0 ? (
                       <div className="table-responsive">
@@ -2110,42 +2091,42 @@ function MainAppContent(): React.JSX.Element {
                               <th>Location</th>
                               <th>Planned Start</th>
                               <th>Planned Finish</th>
-                              <th style={{ textAlign: 'right' }}>Quantity</th>
+                              <th data-fl-style="s19bne5f">Quantity</th>
                               <th>Unit</th>
-                              <th style={{ textAlign: 'center' }}>Actions</th>
+                              <th data-fl-style="sr3etn2">Actions</th>
                             </tr>
                           </thead>
                           <tbody>
                             {activities.map((act) => (
                               <tr key={act.id}>
                                 <td>
-                                  <span
+                                  <button type="button" data-fl-link="true"
                                     className="act-id-cell"
-                                    style={{ cursor: 'pointer' }}
+                                    data-fl-style="spyafsr"
                                     onClick={() => handleOpenActivityDetail(act.id)}
                                     title="View full activity history"
                                   >
                                     {act.externalId}
-                                  </span>
+                                  </button>
                                 </td>
-                                <td style={{ fontWeight: 500 }}>
-                                  <span
-                                    style={{ cursor: 'pointer', color: 'var(--text-primary)' }}
+                                <td data-fl-style="s1tfn5t1">
+                                  <button type="button" data-fl-link="true"
+                                    data-fl-style="s8h39qv"
                                     onClick={() => handleOpenActivityDetail(act.id)}
                                     title="View full activity history"
                                   >
                                     {act.name}
-                                  </span>
+                                  </button>
                                 </td>
                                 <td>
                                   {act.wbsCode ? (
                                     <span className="wbs-badge">{act.wbsCode}</span>
                                   ) : (
-                                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                    <span data-fl-style="s1vkpsqq">—</span>
                                   )}
                                 </td>
                                 <td>
-                                  {act.location || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                                  {act.location || <span data-fl-style="s1vkpsqq">—</span>}
                                 </td>
                                 <td>
                                   <span className="date-cell">{act.plannedStart}</span>
@@ -2153,24 +2134,24 @@ function MainAppContent(): React.JSX.Element {
                                 <td>
                                   <span className="date-cell">{act.plannedFinish}</span>
                                 </td>
-                                <td style={{ textAlign: 'right' }}>
+                                <td data-fl-style="s19bne5f">
                                   {act.plannedQuantity !== null ? (
                                     <span className="qty-cell">
                                       {act.plannedQuantity.toLocaleString()}
                                     </span>
                                   ) : (
-                                    <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                    <span data-fl-style="s1vkpsqq">—</span>
                                   )}
                                 </td>
                                 <td>
-                                  {act.unit || <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                                  {act.unit || <span data-fl-style="s1vkpsqq">—</span>}
                                 </td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                                <td data-fl-style="sr3etn2">
+                                  <div data-fl-style="s3boujw">
                                     <button
                                       type="button"
                                       className="btn btn-secondary btn-sm"
-                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
+                                      data-fl-style="srgfkte"
                                       onClick={() => handleOpenActivityDetail(act.id)}
                                       title="View complete activity history & current status"
                                     >
@@ -2180,7 +2161,7 @@ function MainAppContent(): React.JSX.Element {
                                     <button
                                       type="button"
                                       className="btn btn-secondary btn-sm"
-                                      style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', gap: '0.3rem', display: 'inline-flex', alignItems: 'center' }}
+                                      data-fl-style="srgfkte"
                                       onClick={() => handleOpenActivityTrace(act)}
                                       title="Trace originating evidence for this activity"
                                     >
@@ -2195,7 +2176,7 @@ function MainAppContent(): React.JSX.Element {
                         </table>
                       </div>
                     ) : (
-                      <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
+                      <div className="empty-state-card" data-fl-style="smf6km8">
                         <p className="empty-desc">No activities found for this schedule.</p>
                       </div>
                     )}
@@ -2207,7 +2188,7 @@ function MainAppContent(): React.JSX.Element {
                     </div>
                     <h3 className="empty-title">No Schedules Imported Yet</h3>
                     <p className="empty-desc">
-                      Import your master construction schedule using the uploader above. FieldLine will extract all activity work items into the SQLite database.
+                      Import a schedule to see its activities here.
                     </p>
                   </div>
                 )}
@@ -2216,7 +2197,7 @@ function MainAppContent(): React.JSX.Element {
           ) : activeWorkspaceTab === 'progress' ? (
             /* Tab 3: Progress Updates Content (PASS 7) */
             <div className="progress-container">
-              {/* Form Card: Record Manual Field Progress */}
+              {/* Form Card: Record progress */}
               <div className="progress-form-card">
                 <div className="progress-card-header">
                   <div className="progress-card-title-group">
@@ -2224,27 +2205,27 @@ function MainAppContent(): React.JSX.Element {
                       <Activity size={18} color="var(--accent-blue)" />
                     </div>
                     <div>
-                      <h3 className="progress-card-title">Record Manual Field Progress</h3>
+                      <h3 className="progress-card-title">Record progress</h3>
                       <p className="progress-card-subtitle">
-                        Capture ground-truth human updates with guaranteed raw-text preservation.
+                        
                       </p>
                     </div>
                   </div>
                   <div className="progress-mode-badge">
                     <ShieldCheck size={13} />
-                    <span>Direct Field Progress Capture</span>
+                    <span></span>
                   </div>
                 </div>
 
                 {reportFormError && (
-                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner error" data-fl-style="s72wa23">
                     <AlertTriangle size={16} />
                     <span>{reportFormError}</span>
                   </div>
                 )}
 
                 {reportSuccessMessage && (
-                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner success" data-fl-style="s72wa23">
                     <CheckCircle2 size={16} />
                     <span>{reportSuccessMessage}</span>
                   </div>
@@ -2311,7 +2292,7 @@ function MainAppContent(): React.JSX.Element {
                     />
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                  <div data-fl-style="s151l2o9">
                     <button
                       id="submit-progress-report-btn"
                       type="submit"
@@ -2339,7 +2320,7 @@ function MainAppContent(): React.JSX.Element {
                 <div className="section-toolbar">
                   <div className="toolbar-left">
                     <h3 className="section-title">Field Progress History</h3>
-                    <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
+                    <span className="status-badge active" data-fl-style="s1v0dyfx">
                       {progressUpdates.length} {progressUpdates.length === 1 ? 'Report' : 'Reports'}
                     </span>
                   </div>
@@ -2356,9 +2337,9 @@ function MainAppContent(): React.JSX.Element {
                 </div>
 
                 {loadingProgressUpdates ? (
-                  <div style={{ padding: '3rem', textAlign: 'center' }}>
+                  <div data-fl-style="s1tu4yvd">
                     <RefreshCw size={24} className="pulse-dot" />
-                    <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading field updates...</p>
+                    <p className="empty-desc" data-fl-style="sampshg">Loading field updates...</p>
                   </div>
                 ) : progressUpdates.length === 0 ? (
                   <div className="empty-state-card">
@@ -2390,7 +2371,7 @@ function MainAppContent(): React.JSX.Element {
                                 )}
                               </div>
                             ) : (
-                              <div className="progress-reporter-badge" style={{ opacity: 0.6 }}>
+                              <div className="progress-reporter-badge" data-fl-style="s1oya5rt">
                                 <User size={13} />
                                 <span>Anonymous Field Reporter</span>
                               </div>
@@ -2401,7 +2382,7 @@ function MainAppContent(): React.JSX.Element {
                             <span className="badge-source-manual">
                               Source: {update.sourceType.toUpperCase()}
                             </span>
-                            <span className={`status-badge ${update.status === 'received' ? 'active' : 'planning'}`} style={{ textTransform: 'capitalize' }}>
+                            <span className={`status-badge ${update.status === 'received' ? 'active' : 'planning'}`} data-fl-style="s1jemtkw">
                               {update.status}
                             </span>
                             <span className="progress-timestamp" title={`Stored at: ${update.createdAt}`}>
@@ -2415,8 +2396,8 @@ function MainAppContent(): React.JSX.Element {
                           <p className="progress-raw-text">{update.rawText}</p>
                         </div>
 
-                        <div className="progress-item-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div className="progress-item-footer" data-fl-style="s1jh2tnc">
+                          <div data-fl-style="s1fh8r4i">
                             <span className="progress-record-id mono">ID: {update.id}</span>
                             <span className="progress-pass-tag">Human Review Enabled</span>
                           </div>
@@ -2458,20 +2439,20 @@ function MainAppContent(): React.JSX.Element {
                             </div>
 
                             <div className="canonical-protection-banner">
-                              <Info size={16} style={{ flexShrink: 0 }} />
+                              <Info size={16} data-fl-style="sdq2mnb" />
                               <span>
-                                <strong>Canonical Truth Protection:</strong> Only <strong>Confirmed</strong> matches are eligible to produce canonical <em>ActivityProgress</em>. Suggested and unresolved matches never silently become project truth.
+                                <strong>Progress review:</strong> Only confirmed matches update activity progress.
                               </span>
                             </div>
 
                             {loadingReportMatchesMap[update.id] ? (
-                              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                              <div data-fl-style="skvbzhi">
                                 <RefreshCw size={20} className="pulse-dot" />
-                                <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Loading activity matches...</p>
+                                <p className="empty-desc" data-fl-style="s9ytplt">Loading activity matches...</p>
                               </div>
                             ) : !reportMatchesMap[update.id] || reportMatchesMap[update.id].length === 0 ? (
-                              <div style={{ padding: '1.5rem', textAlign: 'center', background: 'rgba(255,255,255,0.02)', borderRadius: 'var(--radius-sm)' }}>
-                                <AlertCircle size={24} color="#94a3b8" style={{ margin: '0 auto 0.5rem' }} />
+                              <div data-fl-style="sk67vz3">
+                                <AlertCircle size={24} color="#94a3b8" data-fl-style="s99akhm" />
                                 <p className="empty-desc">No candidate matches found for this progress update.</p>
                               </div>
                             ) : (
@@ -2507,7 +2488,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <span className="code-pill">{act?.externalId || m.activityId}</span>
                                                       <span>{act?.name || 'Activity Reference'}</span>
                                                       {act?.location && (
-                                                        <span className="badge-source-manual" style={{ fontSize: '0.7rem' }}>
+                                                        <span className="badge-source-manual" data-fl-style="s1v0dyfx">
                                                           Loc: {act.location}
                                                         </span>
                                                       )}
@@ -2516,7 +2497,7 @@ function MainAppContent(): React.JSX.Element {
                                                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                                                         <span className="match-ml-badge">
                                                           <Cpu size={11} />
-                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                                                         </span>
                                                       )}
                                                       <span className="match-tier-badge tier-high">
@@ -2524,7 +2505,7 @@ function MainAppContent(): React.JSX.Element {
                                                       </span>
                                                       <span className="match-status-badge confirmed">
                                                         <Check size={12} />
-                                                        {m.reviewedBy === 'system' ? 'Auto-Confirmed (System)' : 'Confirmed (Human)'}
+                                                        {m.reviewedBy === 'system' ? 'Confirmed automatically' : 'Confirmed by reviewer'}
                                                       </span>
                                                     </div>
                                                   </div>
@@ -2533,7 +2514,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <AlertTriangle size={14} className="anomaly-icon" />
                                                       <div className="anomaly-body">
                                                         <span className="anomaly-title">
-                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                                                         </span>
                                                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                                                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -2554,8 +2535,8 @@ function MainAppContent(): React.JSX.Element {
                                                         </>
                                                       )}
                                                     </div>
-                                                    <span style={{ fontSize: '0.725rem', color: '#34d399', fontWeight: 600 }}>
-                                                      ✓ Canonical Progress Eligible
+                                                    <span data-fl-style="sdvievz">
+                                                      Included in activity progress
                                                     </span>
                                                   </div>
                                                 </div>
@@ -2584,7 +2565,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <span className="code-pill">{act?.externalId || m.activityId}</span>
                                                       <span>{act?.name || 'Candidate Activity'}</span>
                                                       {act?.location && (
-                                                        <span className="badge-source-manual" style={{ fontSize: '0.7rem' }}>
+                                                        <span className="badge-source-manual" data-fl-style="s1v0dyfx">
                                                           Loc: {act.location}
                                                         </span>
                                                       )}
@@ -2593,7 +2574,7 @@ function MainAppContent(): React.JSX.Element {
                                                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                                                         <span className="match-ml-badge">
                                                           <Cpu size={11} />
-                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                                                         </span>
                                                       )}
                                                       <span className={`match-tier-badge tier-${m.confidenceTier || 'medium'}`}>
@@ -2610,7 +2591,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <AlertTriangle size={14} className="anomaly-icon" />
                                                       <div className="anomaly-body">
                                                         <span className="anomaly-title">
-                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                                                         </span>
                                                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                                                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -2642,7 +2623,7 @@ function MainAppContent(): React.JSX.Element {
                                                       </button>
                                                     </div>
 
-                                                    <div className="match-resolve-dropdown-group" style={{ marginTop: '0.5rem' }}>
+                                                    <div className="match-resolve-dropdown-group" data-fl-style="s9ytplt">
                                                       <select
                                                         className="match-activity-select"
                                                         value={resolvingActivityMap[m.id] || ''}
@@ -2677,12 +2658,12 @@ function MainAppContent(): React.JSX.Element {
                                         </div>
                                       )}
 
-                                      {/* 3. Unresolved / Low Confidence Matches */}
+                                      {/* 3. Needs activity match Matches */}
                                       {unresolved.length > 0 && (
                                         <div className="review-group">
                                           <div className="review-group-header unresolved">
                                             <HelpCircle size={14} />
-                                            <span>Unresolved / Low Confidence</span>
+                                            <span>Needs activity match</span>
                                             <span className="review-group-count">{unresolved.length}</span>
                                           </div>
                                           <div className="match-cards-list">
@@ -2693,20 +2674,20 @@ function MainAppContent(): React.JSX.Element {
                                                 <div key={m.id} className="match-card status-unresolved">
                                                   <div className="match-card-top">
                                                     <div className="match-activity-name">
-                                                      <span className="code-pill" style={{ borderColor: '#8b5cf6', color: '#c084fc' }}>
+                                                      <span className="code-pill" data-fl-style="s1gh5ubc">
                                                         {act?.externalId || m.activityId}
                                                       </span>
-                                                      <span>Initial Suggestion: {act?.name || 'Uncertain Activity'}</span>
+                                                      <span>Suggested activity: {act?.name || 'Activity not identified'}</span>
                                                     </div>
                                                     <div className="match-meta-pills">
                                                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
                                                         <span className="match-ml-badge">
                                                           <Cpu size={11} />
-                                                          <span>ML Match: {Math.round(m.mlConfidence * 100)}%</span>
+                                                          <span>Suggested match: {Math.round(m.mlConfidence * 100)}%</span>
                                                         </span>
                                                       )}
                                                       <span className="match-tier-badge tier-low">
-                                                        LOW &bull; {Math.round(m.confidenceScore * 100)}%
+                                                        Needs review &bull; {Math.round(m.confidenceScore * 100)}% match
                                                       </span>
                                                       <span className="match-status-badge unresolved">
                                                         <HelpCircle size={12} />
@@ -2719,7 +2700,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <AlertTriangle size={14} className="anomaly-icon" />
                                                       <div className="anomaly-body">
                                                         <span className="anomaly-title">
-                                                          Progress Anomaly Detected ({Math.round((m.anomalyScore || 0) * 100)}% Anomaly)
+                                                          Progress needs review ({Math.round((m.anomalyScore || 0) * 100)}% difference)
                                                         </span>
                                                         {m.anomalyReasons && m.anomalyReasons.length > 0 && (
                                                           <span className="anomaly-desc">{m.anomalyReasons.join('. ')}</span>
@@ -2727,12 +2708,12 @@ function MainAppContent(): React.JSX.Element {
                                                       </div>
                                                     </div>
                                                   )}
-                                                  <p className="match-rationale-text" style={{ color: '#d8b4fe' }}>
-                                                    ⚠ Low confidence candidate match. Human supervisor must select the correct activity before progress can be recorded.
+                                                  <p className="match-rationale-text" data-fl-style="s1pe994h">
+                                                    This report may match the wrong activity. Choose the correct activity before saving progress.
                                                   </p>
                                                   {m.rationale && (
-                                                    <p className="match-rationale-text" style={{ opacity: 0.8 }}>
-                                                      AI Rationale: {m.rationale}
+                                                    <p className="match-rationale-text" data-fl-style="s1oy3urv">
+                                                      Why this was suggested: {m.rationale}
                                                     </p>
                                                   )}
 
@@ -2844,7 +2825,7 @@ function MainAppContent(): React.JSX.Element {
             <div className="evidence-container">
               {/* Evidence Upload Card */}
               <div className="evidence-uploader-card">
-                <div className="progress-card-header" style={{ marginBottom: '1rem' }}>
+                <div className="progress-card-header" data-fl-style="s72wa23">
                   <div>
                     <h3 className="section-title">Upload Project Evidence</h3>
                     <p className="section-subtitle">
@@ -2854,22 +2835,22 @@ function MainAppContent(): React.JSX.Element {
                 </div>
 
                 {evidenceError && (
-                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner error" data-fl-style="s72wa23">
                     <AlertTriangle size={16} />
                     <span>{evidenceError}</span>
                   </div>
                 )}
 
                 {evidenceSuccess && (
-                  <div className="notification-banner success" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner success" data-fl-style="s72wa23">
                     <CheckCircle2 size={16} />
                     <span>{evidenceSuccess}</span>
                   </div>
                 )}
 
                 <form onSubmit={handleUploadEvidence}>
-                  <div className="form-row" style={{ alignItems: 'flex-end', marginBottom: '1rem' }}>
-                    <div className="form-group" style={{ flex: 1 }}>
+                  <div className="form-row" data-fl-style="s1gc8wqz">
+                    <div className="form-group" data-fl-style="sr3rkw">
                       <label className="form-label">
                         Select Evidence File <span className="required-star">*</span>
                       </label>
@@ -2886,7 +2867,7 @@ function MainAppContent(): React.JSX.Element {
                       />
                     </div>
 
-                    <div className="form-group" style={{ flex: 1 }}>
+                    <div className="form-group" data-fl-style="sr3rkw">
                       <label className="form-label">
                         Attach to Field Progress Report (Optional)
                       </label>
@@ -2905,13 +2886,13 @@ function MainAppContent(): React.JSX.Element {
                       </select>
                     </div>
 
-                    <div className="form-group" style={{ flexShrink: 0 }}>
+                    <div className="form-group" data-fl-style="sdq2mnb">
                       <button
                         id="submit-evidence-upload-btn"
                         type="submit"
                         className="btn btn-primary"
                         disabled={uploadingEvidence || !evidenceUploadFile}
-                        style={{ height: '42px' }}
+                        data-fl-style="sgymq3n"
                       >
                         {uploadingEvidence ? (
                           <>
@@ -2932,10 +2913,10 @@ function MainAppContent(): React.JSX.Element {
 
               {/* Evidence Inventory */}
               <div className="evidence-inventory-section">
-                <div className="section-toolbar" style={{ marginBottom: '1rem' }}>
+                <div className="section-toolbar" data-fl-style="s72wa23">
                   <div className="toolbar-left">
                     <h3 className="section-title">Evidence Inventory</h3>
-                    <span className="status-badge active" style={{ fontSize: '0.8rem' }}>
+                    <span className="status-badge active" data-fl-style="s1v0dyfx">
                       {evidenceList.length} {evidenceList.length === 1 ? 'file' : 'files'}
                     </span>
                   </div>
@@ -2952,9 +2933,9 @@ function MainAppContent(): React.JSX.Element {
                 </div>
 
                 {loadingEvidence ? (
-                  <div style={{ padding: '3rem', textAlign: 'center' }}>
+                  <div data-fl-style="s1tu4yvd">
                     <RefreshCw size={24} className="pulse-dot" />
-                    <p className="empty-desc" style={{ marginTop: '0.75rem' }}>Loading project evidence...</p>
+                    <p className="empty-desc" data-fl-style="sampshg">Loading project evidence...</p>
                   </div>
                 ) : evidenceList.length === 0 ? (
                   <div className="empty-state-card">
@@ -2973,7 +2954,7 @@ function MainAppContent(): React.JSX.Element {
                         <div>
                           <div className="evidence-card-header">
                             <div className="evidence-title-group">
-                              <FileText size={20} color="var(--accent-blue)" style={{ flexShrink: 0 }} />
+                              <FileText size={20} color="var(--accent-blue)" data-fl-style="sdq2mnb" />
                               <span className="evidence-file-name" title={ev.fileName}>
                                 {ev.fileName}
                               </span>
@@ -2983,19 +2964,19 @@ function MainAppContent(): React.JSX.Element {
                             </span>
                           </div>
 
-                          <div className="evidence-meta-list" style={{ marginTop: '0.75rem' }}>
+                          <div className="evidence-meta-list" data-fl-style="sampshg">
                             <div className="evidence-meta-row">
-                              <span style={{ color: 'var(--text-muted)' }}>Size:</span>
+                              <span data-fl-style="s1vkpsqq">Size:</span>
                               <span className="mono">{ev.fileSizeBytes !== null ? formatFileSize(ev.fileSizeBytes) : '—'}</span>
                             </div>
                             <div className="evidence-meta-row">
-                              <span style={{ color: 'var(--text-muted)' }}>Uploaded:</span>
+                              <span data-fl-style="s1vkpsqq">Uploaded:</span>
                               <span>{new Date(ev.uploadedAt).toLocaleString()}</span>
                             </div>
                             {ev.progressUpdateId && (
                               <div className="evidence-meta-row">
-                                <span style={{ color: 'var(--text-muted)' }}>Report:</span>
-                                <span className="mono" style={{ fontSize: '0.7rem' }}>{ev.progressUpdateId.slice(0, 12)}...</span>
+                                <span data-fl-style="s1vkpsqq">Report:</span>
+                                <span className="mono" data-fl-style="s1v0dyfx">{ev.progressUpdateId.slice(0, 12)}...</span>
                               </div>
                             )}
                           </div>
@@ -3009,8 +2990,8 @@ function MainAppContent(): React.JSX.Element {
                               className="btn btn-secondary btn-sm"
                               onClick={() => handleProcessEvidence(ev.id)}
                               disabled={processingEvidenceId === ev.id}
-                              style={{ gap: '0.35rem', fontSize: '0.75rem' }}
-                              title="Extract document content and create progress update with AI facts"
+                              data-fl-style="s1ihl9rw"
+                              title="Process document"
                             >
                               {processingEvidenceId === ev.id ? (
                                 <>
@@ -3039,7 +3020,7 @@ function MainAppContent(): React.JSX.Element {
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => window.open(`/api/projects/${selectedProject.id}/evidence/${ev.id}/content`, '_blank')}
-                            style={{ gap: '0.35rem', fontSize: '0.75rem' }}
+                            data-fl-style="s1ihl9rw"
                           >
                             <ExternalLink size={13} />
                             <span>Open Content</span>
@@ -3048,7 +3029,7 @@ function MainAppContent(): React.JSX.Element {
                             type="button"
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleDeleteEvidence(ev.id)}
-                            style={{ color: 'var(--accent-rose)', borderColor: 'rgba(244, 63, 94, 0.2)' }}
+                            data-fl-style="s1wg1xrn"
                             title="Delete evidence record"
                           >
                             <Trash2 size={13} />
@@ -3067,7 +3048,7 @@ function MainAppContent(): React.JSX.Element {
               <div className="intelligence-controls-bar">
                 <div className="intelligence-inputs-group">
                   <div className="intelligence-input-item">
-                    <label htmlFor="intel-as-of-date">As-Of Date:</label>
+                    <label htmlFor="intel-as-of-date">View date</label>
                     <input
                       id="intel-as-of-date"
                       type="date"
@@ -3078,28 +3059,28 @@ function MainAppContent(): React.JSX.Element {
                   </div>
 
                   <div className="intelligence-input-item">
-                    <label htmlFor="intel-recent-days">Recent Window (Days):</label>
+                    <label htmlFor="intel-recent-days">Recent reports (days)</label>
                     <input
                       id="intel-recent-days"
                       type="number"
                       min="1"
                       max="365"
                       className="form-input"
-                      style={{ width: '80px' }}
+                      data-fl-style="s1a2cgki"
                       value={intelligenceRecentDays}
                       onChange={(e) => setIntelligenceRecentDays(Number(e.target.value) || 1)}
                     />
                   </div>
 
                   <div className="intelligence-input-item">
-                    <label htmlFor="intel-approaching-days">Approaching Window (Days):</label>
+                    <label htmlFor="intel-approaching-days">Upcoming milestones (days)</label>
                     <input
                       id="intel-approaching-days"
                       type="number"
                       min="0"
                       max="365"
                       className="form-input"
-                      style={{ width: '80px' }}
+                      data-fl-style="s1a2cgki"
                       value={intelligenceApproachingDays}
                       onChange={(e) => setIntelligenceApproachingDays(Number(e.target.value) || 0)}
                     />
@@ -3121,8 +3102,8 @@ function MainAppContent(): React.JSX.Element {
                     }
                   }}
                   disabled={loadingIntelligence}
-                  aria-label="Refresh Intelligence"
-                  title="Refresh Intelligence"
+                  aria-label="Refresh schedule status"
+                  title="Refresh schedule status"
                 >
                   <RefreshCw size={17} className={loadingIntelligence ? 'pulse-dot' : ''} />
                 </button>
@@ -3143,9 +3124,9 @@ function MainAppContent(): React.JSX.Element {
                       <Bot size={24} color="#6366f1" />
                     </div>
                     <div>
-                      <h2 className="assistant-title">Ask FieldLine Assistant</h2>
+                      <h2 className="assistant-title">Ask FieldLine</h2>
                       <p className="assistant-subtitle">
-                        Natural-language queries grounded strictly in verified Project Intelligence facts.
+                        
                       </p>
                     </div>
                   </div>
@@ -3192,7 +3173,7 @@ function MainAppContent(): React.JSX.Element {
 
                 {/* Quick Query Chips */}
                 <div className="assistant-suggestions">
-                  <span className="assistant-suggestions-label">Recent / Suggested:</span>
+                  <span className="assistant-suggestions-label"></span>
                   {[
                     'What is delayed?',
                     'Which activities are at risk?',
@@ -3217,7 +3198,7 @@ function MainAppContent(): React.JSX.Element {
 
                 {/* Error Banner */}
                 {assistantError && (
-                  <div className="notification-banner error" style={{ margin: 0 }}>
+                  <div className="notification-banner error" data-fl-style="s16ogups">
                     <AlertCircle size={16} />
                     <span>{assistantError}</span>
                   </div>
@@ -3228,10 +3209,10 @@ function MainAppContent(): React.JSX.Element {
                   <div className="assistant-loading-box">
                     <RefreshCw size={24} className="pulse-dot" color="#6366f1" />
                     <span className="assistant-loading-text">
-                      Evaluating Verified Project Intelligence Facts...
+                      Checking project records…
                     </span>
                     <span className="assistant-loading-subtext">
-                      Performing grounded natural language synthesis with deterministic citation verification
+                      
                     </span>
                   </div>
                 )}
@@ -3244,32 +3225,28 @@ function MainAppContent(): React.JSX.Element {
                         {assistantResponse.grounded ? (
                           <span className="grounding-pill success">
                             <CheckCircle2 size={13} />
-                            Grounded &bull; {assistantResponse.factRefs.length} Cited Facts
+                            Based on {assistantResponse.factRefs.length} sources
                           </span>
                         ) : assistantResponse.status === 'unsupported' ? (
                           <span className="grounding-pill unsupported">
                             <HelpCircle size={13} />
-                            General Response
+                            
                           </span>
                         ) : assistantResponse.status !== 'success' && assistantResponse.intent?.intent !== 'general' ? (
                           <span className="grounding-pill warning">
                             <AlertTriangle size={13} />
                             {assistantResponse.status === 'activity_not_found'
-                              ? 'Activity Not Found'
+                              ? 'No matching activity'
                               : assistantResponse.status === 'ambiguous_activity'
-                              ? 'Ambiguous Activity Match'
-                              : 'Insufficient Facts'}
+                              ? 'Several activities match'
+                              : 'Not enough project information'}
                           </span>
                         ) : null}
 
                         {assistantResponse.resolvedActivity && (
                           <span
                             className="format-tag"
-                            style={{
-                              background: 'rgba(56, 189, 248, 0.15)',
-                              color: '#38bdf8',
-                              cursor: 'pointer'
-                            }}
+                            data-fl-style="sjqp8y6"
                             onClick={() => {
                               if (assistantResponse.resolvedActivity?.id) {
                                 handleOpenActivityDetail(assistantResponse.resolvedActivity.id);
@@ -3282,7 +3259,7 @@ function MainAppContent(): React.JSX.Element {
                         )}
                       </div>
 
-                      <span className="date-cell" style={{ fontSize: '0.75rem' }}>
+                      <span className="date-cell" data-fl-style="s1v0dyfx">
                         Observed as-of {assistantResponse.asOfDate}
                       </span>
                     </div>
@@ -3320,7 +3297,7 @@ function MainAppContent(): React.JSX.Element {
                       <div className="assistant-claims-section">
                         <div className="assistant-claims-title">
                           <ShieldCheck size={14} />
-                          <span>Verified Factual Claims ({assistantResponse.claims.length}):</span>
+                          <span>Supporting details ({assistantResponse.claims.length}):</span>
                         </div>
                         <div className="assistant-claims-grid">
                           {assistantResponse.claims.map((claim, idx) => (
@@ -3355,7 +3332,7 @@ function MainAppContent(): React.JSX.Element {
                           onClick={() => setShowVerifiedFacts(!showVerifiedFacts)}
                         >
                           <span>
-                            Verified Fact Set &amp; Citations ({assistantResponse.verifiedFacts.length})
+                            Based on ({assistantResponse.verifiedFacts.length})
                           </span>
                           {showVerifiedFacts ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                         </button>
@@ -3367,21 +3344,19 @@ function MainAppContent(): React.JSX.Element {
                                 <div className="assistant-fact-card-header">
                                   <span className="assistant-fact-ref-badge">{fact.ref}</span>
                                   {fact.externalId && (
-                                    <span
-                                      className="act-id-cell"
-                                      style={{ cursor: fact.activityId ? 'pointer' : 'default' }}
-                                      onClick={() => {
-                                        if (fact.activityId) {
-                                          handleOpenActivityDetail(fact.activityId);
-                                        }
-                                      }}
-                                      title={fact.activityId ? 'Click to open Activity Detail View' : undefined}
-                                    >
-                                      {fact.externalId}
-                                    </span>
+                                    fact.activityId ? (
+                                      <button
+                                        type="button"
+                                        className="act-id-cell fl-link-button"
+                                        onClick={() => fact.activityId && handleOpenActivityDetail(fact.activityId)}
+                                        aria-label={`Open activity ${fact.externalId}`}
+                                      >
+                                        {fact.externalId}
+                                      </button>
+                                    ) : <span className="act-id-cell">{fact.externalId}</span>
                                   )}
                                   {fact.category && (
-                                    <span className="format-tag" style={{ fontSize: '0.7rem' }}>
+                                    <span className="format-tag" data-fl-style="s1v0dyfx">
                                       {fact.category}
                                     </span>
                                   )}
@@ -3398,10 +3373,10 @@ function MainAppContent(): React.JSX.Element {
               </div>
 
               {loadingIntelligence && !intelligence ? (
-                <div style={{ padding: '3rem', textAlign: 'center' }}>
+                <div data-fl-style="s1tu4yvd">
                   <RefreshCw size={24} className="pulse-dot" />
-                  <p className="empty-desc" style={{ marginTop: '0.75rem' }}>
-                    Computing deterministic project intelligence queries...
+                  <p className="empty-desc" data-fl-style="sampshg">
+                    Checking schedule…
                   </p>
                 </div>
               ) : intelligence ? (
@@ -3446,21 +3421,23 @@ function MainAppContent(): React.JSX.Element {
 
                   {/* 7 Structured Fact Sections */}
                   <div className="intelligence-sections-stack">
-                    {/* Section 1: Delayed Activities */}
+                    <section className="fl-schedule-priorities" aria-labelledby="fl-schedule-priorities-heading">
+                      <h3 id="fl-schedule-priorities-heading" className="fl-schedule-group-heading">Needs attention</h3>
+                      {/* Section 1: Delayed Activities */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <AlertTriangle size={18} color="var(--accent-rose)" />
-                          <h3 className="intelligence-card-title">1. Delayed Activities</h3>
+                          <h3 className="intelligence-card-title">Delayed</h3>
                           <span className="intelligence-card-count">{intelligence.delayed.length}</span>
                         </div>
-                        <span className="status-badge delayed" style={{ fontSize: '0.75rem' }}>
+                        <span className="status-badge delayed" data-fl-style="s1v0dyfx">
                           Objective Overdue (Finish &lt; {intelligence.asOfDate})
                         </span>
                       </div>
 
                       {intelligence.delayed.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
                           No overdue/delayed activities detected as of {intelligence.asOfDate}.
                         </p>
                       ) : (
@@ -3480,28 +3457,28 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.delayed.map((d) => (
                                 <tr key={d.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
-                                      style={{ cursor: 'pointer' }}
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(d.activityId)}
                                       title="View complete activity history"
                                     >
                                       {d.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
-                                      style={{ cursor: 'pointer' }}
+                                    <button type="button" data-fl-link="true"
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(d.activityId)}
                                       title="View complete activity history"
                                     >
                                       {d.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{d.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{d.actualProgress}%</span></td>
                                   <td>
-                                    <span style={{ color: 'var(--accent-rose)', fontWeight: 600 }}>
+                                    <span data-fl-style="s36xfse">
                                       {d.progressVariance}%
                                     </span>
                                   </td>
@@ -3520,21 +3497,22 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 2: At-Risk Activities */}
+                    
+{/* Section 2: At-Risk Activities */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <AlertCircle size={18} color="var(--accent-amber)" />
-                          <h3 className="intelligence-card-title">2. At-Risk Activities</h3>
+                          <h3 className="intelligence-card-title">At risk</h3>
                           <span className="intelligence-card-count">{intelligence.atRisk.length}</span>
                         </div>
-                        <span className="status-badge" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', fontSize: '0.75rem' }}>
+                        <span className="status-badge" data-fl-style="s1d0t8o7">
                           Variance &le; -10% or Near Finish Window
                         </span>
                       </div>
 
                       {intelligence.atRisk.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
                           No activities classified as at-risk as of {intelligence.asOfDate}.
                         </p>
                       ) : (
@@ -3554,35 +3532,35 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.atRisk.map((r) => (
                                 <tr key={r.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
-                                      style={{ cursor: 'pointer' }}
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(r.activityId)}
                                       title="View complete activity history"
                                     >
                                       {r.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
-                                      style={{ cursor: 'pointer' }}
+                                    <button type="button" data-fl-link="true"
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(r.activityId)}
                                       title="View complete activity history"
                                     >
                                       {r.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{r.plannedFinish}</span></td>
                                   <td><span className="qty-cell">{r.actualProgress}%</span></td>
                                   <td>
-                                    <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
+                                    <span data-fl-style="s1odijue">
                                       {r.progressVariance}%
                                     </span>
                                   </td>
                                   <td>
                                     <div className="reasons-tags-list">
                                       {r.reasons.map((reason, idx) => (
-                                        <span key={idx} className="reason-tag-item" style={{ background: 'rgba(245, 158, 11, 0.1)', color: '#fcd34d', borderColor: 'rgba(245, 158, 11, 0.25)' }}>
+                                        <span key={idx} className="reason-tag-item" data-fl-style="smdlp30">
                                           {reason.message}
                                         </span>
                                       ))}
@@ -3596,21 +3574,22 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 3: Behind Schedule */}
+                    
+{/* Section 3: Behind Schedule */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <TrendingUp size={18} color="#fb923c" />
-                          <h3 className="intelligence-card-title">3. Behind Schedule Activities</h3>
+                          <h3 className="intelligence-card-title">Behind plan</h3>
                           <span className="intelligence-card-count">{intelligence.behindSchedule.length}</span>
                         </div>
-                        <span className="status-badge" style={{ background: 'rgba(251, 146, 60, 0.15)', color: '#fb923c', fontSize: '0.75rem' }}>
+                        <span className="status-badge" data-fl-style="s18sx5z6">
                           Variance &lt; -0.01%
                         </span>
                       </div>
 
                       {intelligence.behindSchedule.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
                           All project activities are on-plan or ahead of planned schedule as of {intelligence.asOfDate}.
                         </p>
                       ) : (
@@ -3631,28 +3610,31 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.behindSchedule.map((b) => (
                                 <tr key={b.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
-                                      style={{ cursor: 'pointer' }}
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(b.activityId)}
                                       title="View complete activity history"
                                     >
                                       {b.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
-                                      style={{ cursor: 'pointer' }}
+                                    <button type="button" data-fl-link="true"
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(b.activityId)}
                                       title="View complete activity history"
                                     >
                                       {b.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{b.plannedProgress}%</span></td>
-                                  <td><span className="qty-cell">{b.actualProgress}%</span></td>
                                   <td>
-                                    <span style={{ color: '#fb923c', fontWeight: 600 }}>
+                                     <span className="qty-cell">{b.actualProgress}%</span>
+                                     <FieldLineProgress planned={b.plannedProgress} actual={b.actualProgress} label={`Progress for ${b.name}`} />
+                                   </td>
+                                  <td>
+                                    <span data-fl-style="s11cs6le">
                                       {b.progressVariance}%
                                     </span>
                                   </td>
@@ -3666,85 +3648,22 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 4: Completed on Selected Date */}
-                    <div className="intelligence-card">
-                      <div className="intelligence-card-header">
-                        <div className="intelligence-card-title-group">
-                          <CheckCircle2 size={18} color="var(--accent-emerald)" />
-                          <h3 className="intelligence-card-title">4. Completed on Selected Date</h3>
-                          <span className="intelligence-card-count">{intelligence.completedToday.length}</span>
-                        </div>
-                        <span className="status-badge active" style={{ fontSize: '0.75rem' }}>
-                          Observed as-of {intelligence.asOfDate}
-                        </span>
-                      </div>
-
-                      {intelligence.completedToday.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
-                          No activities recorded completion observations on {intelligence.asOfDate}.
-                        </p>
-                      ) : (
-                        <div className="table-responsive">
-                          <table className="activities-table">
-                            <thead>
-                              <tr>
-                                <th>Activity ID</th>
-                                <th>Name</th>
-                                <th>Progress Update ID</th>
-                                <th>Observation Date</th>
-                                <th>Actual Progress</th>
-                                <th>Status</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {intelligence.completedToday.map((c) => (
-                                <tr key={c.activityId}>
-                                  <td>
-                                    <span
-                                      className="act-id-cell"
-                                      style={{ cursor: 'pointer' }}
-                                      onClick={() => handleOpenActivityDetail(c.activityId)}
-                                      title="View complete activity history"
-                                    >
-                                      {c.externalId}
-                                    </span>
-                                  </td>
-                                  <td>
-                                    <strong
-                                      style={{ cursor: 'pointer' }}
-                                      onClick={() => handleOpenActivityDetail(c.activityId)}
-                                      title="View complete activity history"
-                                    >
-                                      {c.name}
-                                    </strong>
-                                  </td>
-                                  <td><span className="mono" style={{ fontSize: '0.75rem', opacity: 0.8 }}>{c.progressUpdateId || 'Direct'}</span></td>
-                                  <td><span className="date-cell">{c.asOfDate}</span></td>
-                                  <td><span className="qty-cell">{c.actualPercent}%</span></td>
-                                  <td><span className="baseline-tag">{c.status}</span></td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Section 5: Approaching Milestones */}
+                    
+{/* Section 5: Approaching Milestones */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <Calendar size={18} color="var(--accent-cyan)" />
-                          <h3 className="intelligence-card-title">5. Approaching Milestones</h3>
+                          <h3 className="intelligence-card-title">Upcoming milestones</h3>
                           <span className="intelligence-card-count">{intelligence.approachingMilestones.length}</span>
                         </div>
-                        <span className="status-badge" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#22d3ee', fontSize: '0.75rem' }}>
+                        <span className="status-badge" data-fl-style="s1mbdx1h">
                           Zero-duration within {intelligenceApproachingDays} days
                         </span>
                       </div>
 
                       {intelligence.approachingMilestones.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
                           No milestones approaching within the next {intelligenceApproachingDays} days from {intelligence.asOfDate}.
                         </p>
                       ) : (
@@ -3764,27 +3683,27 @@ function MainAppContent(): React.JSX.Element {
                               {intelligence.approachingMilestones.map((m) => (
                                 <tr key={m.activityId}>
                                   <td>
-                                    <span
+                                    <button type="button" data-fl-link="true"
                                       className="act-id-cell"
-                                      style={{ cursor: 'pointer' }}
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(m.activityId)}
                                       title="View complete activity history"
                                     >
                                       {m.externalId}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td>
-                                    <strong
-                                      style={{ cursor: 'pointer' }}
+                                    <button type="button" data-fl-link="true"
+                                      data-fl-style="spyafsr"
                                       onClick={() => handleOpenActivityDetail(m.activityId)}
                                       title="View complete activity history"
                                     >
                                       {m.name}
-                                    </strong>
+                                    </button>
                                   </td>
                                   <td><span className="date-cell">{m.milestoneDate}</span></td>
                                   <td>
-                                    <span className="format-tag" style={{ background: 'rgba(6, 182, 212, 0.15)', color: '#67e8f9', fontWeight: 700 }}>
+                                    <span className="format-tag" data-fl-style="sm291x7">
                                       {m.daysUntil} day{m.daysUntil !== 1 ? 's' : ''}
                                     </span>
                                   </td>
@@ -3798,21 +3717,22 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 6: Activities With No Recent Updates (Stale) */}
+                    
+{/* Section 6: Activities With No Recent Updates (Stale) */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <Clock size={18} color="#c084fc" />
-                          <h3 className="intelligence-card-title">6. Stale Activities (No Recent Updates)</h3>
+                          <h3 className="intelligence-card-title">Missing reports</h3>
                           <span className="intelligence-card-count">{intelligence.staleActivities.length}</span>
                         </div>
-                        <span className="status-badge" style={{ background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', fontSize: '0.75rem' }}>
+                        <span className="status-badge" data-fl-style="s1oqvlxz">
                           Older than {intelligenceRecentDays} days or never updated
                         </span>
                       </div>
 
                       {intelligence.staleActivities.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
                           All project activities have progress reports within the last {intelligenceRecentDays} days.
                         </p>
                       ) : (
@@ -3840,11 +3760,11 @@ function MainAppContent(): React.JSX.Element {
                                   </td>
                                   <td>
                                     {s.hasAnyUpdate ? (
-                                      <span className="format-tag" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24' }}>
+                                      <span className="format-tag" data-fl-style="smowlt9">
                                         Observation Stale
                                       </span>
                                     ) : (
-                                      <span className="format-tag" style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
+                                      <span className="format-tag" data-fl-style="slw9q3e">
                                         Never Updated
                                       </span>
                                     )}
@@ -3857,22 +3777,91 @@ function MainAppContent(): React.JSX.Element {
                       )}
                     </div>
 
-                    {/* Section 7: Recent Project Changes */}
+                    
+                    </section>
+                    <section className="fl-schedule-reference" aria-labelledby="fl-schedule-reference-heading">
+                      <h3 id="fl-schedule-reference-heading" className="fl-schedule-group-heading">For reference</h3>
+                      {/* Section 4: Completed on Selected Date */}
+                    <div className="intelligence-card">
+                      <div className="intelligence-card-header">
+                        <div className="intelligence-card-title-group">
+                          <CheckCircle2 size={18} color="var(--accent-emerald)" />
+                          <h3 className="intelligence-card-title">Completed on selected date</h3>
+                          <span className="intelligence-card-count">{intelligence.completedToday.length}</span>
+                        </div>
+                        <span className="status-badge active" data-fl-style="s1v0dyfx">
+                          Observed as-of {intelligence.asOfDate}
+                        </span>
+                      </div>
+
+                      {intelligence.completedToday.length === 0 ? (
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
+                          No activities recorded completion observations on {intelligence.asOfDate}.
+                        </p>
+                      ) : (
+                        <div className="table-responsive">
+                          <table className="activities-table">
+                            <thead>
+                              <tr>
+                                <th>Activity ID</th>
+                                <th>Name</th>
+                                <th>Progress Update ID</th>
+                                <th>Observation Date</th>
+                                <th>Actual Progress</th>
+                                <th>Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {intelligence.completedToday.map((c) => (
+                                <tr key={c.activityId}>
+                                  <td>
+                                    <button type="button" data-fl-link="true"
+                                      className="act-id-cell"
+                                      data-fl-style="spyafsr"
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.externalId}
+                                    </button>
+                                  </td>
+                                  <td>
+                                    <button type="button" data-fl-link="true"
+                                      data-fl-style="spyafsr"
+                                      onClick={() => handleOpenActivityDetail(c.activityId)}
+                                      title="View complete activity history"
+                                    >
+                                      {c.name}
+                                    </button>
+                                  </td>
+                                  <td><span className="mono" data-fl-style="s44g9gl">{c.progressUpdateId || 'Direct'}</span></td>
+                                  <td><span className="date-cell">{c.asOfDate}</span></td>
+                                  <td><span className="qty-cell">{c.actualPercent}%</span></td>
+                                  <td><span className="baseline-tag">{c.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    
+{/* Section 7: Recent Project Changes */}
                     <div className="intelligence-card">
                       <div className="intelligence-card-header">
                         <div className="intelligence-card-title-group">
                           <FileText size={18} color="var(--accent-indigo)" />
-                          <h3 className="intelligence-card-title">7. Recent Project Changes</h3>
+                          <h3 className="intelligence-card-title">Recent changes</h3>
                           <span className="intelligence-card-count">{intelligence.recentChanges.length}</span>
                         </div>
-                        <span className="status-badge" style={{ background: 'rgba(99, 102, 241, 0.15)', color: '#a5b4fc', fontSize: '0.75rem' }}>
-                          Bounded Project Event Stream
+                        <span className="status-badge" data-fl-style="s12vxcrz">
+                          Last {intelligenceRecentDays} days
                         </span>
                       </div>
 
                       {intelligence.recentChanges.length === 0 ? (
-                        <p className="empty-desc" style={{ padding: '0.5rem 0' }}>
-                          No project events recorded in the {intelligenceRecentDays}-day window prior to {intelligence.asOfDate}.
+                        <p className="empty-desc" data-fl-style="s1gdiwu0">
+                          No project changes recorded in the {intelligenceRecentDays} days up to {intelligence.asOfDate}.
                         </p>
                       ) : (
                         <div className="table-responsive">
@@ -3880,18 +3869,18 @@ function MainAppContent(): React.JSX.Element {
                             <thead>
                               <tr>
                                 <th>Timestamp</th>
-                                <th>Event Type</th>
+                                <th>Change</th>
                                 <th>Summary</th>
-                                <th>Structured Payload</th>
+                                <th>Details</th>
                               </tr>
                             </thead>
                             <tbody>
                               {intelligence.recentChanges.map((evt) => (
                                 <tr key={evt.eventId}>
                                   <td><span className="date-cell">{evt.createdAt}</span></td>
-                                  <td><span className="format-tag" style={{ color: '#93c5fd' }}>{evt.eventType}</span></td>
+                                  <td><span className="format-tag" data-fl-style="s1ifcdie">{evt.eventType}</span></td>
                                   <td><strong>{evt.summary}</strong></td>
-                                  <td style={{ maxWidth: '300px' }}>
+                                  <td data-fl-style="s1t2typc">
                                     {evt.payload ? (
                                       <div className="payload-preview-box">
                                         {JSON.stringify(evt.payload, null, 2)}
@@ -3907,6 +3896,7 @@ function MainAppContent(): React.JSX.Element {
                         </div>
                       )}
                     </div>
+                    </section>
                   </div>
                 </>
               ) : null}
@@ -3933,17 +3923,17 @@ function MainAppContent(): React.JSX.Element {
           </div>
           <h2 className="empty-title">No Projects Found</h2>
           <p className="empty-desc">
-            FieldLine needs at least one infrastructure project to begin tracking schedules and field progress. Load the presentation-ready Golden Demo repository or create a custom project.
+            FieldLine needs at least one infrastructure project to begin tracking schedules and field progress. Load the demo project or create a custom project.
           </p>
-          <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+          <div data-fl-style="sntw44r">
             <button
               id="seed-golden-demo-btn"
               className="btn btn-primary"
               onClick={() => handleSeedGoldenDemo()}
               disabled={isSeedingDemo}
             >
-              {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <Sparkles size={16} />}
-              <span>{isSeedingDemo ? 'Seeding Golden Demo...' : 'Load Golden Demo Project'}</span>
+              {isSeedingDemo ? <RefreshCw size={16} className="pulse-dot" /> : <FieldLineMark size={16} />}
+              <span>{isSeedingDemo ? 'Seeding Demo...' : 'Try the demo'}</span>
             </button>
             <button
               id="create-first-project-btn"
@@ -3988,9 +3978,9 @@ function MainAppContent(): React.JSX.Element {
                 className="btn btn-secondary"
                 onClick={() => handleSeedGoldenDemo(true)}
                 disabled={isSeedingDemo}
-                title="Reset or refresh the canonical Golden Demo dataset"
+                title="Reset demo"
               >
-                {isSeedingDemo ? <RefreshCw size={14} className="pulse-dot" /> : <Sparkles size={14} color="var(--accent-indigo)" />}
+                {isSeedingDemo ? <RefreshCw size={14} className="pulse-dot" /> : <FieldLineMark size={14} />}
                 <span>{isSeedingDemo ? 'Resetting...' : 'Reset Demo Data'}</span>
               </button>
               <button
@@ -4005,8 +3995,8 @@ function MainAppContent(): React.JSX.Element {
           </div>
 
           {filteredProjects.length === 0 ? (
-            <div className="empty-state-card" style={{ padding: '3rem 1.5rem' }}>
-              <p className="empty-desc" style={{ marginBottom: '1rem' }}>
+            <div className="empty-state-card" data-fl-style="sd25uzk">
+              <p className="empty-desc" data-fl-style="s72wa23">
                 No projects matched your search query "{searchQuery}".
               </p>
               <button className="btn btn-secondary btn-sm" onClick={() => setSearchQuery('')}>
@@ -4041,7 +4031,7 @@ function MainAppContent(): React.JSX.Element {
                         <Calendar size={13} />
                         Planned Start
                       </span>
-                      <span style={{ color: 'var(--text-secondary)' }}>
+                      <span data-fl-style="s61w4mv">
                         {project.startDate ? project.startDate.slice(0, 10) : 'Not specified'}
                       </span>
                     </div>
@@ -4051,18 +4041,18 @@ function MainAppContent(): React.JSX.Element {
                         <Calendar size={13} />
                         Target Completion
                       </span>
-                      <span style={{ color: 'var(--text-secondary)' }}>
+                      <span data-fl-style="s61w4mv">
                         {project.targetEndDate ? project.targetEndDate.slice(0, 10) : 'Not specified'}
                       </span>
                     </div>
                   </div>
 
-                  <div className="project-card-footer" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <div className="project-card-footer" data-fl-style="s1ggpvpq">
                     <button
                       id={`open-cockpit-btn-${project.code}`}
                       type="button"
                       className="btn btn-secondary btn-sm"
-                      style={{ flex: '1 1 120px', gap: '0.35rem', fontSize: '0.75rem', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                      data-fl-style="s4vpcgw"
                       onClick={(e) => {
                         e.stopPropagation();
                         setWorkerTab('work');
@@ -4070,20 +4060,20 @@ function MainAppContent(): React.JSX.Element {
                       }}
                     >
                       <User size={13} color="var(--accent-amber)" />
-                      <span>Worker Cockpit</span>
+                      <span>Worker view</span>
                     </button>
                     <button
                       id={`open-admin-btn-${project.code}`}
                       type="button"
                       className="project-open-btn"
-                      style={{ flex: '1 1 120px' }}
+                      data-fl-style="sgmsknq"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleOpenProject(project, 'overview', null, 'admin');
                       }}
                     >
                       <ShieldCheck size={13} />
-                      <span>Admin Control Room</span>
+                      <span>Engineer view</span>
                       <ChevronRight size={14} />
                     </button>
                   </div>
@@ -4097,11 +4087,7 @@ function MainAppContent(): React.JSX.Element {
       {/* Footer Banner */}
       <footer className="footer-banner">
         <div className="footer-text">
-          <strong>FieldLine Local Monolith</strong> &bull; Problem Statement SIH26122 &bull; Local SQLite WAL
-        </div>
-        <div className="footer-actions">
-          <span className="footer-link">Database: {envDatabaseDisplay(health)}</span>
-          <span className="footer-link">Port: 3001</span>
+          <strong>FieldLine</strong>
         </div>
       </footer>
 
@@ -4123,7 +4109,7 @@ function MainAppContent(): React.JSX.Element {
             <form onSubmit={handleCreateSubmit}>
               <div className="modal-body">
                 {formError && (
-                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner error" data-fl-style="s72wa23">
                     <AlertTriangle size={16} />
                     <span>{formError}</span>
                   </div>
@@ -4249,7 +4235,7 @@ function MainAppContent(): React.JSX.Element {
             <form onSubmit={handleEditSubmit}>
               <div className="modal-body">
                 {formError && (
-                  <div className="notification-banner error" style={{ marginBottom: '1rem' }}>
+                  <div className="notification-banner error" data-fl-style="s72wa23">
                     <AlertTriangle size={16} />
                     <span>{formError}</span>
                   </div>
@@ -4358,7 +4344,7 @@ function MainAppContent(): React.JSX.Element {
         <div className="modal-overlay" onClick={() => !formSubmitting && setIsDeleteModalOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title" style={{ color: 'var(--accent-rose)' }}>
+              <h3 className="modal-title" data-fl-style="slt4x1v">
                 Delete Project
               </h3>
               <button
@@ -4371,10 +4357,10 @@ function MainAppContent(): React.JSX.Element {
             </div>
 
             <div className="modal-body">
-              <p style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>
+              <p data-fl-style="s16kppf2">
                 Are you sure you want to permanently delete <strong>{selectedProject.name}</strong> ({selectedProject.code})?
               </p>
-              <div className="notification-banner error" style={{ margin: 0 }}>
+              <div className="notification-banner error" data-fl-style="s16ogups">
                 <AlertTriangle size={16} />
                 <span>
                   All associated schedules, activities, and linked progress data in SQLite will be cascade deleted.
@@ -4405,18 +4391,18 @@ function MainAppContent(): React.JSX.Element {
         </div>
       )}
 
-      {/* Modal: Activity Evidence Provenance (PASS 13) */}
+      {/* Modal: Related photos & documents (PASS 13) */}
       {traceActivity && selectedProject && (
         <div className="modal-overlay" onClick={() => setTraceActivity(null)}>
-          <div className="modal-card" style={{ maxWidth: '650px' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-card" data-fl-style="srb34mm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <h3 className="modal-title" data-fl-style="s1ouob6n">
                   <Paperclip size={18} color="var(--accent-blue)" />
-                  <span>Activity Evidence Provenance</span>
+                  <span>Related photos & documents</span>
                 </h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                  Trace all ground-truth evidence linked to <strong>{traceActivity.externalId} — {traceActivity.name}</strong>
+                <p data-fl-style="s8uy5mb">
+                  Files linked to <strong>{traceActivity.externalId} — {traceActivity.name}</strong>
                 </p>
               </div>
               <button
@@ -4429,12 +4415,12 @@ function MainAppContent(): React.JSX.Element {
 
             <div className="modal-body">
               {loadingActivityEvidence ? (
-                <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <div data-fl-style="skvbzhi">
                   <RefreshCw size={20} className="pulse-dot" />
-                  <p className="empty-desc" style={{ marginTop: '0.5rem' }}>Tracing originating evidence...</p>
+                  <p className="empty-desc" data-fl-style="s9ytplt">Tracing originating evidence...</p>
                 </div>
               ) : activityEvidenceList.length === 0 ? (
-                <div className="empty-state-card" style={{ padding: '2rem 1rem' }}>
+                <div className="empty-state-card" data-fl-style="smf6km8">
                   <p className="empty-desc">
                     No originating evidence attached to this activity yet. Evidence uploaded with matching progress reports will automatically appear here.
                   </p>
@@ -4444,11 +4430,11 @@ function MainAppContent(): React.JSX.Element {
                   {activityEvidenceList.map((ev) => (
                     <div key={ev.id} className="evidence-trace-item">
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{ev.fileName}</span>
+                        <div data-fl-style="s6as1bx">
+                          <span data-fl-style="sl4w07d">{ev.fileName}</span>
                           <span className={`evidence-badge ${ev.fileType}`}>{ev.fileType}</span>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '1rem' }}>
+                        <div data-fl-style="s1xnfns9">
                           <span>Size: {ev.fileSizeBytes !== null ? formatFileSize(ev.fileSizeBytes) : '—'}</span>
                           <span>Uploaded: {new Date(ev.uploadedAt).toLocaleDateString()}</span>
                         </div>
@@ -4457,7 +4443,7 @@ function MainAppContent(): React.JSX.Element {
                         type="button"
                         className="btn btn-secondary btn-sm"
                         onClick={() => window.open(`/api/projects/${selectedProject.id}/evidence/${ev.id}/content`, '_blank')}
-                        style={{ gap: '0.35rem', fontSize: '0.75rem' }}
+                        data-fl-style="s1ihl9rw"
                       >
                         <ExternalLink size={13} />
                         <span>View Evidence</span>
@@ -4486,20 +4472,20 @@ function MainAppContent(): React.JSX.Element {
         <div className="modal-overlay" onClick={() => setIsDiagnosticsOpen(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">System Diagnostics & Storage</h3>
+              <h3 className="modal-title">Connection details</h3>
               <button className="modal-close-btn" onClick={() => setIsDiagnosticsOpen(false)}>
                 <X size={18} />
               </button>
             </div>
             <div className="modal-body">
-              <div className="meta-grid" style={{ gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div className="meta-grid" data-fl-style="st2739i">
                 <div className="meta-card">
                   <span className="meta-card-label">Server Status</span>
                   <span className="meta-card-value">{health?.status.toUpperCase() || 'OFFLINE'}</span>
                 </div>
                 <div className="meta-card">
-                  <span className="meta-card-label">Database Path</span>
-                  <span className="meta-card-value mono" style={{ fontSize: '0.75rem' }}>
+                  <span className="meta-card-label">Storage location</span>
+                  <span className="meta-card-value mono" data-fl-style="s1v0dyfx">
                     {health?.database.path || 'Unknown'}
                   </span>
                 </div>
@@ -4508,7 +4494,7 @@ function MainAppContent(): React.JSX.Element {
                   <span className="meta-card-value">{latency !== null ? `${latency} ms` : '—'}</span>
                 </div>
                 <div className="meta-card">
-                  <span className="meta-card-label">System Release</span>
+                  <span className="meta-card-label">App version</span>
                   <span className="meta-card-value">FieldLine v0.1.0 Production</span>
                 </div>
               </div>
@@ -4532,11 +4518,6 @@ function MainAppContent(): React.JSX.Element {
       />
     </div>
   );
-}
-
-function envDatabaseDisplay(health: HealthData | null): string {
-  if (!health) return 'SQLite';
-  return health.database.path;
 }
 
 export function App(): React.JSX.Element {

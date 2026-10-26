@@ -1,3 +1,4 @@
+import { useDialogKeyboard } from '../ui/FieldLine.js';
 import React, { useState, useEffect } from 'react';
 import {
   AlertTriangle,
@@ -5,7 +6,6 @@ import {
   ShieldAlert,
   CheckCircle2,
   Loader2,
-  HardHat,
   Eye,
   Flame,
   Zap,
@@ -70,6 +70,7 @@ export function ReportHazardModal({
     }
   }, [isOpen, selectedArea]);
 
+  const dialogRef = useDialogKeyboard(isOpen, onClose);
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -127,8 +128,8 @@ export function ReportHazardModal({
   };
 
   return (
-    <div className="blocker-modal-backdrop" role="dialog" aria-modal="true">
-      <div className="blocker-modal-sheet">
+    <div className="blocker-modal-backdrop">
+      <div ref={dialogRef} tabIndex={-1} className="blocker-modal-sheet" role="dialog" aria-modal="true" aria-label="Report safety hazard">
         {/* Header */}
         <div className="modal-header-row">
           <div className="modal-title-group">
@@ -284,7 +285,7 @@ export function ReportHazardModal({
               id="submit-hazard-btn"
               className="btn btn-primary"
               disabled={submitting || !description.trim() || !reporterName.trim()}
-              style={{ backgroundColor: 'var(--accent-rose, #f43f5e)' }}
+              data-fl-style="ss9hc1q"
             >
               {submitting ? (
                 <>
