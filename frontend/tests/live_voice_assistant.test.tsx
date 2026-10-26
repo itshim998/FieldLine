@@ -636,7 +636,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
       // Verify HUD renders with status, badges, and visualizer
       expect(document.getElementById('floating-ai-live-hud')).toBeDefined();
       expect(screen.getByText('Live Voice', { selector: '.live-model-badge' })).toBeDefined();
-      expect(screen.getByLabelText('Audio Visualizer')).toBeDefined();
+      expect(screen.getByLabelText('Voice activity')).toBeDefined();
 
       const ws = MockWebSocket.lastInstance!;
       await act(async () => {
@@ -648,8 +648,7 @@ describe('Pass 4: Frontend Live Voice Client & Floating AI Panel Integration', (
         });
       });
 
-      // Active slot badge should show Slot 05
-      expect(screen.getByText('Slot 05')).toBeDefined();
+      // Connection routing details remain internal; workers only see the voice state.
       expect(screen.getByText('Listening...')).toBeDefined();
 
       // Click mic button again to stop Live Voice
