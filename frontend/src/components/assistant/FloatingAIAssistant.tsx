@@ -382,7 +382,7 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                         {liveSession.connectionState === 'connecting'
                           ? 'Connecting...'
                           : liveSession.connectionState === 'error'
-                          ? (liveSession.error || 'CONNECTION FAILED')
+                          ? (liveSession.error || 'Connection failed')
                           : liveSession.connectionState === 'handover'
                           ? 'Switching...'
                           : liveSession.isSpeaking
@@ -391,17 +391,12 @@ export const FloatingAIAssistant: React.FC<FloatingAIAssistantProps> = ({
                       </span>
                     </div>
                     <div className="live-hud-badges">
-                      {liveSession.activeSlot && (
-                        <span className="live-slot-badge" title="Connection">
-                          Slot {liveSession.activeSlot}
-                        </span>
-                      )}
                       <span className="live-model-badge">Live Voice</span>
                     </div>
                   </div>
 
                   {/* Audio Equalizer Frequency Bars */}
-                  <div className="live-voice-visualizer" aria-label="Audio Visualizer">
+                  <div className="live-voice-visualizer" aria-label="Voice activity">
                     {liveSession.frequencyBars.map((height, idx) => (
                       <div
                         key={idx}
