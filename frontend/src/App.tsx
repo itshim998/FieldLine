@@ -2677,7 +2677,7 @@ function MainAppContent(): React.JSX.Element {
                                                       <span className="code-pill" data-fl-style="s1gh5ubc">
                                                         {act?.externalId || m.activityId}
                                                       </span>
-                                                      <span>Initial Suggestion: {act?.name || 'Uncertain Activity'}</span>
+                                                      <span>Suggested activity: {act?.name || 'Activity not identified'}</span>
                                                     </div>
                                                     <div className="match-meta-pills">
                                                       {m.mlConfidence !== null && m.mlConfidence !== undefined && (
@@ -2687,7 +2687,7 @@ function MainAppContent(): React.JSX.Element {
                                                         </span>
                                                       )}
                                                       <span className="match-tier-badge tier-low">
-                                                        LOW &bull; {Math.round(m.confidenceScore * 100)}%
+                                                        Needs review &bull; {Math.round(m.confidenceScore * 100)}% match
                                                       </span>
                                                       <span className="match-status-badge unresolved">
                                                         <HelpCircle size={12} />
@@ -2709,11 +2709,11 @@ function MainAppContent(): React.JSX.Element {
                                                     </div>
                                                   )}
                                                   <p className="match-rationale-text" data-fl-style="s1pe994h">
-                                                    ⚠ Low confidence candidate match. Human supervisor must select the correct activity before progress can be recorded.
+                                                    This report may match the wrong activity. Choose the correct activity before saving progress.
                                                   </p>
                                                   {m.rationale && (
                                                     <p className="match-rationale-text" data-fl-style="s1oy3urv">
-                                                      AI Rationale: {m.rationale}
+                                                      Why this was suggested: {m.rationale}
                                                     </p>
                                                   )}
 
@@ -3855,13 +3855,13 @@ function MainAppContent(): React.JSX.Element {
                           <span className="intelligence-card-count">{intelligence.recentChanges.length}</span>
                         </div>
                         <span className="status-badge" data-fl-style="s12vxcrz">
-                          Bounded Project Event Stream
+                          Last {intelligenceRecentDays} days
                         </span>
                       </div>
 
                       {intelligence.recentChanges.length === 0 ? (
                         <p className="empty-desc" data-fl-style="s1gdiwu0">
-                          No project events recorded in the {intelligenceRecentDays}-day window prior to {intelligence.asOfDate}.
+                          No project changes recorded in the {intelligenceRecentDays} days up to {intelligence.asOfDate}.
                         </p>
                       ) : (
                         <div className="table-responsive">
@@ -3869,9 +3869,9 @@ function MainAppContent(): React.JSX.Element {
                             <thead>
                               <tr>
                                 <th>Timestamp</th>
-                                <th>Event Type</th>
+                                <th>Change</th>
                                 <th>Summary</th>
-                                <th>Structured Payload</th>
+                                <th>Details</th>
                               </tr>
                             </thead>
                             <tbody>
